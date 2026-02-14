@@ -1,0 +1,1024 @@
+"use client"
+
+import { useState, useEffect } from "react"
+import Link from "next/link"
+import { useRouter, useSearchParams } from "next/navigation"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent } from "@/components/ui/card"
+import { Progress } from "@/components/ui/progress"
+import { ArrowLeft, Loader2 } from "lucide-react"
+import { toast } from "sonner"
+import { useAuth } from "@/lib/auth-context"
+import { createProperty } from "@/lib/data-service"
+import { uploadPropertyImages } from "@/lib/storage-service"
+import { supabase } from "@/lib/supabase"
+import { PLAN_FEATURES } from "@/lib/constants"
+import { sendPropertyPostedEmail } from "@/lib/email-service"
+import { withAuth } from "@/lib/with-auth"
+
+// Import modular components
+import { BasicDetailsStep } from "@/components/post-property/BasicDetailsStep"
+import { RoomSelectionStep } from "@/components/post-property/RoomSelectionStep"
+import { PricingStep } from "@/components/post-property/PricingStep"
+import { RulesStep } from "@/components/post-property/RulesStep"
+import { MediaStep } from "@/components/post-property/MediaStep"
+import { type FormData, type RoomData } from "@/components/post-property/types"
+
+const INITIAL_DATA: FormData = {
+  propertyType: 'PG',
+  title: "",
+  description: "",
+  city: "",
+  area: "",
+  address: "",
+  pincode: "",
+  rooms: {
+    '1rk': { selected: false, rent: "", deposit: "", amenities: [] },
+    single: { selected: false, rent: "", deposit: "", amenities: [] },
+    double: { selected: false, rent: "", deposit: "", amenities: [] },
+    triple: { selected: false, rent: "", deposit: "", amenities: [] },
+    four: { selected: false, rent: "", deposit: "", amenities: [] },
+  },
+  gender: "male",
+  preferredTenant: "any",
+  noSmoking: false,
+  noNonVeg: false,
+  noDrinking: false,
+  noLoudMusic: false,
+  noOppGender: false,
+  otherRules: "",
+  directionsTip: "",
+  furnishing: "" as "Fully Furnished" | "Semi Furnished" | "Unfurnished" | "",
+  images: []
+}
+
+function PostPropertyPage() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const editPropertyId = searchParams.get('edit')
+  const isEditMode = !!editPropertyId
+  
+  const { user } = useAuth()
+  const [currentStep, setCurrentStep] = useState(1)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [uploadStatus, setUploadStatus] = useState<string>("")
+  const [formData, setFormData] = useState<FormData>(INITIAL_DATA)
+  const [maxPhotos, setMaxPhotos] = useState(10) // Maximum 10 images for all users
+  const [isLoadingProperty, setIsLoadingProperty] = useState(false)
+  
+  // Admin-specific state for owner creation
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [ownerMode, setOwnerMode] = useState<'new' | 'existing'>('new')
+  const [ownerDetails, setOwnerDetails] = useState({
+    name: '',
+    email: '',
+    password: '',
+    phone: ''
+  })
+  const [selectedExistingOwner, setSelectedExistingOwner] = useState<{
+    id: string
+    name: string
+    email: string
+    phone: string
+  } | null>(null)
+  
+  // Property limit state
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false)
+  const [showPaymentModal, setShowPaymentModal] = useState(false)
+  const [hasSubscription, setHasSubscription] = useState(false)
+  const [existingPropertyCount, setExistingPropertyCount] = useState(0)
+  const [selectedPlan, setSelectedPlan] = useState<string>('')
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false)
+  const [propertyPayment, setPropertyPayment] = useState<{
+    transactionId: string
+    plan: string
+    expiresAt: string
+  } | null>(null)
+
+  // --- Fetch Subscription Limit ---
+  useEffect(() => {
+    async function fetchLimit() {
+      if (!user) return
+      const { data } = await supabase
+        .from('subscriptions')
+        .select('plan_name, plan_duration')
+        .eq('user_id', user.id)
+        .eq('status', 'active')
+        .gt('end_date', new Date().toISOString())
+        .order('end_date', { ascending: false })
+        .maybeSingle() // Use maybeSingle() to handle no subscription case
+
+      if (data) {
+        const planName = data.plan_name || data.plan_duration
+        const features = PLAN_FEATURES[planName?.toUpperCase() as keyof typeof PLAN_FEATURES]
+        if (features) {
+          setMaxPhotos(features.maxPhotos)
+        }
+      }
+    }
+    fetchLimit()
+  }, [user])
+
+  // Load property data if in edit mode
+  useEffect(() => {
+    if (isEditMode && editPropertyId) {
+      loadPropertyData(editPropertyId)
+    }
+  }, [isEditMode, editPropertyId])
+
+  const loadPropertyData = async (propertyId: string) => {
+    setIsLoadingProperty(true)
+    try {
+      const { data, error } = await supabase
+        .from('properties')
+        .select('*')
+        .eq('id', propertyId)
+        .single()
+
+      if (error) throw error
+
+      if (data) {
+        // Map database data to form data
+        setFormData({
+          propertyType: data.property_type,
+          title: data.title,
+          description: data.description?.split('\n\nDirections:')[0] || '',
+          city: data.city,
+          area: data.area,
+          address: data.address,
+          pincode: data.pincode || '',
+          rooms: {
+            '1rk': {
+              selected: !!data.private_room_price && data.room_type === '1RK',
+              rent: (data.room_type === '1RK' ? data.private_room_price : '')?.toString() || '',
+              deposit: data.deposit?.toString() || '',
+              amenities: data.amenities || []
+            },
+            single: {
+              selected: !!data.private_room_price && data.room_type !== '1RK',
+              rent: data.private_room_price?.toString() || '',
+              deposit: data.deposit?.toString() || '',
+              amenities: data.amenities || []
+            },
+            double: {
+              selected: !!data.double_sharing_price,
+              rent: data.double_sharing_price?.toString() || '',
+              deposit: data.deposit?.toString() || '',
+              amenities: data.amenities || []
+            },
+            triple: {
+              selected: !!data.triple_sharing_price,
+              rent: data.triple_sharing_price?.toString() || '',
+              deposit: data.deposit?.toString() || '',
+              amenities: data.amenities || []
+            },
+            four: {
+              selected: !!data.four_sharing_price,
+              rent: data.four_sharing_price?.toString() || '',
+              deposit: data.deposit?.toString() || '',
+              amenities: data.amenities || []
+            }
+          },
+          gender: data.preferred_tenant?.toLowerCase() || 'male',
+          preferredTenant: 'any',
+          noSmoking: data.rules?.includes('No Smoking') || false,
+          noNonVeg: data.rules?.includes('No Non-Veg') || false,
+          noDrinking: data.rules?.includes('No Drinking') || false,
+          noLoudMusic: data.rules?.includes('No Loud Music') || false,
+          noOppGender: data.rules?.includes('No Opposite Gender') || false,
+          otherRules: data.rules?.find((r: string) => !['No Smoking', 'No Non-Veg', 'No Drinking', 'No Loud Music', 'No Opposite Gender'].includes(r) && !r.startsWith('Preferred Tenant:')) || '',
+          directionsTip: data.description?.split('\n\nDirections: ')[1] || '',
+          furnishing: data.furnishing || '',
+          images: [] // Images will be handled separately
+        })
+        toast.success('Property data loaded')
+      }
+    } catch (error) {
+      console.error('Error loading property:', error)
+      toast.error('Failed to load property data')
+      router.push('/dashboard/admin')
+    } finally {
+      setIsLoadingProperty(false)
+    }
+  }
+
+  // Check if user is admin and enforce subscription gate
+  useEffect(() => {
+    if (user) {
+      setIsAdmin(user.role === 'admin')
+      // Admin bypasses ALL checks
+      if (user.role === 'admin') return
+
+      // For owners: check subscription first, then property limit
+      checkSubscriptionAndLimit(user.id)
+    }
+  }, [user])
+
+  const checkSubscriptionAndLimit = async (userId: string) => {
+    // 1. Check for active subscription
+    const { data: subscription } = await supabase
+      .from('subscriptions')
+      .select('status, plan_name')
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .gt('end_date', new Date().toISOString())
+      .maybeSingle()
+
+    setHasSubscription(!!subscription)
+
+    // 2. Count existing properties (for all users)
+    const { count, error } = await supabase
+      .from('properties')
+      .select('*', { count: 'exact', head: true })
+      .eq('owner_id', userId)
+      .neq('status', 'deleted')
+
+    if (error) {
+      console.error("Error checking property count:", error)
+      return
+    }
+
+    setExistingPropertyCount(count || 0)
+
+    // 3. Enforce business logic:
+    //    - First property: MUST have subscription (redirect to pricing)
+    //    - Second+ property: Show upgrade/payment modal
+    if (!isEditMode) {
+      // No subscription at all → redirect to pricing (first property requires plan)
+      if (!subscription) {
+        router.push('/pricing?redirect=post-property')
+        return
+      }
+
+      // Has subscription but already has 1+ properties → show payment modal for addon
+      if ((count || 0) >= 1) {
+        setShowPaymentModal(true)
+      }
+      // Has subscription and 0 properties → allow to post (first property included)
+    }
+  }
+
+  // --- Logic ---
+  const maxSteps = 5
+  const progress = (currentStep / maxSteps) * 100
+
+  const toggleRoom = (roomType: string) => {
+    setFormData((prev) => {
+      const currentRoom = prev.rooms[roomType] || { selected: false, rent: "", deposit: "", amenities: [] }
+      return {
+        ...prev,
+        rooms: {
+          ...prev.rooms,
+          [roomType]: {
+            ...currentRoom,
+            selected: !currentRoom.selected,
+          },
+        },
+      }
+    })
+  }
+
+  const updateRoomData = (roomType: string, field: string, value: any) => {
+    setFormData((prev) => ({
+      ...prev,
+      rooms: {
+        ...prev.rooms,
+        [roomType]: {
+          ...prev.rooms[roomType as keyof typeof prev.rooms],
+          [field]: value,
+        },
+      },
+    }))
+  }
+
+  const toggleAmenity = (roomType: string, amenity: string) => {
+    const currentAmenities = formData.rooms[roomType as keyof typeof formData.rooms].amenities
+    const newAmenities = currentAmenities.includes(amenity)
+      ? currentAmenities.filter((a) => a !== amenity)
+      : [...currentAmenities, amenity]
+
+    updateRoomData(roomType, "amenities", newAmenities)
+  }
+
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      const newFiles = Array.from(e.target.files)
+
+      // 🔥 CRITICAL FIX: Validate file size and format
+      const MAX_FILE_SIZE = 5 * 1024 * 1024 // 5MB
+      const ALLOWED_FORMATS = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
+
+      const invalidFiles: string[] = []
+      const validFiles: File[] = []
+
+      newFiles.forEach(file => {
+        // Check file size
+        if (file.size > MAX_FILE_SIZE) {
+          invalidFiles.push(`${file.name} (too large - max 5MB)`)
+          return
+        }
+
+        // Check file format
+        if (!ALLOWED_FORMATS.includes(file.type)) {
+          invalidFiles.push(`${file.name} (invalid format - use JPG, PNG, or WebP)`)
+          return
+        }
+
+        validFiles.push(file)
+      })
+
+      // Show errors for invalid files
+      if (invalidFiles.length > 0) {
+        toast.error(
+          `Invalid files:\n${invalidFiles.join('\n')}`,
+          { duration: 5000 }
+        )
+      }
+
+      // Check total count limit
+      if (formData.images.length + validFiles.length > maxPhotos) {
+        toast.error(`Your plan allows a maximum of ${maxPhotos} images`)
+        return
+      }
+
+      // Add valid files
+      if (validFiles.length > 0) {
+        setFormData(prev => ({
+          ...prev,
+          images: [...prev.images, ...validFiles]
+        }))
+
+        if (validFiles.length > 0) {
+          toast.success(`${validFiles.length} image(s) added successfully`)
+        }
+      }
+    }
+  }
+
+  const removeImage = (index: number) => {
+    setFormData(prev => ({
+      ...prev,
+      images: prev.images.filter((_, i) => i !== index)
+    }))
+  }
+
+  const validateStep = (step: number): boolean => {
+    switch (step) {
+      case 1: // Basics
+        if (!formData.title.trim()) { toast.error("Property Title is required"); return false }
+        if (formData.title.length < 5) { toast.error("Title is too short"); return false }
+        if (!formData.description.trim()) { toast.error("Description is required"); return false }
+        if (formData.description.length < 20) { toast.error("Description should be at least 20 characters"); return false }
+        if (!formData.city.trim()) { toast.error("City is required"); return false }
+        if (!formData.area.trim()) { toast.error("Area is required"); return false }
+        if (!formData.address.trim()) { toast.error("Full Address is required"); return false }
+        if (!formData.pincode || formData.pincode.length !== 6) { toast.error("Valid 6-digit pincode is required"); return false }
+        return true
+
+      case 2: // Room Selection
+        const hasSelectedRoom = Object.values(formData.rooms).some(r => r.selected)
+        if (!hasSelectedRoom) { toast.error("Please select at least one room type"); return false }
+        return true
+
+      case 3: // Pricing
+        // Check pricing for ALL selected rooms
+        const selectedRooms = Object.entries(formData.rooms).filter(([_, r]) => r.selected)
+        for (const [type, room] of selectedRooms) {
+          if (!room.rent || parseInt(room.rent) <= 0) {
+            toast.error(`Please enter valid rent for ${type} room`); return false
+          }
+          if (!room.deposit || parseInt(room.deposit) < 0) {
+            toast.error(`Please enter valid deposit for ${type} room`); return false
+          }
+        }
+        // Validate furnishing is selected
+        if (!formData.furnishing) {
+          toast.error("Please select furnishing type"); return false
+        }
+        return true
+
+      case 4: // PG Details
+        return true
+
+      case 5: // Images
+        if (formData.images.length === 0) {
+          toast.error("Please upload at least 1 image of your property")
+          return false
+        }
+        return true
+
+      default:
+        return true
+    }
+  }
+
+  const handleNext = () => {
+    if (validateStep(currentStep)) {
+      if (currentStep < maxSteps) {
+        setCurrentStep(currentStep + 1)
+        window.scrollTo(0, 0)
+      }
+    }
+  }
+
+  const handleBack = () => {
+    if (currentStep > 1) {
+      setCurrentStep(currentStep - 1)
+      window.scrollTo(0, 0)
+    }
+  }
+
+  const handleSubmit = async () => {
+    if (!validateStep(5)) return // Validate final step
+
+    // Add user null safety check
+    if (!user) {
+      toast.error("User session expired. Please log in again.")
+      router.push('/login/owner')
+      return
+    }
+
+    // Admin validation
+    if (isAdmin) {
+      if (ownerMode === 'new') {
+        if (!ownerDetails.name || !ownerDetails.email || !ownerDetails.password || !ownerDetails.phone) {
+          toast.error("Please provide all owner details (name, email, password, phone)")
+          return
+        }
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+        if (!emailRegex.test(ownerDetails.email)) {
+          toast.error("Please provide a valid email address")
+          return
+        }
+        if (ownerDetails.password.length < 6) {
+          toast.error("Password must be at least 6 characters long")
+          return
+        }
+      } else if (ownerMode === 'existing') {
+        if (!selectedExistingOwner) {
+          toast.error("Please select an existing owner")
+          return
+        }
+      }
+    }
+
+    try {
+      setIsSubmitting(true)
+      setUploadStatus("Creating property details...")
+
+      let ownerId = user.id
+      let ownerName = user.name
+      let ownerContact = user.phone || user.email
+
+      // If admin, handle owner assignment
+      if (isAdmin) {
+        if (ownerMode === 'existing' && selectedExistingOwner) {
+          // Use existing owner — no account creation needed
+          ownerId = selectedExistingOwner.id
+          ownerName = selectedExistingOwner.name
+          ownerContact = selectedExistingOwner.phone || selectedExistingOwner.email
+          setUploadStatus("Creating property...")
+        } else {
+          // Create new owner account
+          setUploadStatus("Creating owner account...")
+          
+          const { data: authData, error: authError } = await supabase.auth.signUp({
+            email: ownerDetails.email,
+            password: ownerDetails.password,
+            options: {
+              data: {
+                name: ownerDetails.name,
+                phone: ownerDetails.phone,
+                role: 'owner'
+              }
+            }
+          })
+
+          if (authError) {
+            console.error("Error creating owner account:", authError)
+            throw new Error(`Failed to create owner account: ${authError.message}`)
+          }
+
+          if (!authData.user) {
+            throw new Error("Failed to create owner account - no user returned")
+          }
+
+          // Insert owner into users table
+          const { error: userError } = await supabase
+            .from('users')
+            .insert({
+              id: authData.user.id,
+              email: ownerDetails.email,
+              name: ownerDetails.name,
+              phone: ownerDetails.phone,
+              role: 'owner',
+              verified: false
+            })
+
+          if (userError) {
+            console.error("Error inserting owner into users table:", userError)
+            throw new Error(`Failed to create owner profile: ${userError.message}`)
+          }
+
+          ownerId = authData.user.id
+          ownerName = ownerDetails.name
+          ownerContact = ownerDetails.phone
+          
+          toast.success("Owner account created successfully")
+          setUploadStatus("Creating property...")
+        }
+      }
+
+
+
+      // 1. Collect ALL selected room prices
+      const selectedRoomTypes = Object.entries(formData.rooms)
+        .filter(([_, r]) => r.selected)
+        .map(([type, r]) => ({ type, price: parseInt(r.rent), deposit: parseInt(r.deposit) }))
+
+      // Find the lowest price for display (primary price)
+      const primaryRoom = selectedRoomTypes.sort((a, b) => a.price - b.price)[0]
+
+      // Map room key 'single' -> DB Enum 'Single'
+      const roomTypeMap: Record<string, string> = {
+        '1rk': '1RK', 'single': 'Single', 'double': 'Double', 'triple': 'Triple', 'four': 'Four Sharing'
+      }
+
+      // 2. Create roomPrices object with ALL selected room prices
+      const roomPrices: Record<string, number> = {}
+      for (const [type, room] of Object.entries(formData.rooms)) {
+        if (room.selected && room.rent) {
+          roomPrices[type] = parseInt(room.rent)
+        }
+      }
+
+      // 3. Prepare Payload with ALL room prices
+      const propertyData = {
+        title: formData.title,
+        description: formData.description + (formData.directionsTip ? `\n\nDirections: ${formData.directionsTip}` : ""),
+        propertyType: formData.propertyType,
+        roomType: roomTypeMap[primaryRoom.type] as any,
+        location: {
+          city: formData.city,
+          area: formData.area,
+          address: formData.address,
+          pincode: formData.pincode
+        },
+        price: primaryRoom.price, // Display price (lowest)
+        deposit: primaryRoom.deposit,
+        roomPrices, // 🔥 NEW: Pass all room prices
+        amenities: Object.values(formData.rooms)
+          .find(r => r.selected)?.amenities || [], // Property-level amenities (same for all rooms)
+        images: [], // Placeholder, will update after upload
+        ownerId: ownerId,
+        ownerName: ownerName,
+        ownerContact: ownerContact,
+
+        preferredTenant: (formData.gender === 'male' ? 'Male' : formData.gender === 'female' ? 'Female' : formData.gender === 'couple' ? 'Couple' : 'Any') as 'Male' | 'Female' | 'Couple' | 'Any',
+        furnishing: formData.furnishing || undefined,
+        rules: [
+          formData.noSmoking ? 'No Smoking' : '',
+          formData.noNonVeg ? 'No Non-Veg' : '',
+          formData.noDrinking ? 'No Drinking' : '',
+          formData.noLoudMusic ? 'No Loud Music' : '',
+          formData.noOppGender ? 'No Opposite Gender' : '',
+          formData.preferredTenant !== 'any' ? `Preferred Tenant: ${formData.preferredTenant.charAt(0).toUpperCase() + formData.preferredTenant.slice(1)}` : '',
+          formData.otherRules
+        ].filter(Boolean),
+        // Payment fields for additional properties
+        ...(propertyPayment ? {
+          payment_status: 'paid',
+          payment_expires_at: propertyPayment.expiresAt,
+          payment_transaction_id: propertyPayment.transactionId,
+          payment_plan: propertyPayment.plan
+        } : {
+          payment_status: 'included' // First property is included in plan
+        })
+      }
+
+
+
+      // 3. Create or Update Property in DB
+      if (isEditMode && editPropertyId) {
+        // UPDATE existing property
+        setUploadStatus("Updating property...")
+        const { updateProperty } = await import('@/lib/data-service')
+        const { error: updateError } = await updateProperty(editPropertyId, propertyData)
+        
+        if (updateError) {
+          throw new Error(updateError.message || "Failed to update property")
+        }
+
+        // 4. Upload new images if any
+        if (formData.images.length > 0) {
+          setUploadStatus(`Uploading ${formData.images.length} new images...`)
+          const { urls, errors } = await uploadPropertyImages(formData.images, editPropertyId)
+
+          if (errors.length > 0) {
+            console.error("Some images failed to upload:", errors)
+            toast.warning(`${errors.length} images failed to upload`)
+          }
+
+          // Update property with new image URLs
+          if (urls.length > 0) {
+            await updateProperty(editPropertyId, { images: urls })
+          }
+        }
+
+        setUploadStatus("Success!")
+        toast.success("Property updated successfully!")
+
+        // Redirect to correct dashboard based on role
+        setTimeout(() => {
+          router.push(isAdmin ? '/dashboard/admin' : '/dashboard/owner')
+        }, 1500)
+      } else {
+        // CREATE new property
+        const { data: newProperty, error } = await createProperty(
+          propertyData,
+          isAdmin ? { isAdminPost: true } : undefined
+        )
+
+        if (error || !newProperty) {
+          throw new Error(error?.message || "Failed to create property record")
+        }
+
+        // 4. Upload Images
+        if (formData.images.length > 0) {
+          setUploadStatus(`Uploading ${formData.images.length} images...`)
+          const { urls, errors } = await uploadPropertyImages(formData.images, newProperty.id)
+
+          if (errors.length > 0) {
+            console.error("Some images failed to upload:", errors)
+            toast.warning(`${errors.length} images failed to upload`)
+          }
+
+          // Update property with image URLs
+          if (urls.length > 0) {
+            const { updateProperty } = await import('@/lib/data-service')
+            await updateProperty(newProperty.id, { images: urls })
+          }
+        }
+
+        setUploadStatus("Success!")
+        toast.success(
+          isAdmin
+            ? "Property posted and auto-approved!"
+            : "Property posted successfully! Waiting for admin approval."
+        )
+
+        // Send email notification (only for owner posts, not admin)
+        if (!isAdmin) {
+          try {
+            await sendPropertyPostedEmail({
+              ownerEmail: user.email,
+              ownerName: user.name,
+              propertyTitle: formData.title
+            })
+          } catch (emailError) {
+            console.error("Failed to send email:", emailError)
+          }
+        }
+
+        // Redirect to correct dashboard
+        setTimeout(() => {
+          router.push(isAdmin ? '/dashboard/admin' : '/dashboard/owner')
+        }, 1500)
+      }
+
+    } catch (error: any) {
+      console.error("=== SUBMISSION ERROR ===")
+      console.error("Error:", error)
+      console.error("Error Message:", error.message)
+      console.error("Error Details:", error.details)
+
+      // Show detailed validation errors if available
+      let errorMessage = error.message || "Failed to submit property"
+
+      // Handle Zod validation errors
+      if (error.details && Array.isArray(error.details)) {
+        const fieldErrors = error.details.map((err: any) => {
+          const field = err.path?.join('.') || 'Unknown field'
+          return `${field}: ${err.message}`
+        })
+        if (fieldErrors.length > 0) {
+          errorMessage = `Validation failed:\n${fieldErrors.join('\n')}`
+        }
+      }
+
+      toast.error("Property Submission Failed", {
+        description: errorMessage,
+        duration: 8000
+      })
+      setUploadStatus("")
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50 flex flex-col">
+      {/* Upgrade Modal for Free Users */}
+      {showUpgradeModal && !hasSubscription && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <Card className="w-full max-w-md animate-in fade-in zoom-in duration-300">
+            <CardContent className="pt-6 pb-6 px-6 text-center space-y-4">
+              <div className="w-16 h-16 bg-gradient-to-br from-orange-400 to-red-500 rounded-full flex items-center justify-center mx-auto">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                </svg>
+              </div>
+              
+              <h2 className="text-xl font-bold text-gray-900">
+                Property Limit Reached
+              </h2>
+              
+              <p className="text-gray-600">
+                You've already posted <span className="font-semibold">{existingPropertyCount} property</span> on the free plan. 
+                Upgrade to a paid plan to post more properties!
+              </p>
+              
+              <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-4 text-left">
+                <h3 className="font-semibold text-gray-900 mb-2">✨ Premium Benefits</h3>
+                <ul className="text-sm text-gray-700 space-y-1">
+                  <li>• Post additional properties</li>
+                  <li>• Priority listing in search</li>
+                  <li>• Detailed property analytics</li>
+                  <li>• Verified owner badge</li>
+                </ul>
+              </div>
+              
+              <div className="flex flex-col gap-3 pt-2">
+                <Button 
+                  className="w-full bg-primary hover:bg-primary/90 h-12 font-bold"
+                  onClick={() => router.push('/pricing')}
+                >
+                  View Plans & Upgrade
+                </Button>
+                <Button 
+                  variant="outline" 
+                  className="w-full"
+                  onClick={() => router.push('/dashboard/owner')}
+                >
+                  Back to Dashboard
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Payment Modal for Paid Users */}
+      {showPaymentModal && hasSubscription && !propertyPayment && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <Card className="w-full max-w-lg animate-in fade-in zoom-in duration-300">
+            <CardContent className="pt-6 pb-6 px-6 space-y-4">
+              <div className="text-center">
+                <div className="w-16 h-16 bg-gradient-to-br from-blue-400 to-purple-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                  </svg>
+                </div>
+                <h2 className="text-xl font-bold text-gray-900">Add Another Property</h2>
+                <p className="text-gray-600 mt-2">
+                  You have {existingPropertyCount} property. Pay to list an additional property.
+                </p>
+              </div>
+              
+              <div className="grid gap-3 mt-4">
+                {[
+                  { key: '1_month', label: '1 Month', price: '₹1,000', days: 30 },
+                  { key: '3_months', label: '3 Months', price: '₹2,700', days: 90, tag: 'Popular' },
+                  { key: '6_months', label: '6 Months', price: '₹5,000', days: 180 },
+                  { key: '12_months', label: '12 Months', price: '₹9,000', days: 365, tag: 'Best Value' },
+                ].map((plan) => (
+                  <button
+                    key={plan.key}
+                    onClick={() => setSelectedPlan(plan.key)}
+                    className={`relative flex items-center justify-between p-4 rounded-lg border-2 transition-all ${
+                      selectedPlan === plan.key 
+                        ? 'border-primary bg-primary/5' 
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                        selectedPlan === plan.key ? 'border-primary' : 'border-gray-300'
+                      }`}>
+                        {selectedPlan === plan.key && (
+                          <div className="w-3 h-3 rounded-full bg-primary" />
+                        )}
+                      </div>
+                      <div className="text-left">
+                        <div className="font-semibold text-gray-900">{plan.label}</div>
+                        <div className="text-sm text-gray-500">{plan.days} days listing</div>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="font-bold text-lg text-gray-900">{plan.price}</div>
+                      {plan.tag && (
+                        <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
+                          {plan.tag}
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                ))}
+              </div>
+              
+              <div className="flex flex-col gap-3 pt-4">
+                <Button 
+                  className="w-full bg-primary hover:bg-primary/90 h-12 font-bold"
+                  disabled={!selectedPlan || isProcessingPayment}
+                  onClick={async () => {
+                    if (!selectedPlan) return
+                    setIsProcessingPayment(true)
+                    try {
+                      // Create order
+                      const orderRes = await fetch('/api/payments/create-property-order', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ plan: selectedPlan })
+                      })
+                      const orderData = await orderRes.json()
+                      
+                      if (!orderRes.ok) {
+                        throw new Error(orderData.error || 'Failed to create order')
+                      }
+                      
+                      // Initialize Razorpay
+                      const options = {
+                        key: orderData.keyId,
+                        amount: orderData.amount,
+                        currency: 'INR',
+                        name: 'ZeroRentals',
+                        description: 'Additional Property Listing',
+                        order_id: orderData.orderId,
+                        handler: async function (response: any) {
+                          // Verify payment
+                          const verifyRes = await fetch('/api/payments/verify-property-payment', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              razorpay_order_id: response.razorpay_order_id,
+                              razorpay_payment_id: response.razorpay_payment_id,
+                              razorpay_signature: response.razorpay_signature,
+                              plan: selectedPlan,
+                              days: orderData.days
+                            })
+                          })
+                          const verifyData = await verifyRes.json()
+                          
+                          if (verifyData.success) {
+                            setPropertyPayment(verifyData.propertyPayment)
+                            setShowPaymentModal(false)
+                            toast.success('Payment successful! You can now post your property.')
+                          } else {
+                            toast.error('Payment verification failed')
+                          }
+                          setIsProcessingPayment(false)
+                        },
+                        modal: {
+                          ondismiss: function() {
+                            setIsProcessingPayment(false)
+                          }
+                        },
+                        theme: { color: '#4F46E5' }
+                      }
+                      
+                      const razorpay = new (window as any).Razorpay(options)
+                      razorpay.open()
+                    } catch (error: any) {
+                      toast.error(error.message || 'Payment failed')
+                      setIsProcessingPayment(false)
+                    }
+                  }}
+                >
+                  {isProcessingPayment ? (
+                    <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Processing...</>
+                  ) : (
+                    'Pay & Continue'
+                  )}
+                </Button>
+                <Button 
+                  variant="outline" 
+                  className="w-full"
+                  onClick={() => router.push('/dashboard/owner')}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+      {/* Header */}
+      <header className="bg-white border-b sticky top-0 z-50">
+        <div className="container mx-auto px-3 md:px-4 h-14 md:h-16 flex items-center justify-between">
+          <div className="flex items-center gap-2 md:gap-4">
+            <Link href={isAdmin ? '/dashboard/admin' : '/dashboard/owner'} className="p-1.5 md:p-2 hover:bg-gray-100 rounded-full">
+              <ArrowLeft className="h-4 w-4 md:h-5 md:w-5 text-gray-600" />
+            </Link>
+            <div className="flex flex-col">
+              <h1 className="font-semibold text-sm md:text-lg">
+                {isAdmin ? 'Admin: Post Property' : (isEditMode ? 'Edit Property' : 'Post New Property')}
+              </h1>
+              <span className="text-xs text-muted-foreground">Step {currentStep} of {maxSteps}</span>
+            </div>
+          </div>
+          <Progress value={progress} className="w-20 md:w-1/3 h-1.5 md:h-2" />
+          <div className="w-6 md:w-10"></div> {/* Spacer */}
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <main className="flex-1 container mx-auto px-3 md:px-4 py-4 md:py-8 max-w-3xl">
+        <Card className="shadow-sm border-0 bg-white">
+          <CardContent className="p-6 md:p-8 min-h-[60vh]">
+
+            {isLoadingProperty ? (
+              <div className="flex flex-col items-center justify-center py-16">
+                <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
+                <p className="text-muted-foreground">Loading property data...</p>
+              </div>
+            ) : (
+              <>
+
+            {currentStep === 1 && (
+              <BasicDetailsStep 
+                formData={formData} 
+                setFormData={setFormData} 
+                isAdmin={isAdmin}
+                ownerMode={ownerMode}
+                setOwnerMode={setOwnerMode}
+                ownerDetails={ownerDetails}
+                setOwnerDetails={setOwnerDetails}
+                selectedExistingOwner={selectedExistingOwner}
+                setSelectedExistingOwner={setSelectedExistingOwner}
+              />
+            )}
+
+            {currentStep === 2 && (
+              <RoomSelectionStep formData={formData} toggleRoom={toggleRoom} />
+            )}
+
+            {currentStep === 3 && (
+              <PricingStep
+                formData={formData}
+                updateRoomData={updateRoomData}
+                toggleAmenity={toggleAmenity}
+                updateFormData={(field, value) => setFormData({ ...formData, [field]: value })}
+              />
+            )}
+
+            {currentStep === 4 && (
+              <RulesStep formData={formData} setFormData={setFormData} />
+            )}
+
+            {currentStep === 5 && (
+              <MediaStep
+                formData={formData}
+                setFormData={setFormData}
+                handleImageSelect={handleImageSelect}
+                removeImage={removeImage}
+                maxPhotos={maxPhotos}
+              />
+            )}
+
+              </>
+            )}
+          </CardContent>
+
+          {/* Footer */}
+          <div className="p-6 border-t bg-gray-50 flex items-center justify-between rounded-b-xl">
+            <Button
+              variant="outline"
+              onClick={handleBack}
+              disabled={currentStep === 1 || isSubmitting}
+              className="w-32"
+            >
+              Back
+            </Button>
+
+            {currentStep < maxSteps ? (
+              <Button onClick={handleNext} className="w-32 bg-primary">
+                Next
+              </Button>
+            ) : (
+              <Button onClick={handleSubmit} disabled={isSubmitting} className="w-48 bg-primary font-bold">
+                {isSubmitting ? (
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    {uploadStatus || "Submitting..."}
+                  </div>
+                ) : (isEditMode ? "Update Property" : "Submit Property")}
+              </Button>
+            )}
+          </div>
+        </Card>
+      </main>
+    </div>
+  )
+}
+
+export default withAuth(PostPropertyPage, { requiredRole: 'owner' })

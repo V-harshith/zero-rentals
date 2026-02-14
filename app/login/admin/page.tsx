@@ -1,0 +1,158 @@
+"use client"
+
+import { useState, useEffect } from "react"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { PasswordInput } from "@/components/ui/password-input"
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
+import { useAuth } from "@/lib/auth-context"
+import { Shield, ArrowLeft } from "lucide-react"
+import Link from "next/link"
+import Image from "next/image"
+import { toast } from "sonner"
+import { useRouter } from "next/navigation"
+
+export default function AdminLoginPage() {
+    const { user, login, isLoading: authLoading } = useAuth()
+    const router = useRouter()
+    const [email, setEmail] = useState("")
+    const [password, setPassword] = useState("")
+    const [isLoading, setIsLoading] = useState(false)
+
+    // Redirect logged-in users to their dashboard
+    useEffect(() => {
+        if (!authLoading && user) {
+            const dashboardPath = user.role === 'tenant' ? '/' : `/dashboard/${user.role}`
+            router.replace(dashboardPath)
+        }
+    }, [user, authLoading, router])
+
+    // Show loading state while checking auth
+    if (authLoading) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-muted/30">
+                <div className="text-center">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
+                    <p className="mt-4 text-muted-foreground">Loading...</p>
+                </div>
+            </div>
+        )
+    }
+
+    // Prevent flash of content before redirect
+    if (user) {
+        return null
+    }
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault()
+        setIsLoading(true)
+
+        await login(email, password)
+        setIsLoading(false)
+    }
+
+    return (
+        <div className="min-h-screen flex items-center justify-center bg-muted/30 p-4">
+            <div className="w-full max-w-md space-y-6 animate-fadeIn">
+                {/* Header with Logo */}
+                <div className="text-center space-y-4">
+                    <Link href="/" className="inline-flex items-center justify-center gap-2 group">
+                        <Image
+                            src="/zerorentals-logo.png"
+                            alt="ZeroRentals"
+                            width={48}
+                            height={48}
+                            className="h-12 w-12 object-contain transition-transform group-hover:scale-110"
+                        />
+                        <span className="text-2xl font-bold">ZeroRentals</span>
+                    </Link>
+                    <div>
+                        <h1 className="text-3xl font-bold">Admin Access</h1>
+                        <p className="text-muted-foreground mt-2">
+                            Sign in to the admin dashboard
+                        </p>
+                    </div>
+                </div>
+
+                {/* Login Card */}
+                <Card className="border-2 border-primary/20">
+                    <CardHeader>
+                        <CardTitle className="flex items-center gap-2">
+                            <Shield className="h-5 w-5 text-primary" />
+                            Administrator Login
+                        </CardTitle>
+                        <CardDescription>
+                            Restricted access for administrators only
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            <div className="space-y-2">
+                                <label htmlFor="email" className="text-sm font-medium">
+                                    Admin Email
+                                </label>
+                                <Input
+                                    id="email"
+                                    type="email"
+                                    placeholder="Enter your email"
+                                    value={email}
+                                    onChange={(e) => setEmail(e.target.value)}
+                                    required
+                                    className="h-12"
+                                />
+                            </div>
+
+                            <div className="space-y-2">
+                                <div className="flex items-center justify-between">
+                                    <label htmlFor="password" className="text-sm font-medium">
+                                        Password
+                                    </label>
+                                    <Link
+                                        href="/forgot-password"
+                                        className="text-sm text-primary hover:underline"
+                                    >
+                                        Forgot password?
+                                    </Link>
+                                </div>
+                                <PasswordInput
+                                    id="password"
+                                    placeholder="Enter admin password"
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                    required
+                                    className="h-12"
+                                />
+                            </div>
+
+                            <Button
+                                type="submit"
+                                className="w-full h-12"
+                                size="lg"
+                                disabled={isLoading}
+                            >
+                                {isLoading ? "Signing in..." : "Sign In as Admin"}
+                            </Button>
+                        </form>
+
+                        {/* Links */}
+                        <div className="mt-6 text-center space-y-2">
+                            <Link
+                                href="/login"
+                                className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                            >
+                                <ArrowLeft className="h-3 w-3" />
+                                Back to Login Selection
+                            </Link>
+                        </div>
+                    </CardContent>
+                </Card>
+
+                <div className="text-center text-xs text-muted-foreground">
+                    <p>This area is restricted to authorized personnel only.</p>
+                </div>
+            </div>
+        </div>
+    )
+}
+
