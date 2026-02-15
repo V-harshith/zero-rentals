@@ -104,6 +104,10 @@ global.FileReader = class FileReader {
     onload: ((event: any) => void) | null = null
     onerror: ((event: any) => void) | null = null
     result: string | ArrayBuffer | null = null
+    readonly EMPTY = 0
+    readonly LOADING = 1
+    readonly DONE = 2
+    readyState = 0
 
     readAsArrayBuffer(file: Blob) {
         setTimeout(() => {

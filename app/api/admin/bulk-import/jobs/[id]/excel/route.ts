@@ -108,8 +108,10 @@ export async function POST(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
+    let jobId = ''
     try {
-        const { id: jobId } = await params
+        const { id } = await params
+        jobId = id
 
         // Auth check
         const supabase = await createClient()
@@ -422,7 +424,7 @@ export async function POST(
                 error_message: error.message,
                 error_details: { stack: error.stack },
             })
-            .eq("id", params.id)
+            .eq("id", jobId)
 
         return NextResponse.json(
             { error: error.message || "Failed to process Excel file" },

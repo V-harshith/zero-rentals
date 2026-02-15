@@ -629,14 +629,14 @@ function EditPropertyPage() {
 
                         {/* Step 4: Rules & Preferences — Shared Component */}
                         {currentStep === 4 && (
-                            <RulesStep formData={formData} setFormData={updateFormData} />
+                            <RulesStep formData={formData} setFormData={(newData) => updateFormData(() => newData)} />
                         )}
 
                         {/* Step 5: Media — Shared Component */}
                         {currentStep === 5 && (
                             <MediaStep
                                 formData={formData}
-                                setFormData={updateFormData}
+                                setFormData={(newData) => updateFormData(() => newData)}
                                 handleImageSelect={handleImageSelect}
                                 removeImage={removeImage}
                                 maxPhotos={10}

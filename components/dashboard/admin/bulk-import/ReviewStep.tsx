@@ -204,7 +204,7 @@ export function ReviewStep({ jobId, previewData, onComplete, onBack }: ReviewSte
                         New Owner Accounts ({newOwners.length})
                     </h3>
                     <div className="bg-muted rounded-lg p-3">
-                        <ScrollArea className="h-32">
+                        <div className="h-32 overflow-y-auto">
                             <div className="space-y-2">
                                 {newOwners.slice(0, 5).map((owner: any, i: number) => (
                                     <div key={i} className="flex items-center justify-between text-sm">
@@ -218,7 +218,7 @@ export function ReviewStep({ jobId, previewData, onComplete, onBack }: ReviewSte
                                     </p>
                                 )}
                             </div>
-                        </ScrollArea>
+                        </div>
                     </div>
                 </div>
             )}
@@ -229,7 +229,7 @@ export function ReviewStep({ jobId, previewData, onComplete, onBack }: ReviewSte
                     <Building2 className="h-4 w-4" />
                     Properties Preview ({properties.length})
                 </h3>
-                <ScrollArea className="h-64 border rounded-lg">
+                <div className="h-64 border rounded-lg overflow-y-auto">
                     <div className="p-2 space-y-2">
                         {properties.slice(0, 20).map((prop: any) => (
                             <div
@@ -267,7 +267,7 @@ export function ReviewStep({ jobId, previewData, onComplete, onBack }: ReviewSte
                             </p>
                         )}
                     </div>
-                </ScrollArea>
+                </div>
             </div>
 
             {/* Progress (when confirming) */}

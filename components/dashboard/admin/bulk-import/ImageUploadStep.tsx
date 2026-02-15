@@ -287,6 +287,7 @@ export function ImageUploadStep({ jobId, onComplete, onBack }: ImageUploadStepPr
                     <input
                         ref={folderInputRef}
                         type="file"
+                        // @ts-expect-error - webkitdirectory is non-standard but needed for folder upload
                         webkitdirectory=""
                         directory=""
                         multiple
