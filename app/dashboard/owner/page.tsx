@@ -150,37 +150,16 @@ function OwnerDashboard() {
       <div className="sticky top-0 z-40 bg-background border-b">
         <div className="container mx-auto px-4">
           <div className="flex items-center justify-between h-16">
+            {/* Left Section: Menu Button (mobile) + Logo + ZeroRentals + Badges */}
             <div className="flex items-center gap-2 sm:gap-4">
-              <div onClick={handleLogoClick} className="flex items-center gap-2 cursor-pointer flex-shrink-0">
-                <Image
-                  src="/zerorentals-logo.png"
-                  alt="ZeroRentals"
-                  width={32}
-                  height={32}
-                  className="h-8 w-8 object-contain"
-                />
-                <span className="text-xl font-bold hidden sm:inline">ZeroRentals</span>
-              </div>
-              <Badge variant="outline" className="hidden md:flex">Owner Dashboard</Badge>
-              {activeSubscription && (
-                <Badge variant="secondary" className="bg-green-100 text-green-700 hover:bg-green-100 hidden lg:flex">
-                  {activeSubscription.plan_name} Plan
-                </Badge>
-              )}
-            </div>
-            <div className="flex items-center gap-2 sm:gap-4">
-              <span className="text-sm text-muted-foreground hidden lg:block">
-                Welcome, {user?.name}
-              </span>
-
-              {/* Mobile Menu - Contains all nav items in dropdown */}
+              {/* Mobile Menu Button - Left side */}
               <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
                 <SheetTrigger asChild>
-                  <Button variant="outline" size="sm" className="md:hidden">
+                  <Button variant="outline" size="sm" className="md:hidden flex-shrink-0">
                     <Menu className="h-4 w-4" />
                   </Button>
                 </SheetTrigger>
-                <SheetContent side="right" className="w-[280px]">
+                <SheetContent side="left" className="w-[280px]">
                   <div className="flex flex-col gap-4 mt-8">
                     <div className="pb-4 border-b">
                       <p className="font-medium">{user?.name}</p>
@@ -218,6 +197,31 @@ function OwnerDashboard() {
                   </div>
                 </SheetContent>
               </Sheet>
+
+              {/* Logo - Always left-aligned */}
+              <div onClick={handleLogoClick} className="flex items-center gap-2 cursor-pointer flex-shrink-0">
+                <Image
+                  src="/zerorentals-logo.png"
+                  alt="ZeroRentals"
+                  width={32}
+                  height={32}
+                  className="h-8 w-8 object-contain"
+                />
+                <span className="text-xl font-bold hidden sm:inline">ZeroRentals</span>
+              </div>
+              <Badge variant="outline" className="hidden md:flex">Owner Dashboard</Badge>
+              {activeSubscription && (
+                <Badge variant="secondary" className="bg-green-100 text-green-700 hover:bg-green-100 hidden lg:flex">
+                  {activeSubscription.plan_name} Plan
+                </Badge>
+              )}
+            </div>
+
+            {/* Right Section: User name (desktop) + Profile + Logout */}
+            <div className="flex items-center gap-2 sm:gap-4">
+              <span className="text-sm text-muted-foreground hidden lg:block">
+                Welcome, {user?.name}
+              </span>
 
               {/* Desktop Only Buttons - Hidden on mobile */}
               <Link href={ROUTES.PROFILE_OWNER} className="hidden md:block">

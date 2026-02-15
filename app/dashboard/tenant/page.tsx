@@ -4,7 +4,8 @@ import React, { useEffect, useState, useRef } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import Image from "next/image"
-import { LogOut, Loader2, User } from "lucide-react"
+import { LogOut, Loader2, User, Menu, Edit } from "lucide-react"
+import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
 import { useAuth } from "@/lib/auth-context"
 import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
@@ -27,6 +28,7 @@ function TenantDashboard() {
   const [recentProperties, setRecentProperties] = useState<Property[]>([])
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'overview')
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const hasLoaded = useRef(false)
 
   useEffect(() => {
@@ -79,20 +81,59 @@ function TenantDashboard() {
               <span className="text-sm text-muted-foreground hidden lg:block">
                 Welcome, {user?.name}
               </span>
-              <Link href="/profile/tenant">
+
+              {/* Mobile Menu - Contains all nav items in dropdown */}
+              <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
+                <SheetTrigger asChild>
+                  <Button variant="outline" size="sm" className="md:hidden">
+                    <Menu className="h-4 w-4" />
+                  </Button>
+                </SheetTrigger>
+                <SheetContent side="right" className="w-[280px]">
+                  <div className="flex flex-col gap-4 mt-8">
+                    <div className="pb-4 border-b">
+                      <p className="font-medium">{user?.name}</p>
+                      <p className="text-sm text-muted-foreground">{user?.email}</p>
+                    </div>
+
+                    <Link href="/profile/tenant" onClick={() => setMobileMenuOpen(false)}>
+                      <Button variant="outline" size="sm" className="w-full justify-start">
+                        <Edit className="h-4 w-4 mr-2" />
+                        Edit Profile
+                      </Button>
+                    </Link>
+
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setMobileMenuOpen(false)
+                        logout()
+                      }}
+                      className="w-full justify-start bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white hover:text-white"
+                    >
+                      <LogOut className="h-4 w-4 mr-2" />
+                      Logout
+                    </Button>
+                  </div>
+                </SheetContent>
+              </Sheet>
+
+              {/* Desktop Only Buttons - Hidden on mobile */}
+              <Link href="/profile/tenant" className="hidden md:block">
                 <Button variant="outline" size="sm" className="gap-2">
                   <User className="h-4 w-4" />
                   <span className="hidden sm:inline">Profile</span>
                 </Button>
               </Link>
-              
-              <Button 
-                variant="ghost" 
-                size="sm" 
+
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={logout}
-                className="gap-2 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white hover:text-white"
+                className="hidden md:flex gap-2 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white hover:text-white"
               >
-                <LogOut className="h-4 w-4 sm:mr-2" />
+                <LogOut className="h-4 w-4 mr-2" />
                 <span className="hidden sm:inline">Logout</span>
               </Button>
             </div>

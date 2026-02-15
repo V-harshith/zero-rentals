@@ -80,11 +80,11 @@ function MobileNav({ userName, onLogout }: { userName: string; onLogout: () => v
   return (
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger asChild>
-        <Button variant="outline" size="sm" className="md:hidden">
+        <Button variant="outline" size="sm" className="md:hidden flex-shrink-0">
           <Menu className="h-4 w-4" />
         </Button>
       </SheetTrigger>
-      <SheetContent side="right" className="w-[280px] p-0">
+      <SheetContent side="left" className="w-[280px] p-0">
         <div className="flex flex-col h-full">
           {/* User Info */}
           <div className="p-4 border-b bg-muted/50">
@@ -590,9 +590,12 @@ function AdminDashboard() {
   return (
     <div className="min-h-screen flex flex-col bg-muted/50 overflow-x-hidden">
       {/* Header */}
-      <header className="bg-white border-b sticky top-0 z-10 shadow-sm">
-          <div className="max-w-7xl mx-auto px-4 md:px-6 py-3 md:py-4 flex items-center justify-between">
+      <div className="sticky top-0 z-40 bg-background border-b">
+        <div className="container mx-auto px-3 sm:px-4">
+          <div className="flex items-center justify-between h-16">
             <div className="flex items-center gap-2 sm:gap-4">
+              {/* Mobile Navigation - Left side */}
+              <MobileNav userName={user?.name || 'Admin'} onLogout={logout} />
               <div onClick={() => router.push('/')} className="flex items-center gap-2 cursor-pointer flex-shrink-0">
                 <Image
                   src="/zerorentals-logo.png"
@@ -627,14 +630,13 @@ function AdminDashboard() {
                 onClick={logout}
                 className="hidden md:flex gap-2 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white hover:text-white"
               >
-                <LogOut className="h-4 w-4 sm:mr-2" />
+                <LogOut className="h-4 w-4 mr-2" />
                 <span className="hidden sm:inline">Logout</span>
               </Button>
-              {/* Mobile Navigation */}
-              <MobileNav userName={user?.name || 'Admin'} onLogout={logout} />
             </div>
           </div>
-        </header>
+        </div>
+      </div>
 
       {/* Main Content */}
       <div className="container mx-auto px-3 sm:px-4 py-6 sm:py-8 flex-1 overflow-x-hidden w-full max-w-full">
