@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, type ComponentType } from "react"
 import { getPropertyById } from "@/lib/data-service"
 import type { Property } from "@/lib/types"
 import { Button } from "@/components/ui/button"
@@ -16,7 +16,6 @@ import {
     Home,
     Ruler,
     Edit,
-    CheckCircle,
     X,
     Eye,
     Shield,
@@ -27,7 +26,13 @@ import {
     ChevronRight,
     Building2,
     Building,
-    Hotel
+    Hotel,
+    Wifi,
+    Snowflake,
+    Car,
+    Dumbbell,
+    WashingMachine,
+    Utensils
 } from "lucide-react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
@@ -616,12 +621,29 @@ export default function PropertyClientPage({ id, initialProperty }: { id: string
                                 <div>
                                     <h3 className="text-lg font-semibold mb-3">Amenities</h3>
                                     <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                                        {property.amenities.map((amenity, index) => (
-                                            <div key={index} className="flex items-center gap-2">
-                                                <CheckCircle className="h-4 w-4 text-green-500" />
-                                                <span className="text-sm">{amenity}</span>
-                                            </div>
-                                        ))}
+                                        {property.amenities.map((amenity, index) => {
+                                            // Map amenity names to Lucide icons (same as used in search/MoreFiltersDropdown)
+                                            const iconMap: Record<string, ComponentType<{ className?: string }>> = {
+                                                'WiFi': Wifi,
+                                                'AC': Snowflake,
+                                                'Parking': Car,
+                                                'Gym': Dumbbell,
+                                                'Security': Shield,
+                                                'Laundry': WashingMachine,
+                                                'Meals': Utensils,
+                                            }
+                                            const IconComponent = iconMap[amenity]
+                                            return (
+                                                <div key={index} className="flex items-center gap-2">
+                                                    {IconComponent ? (
+                                                        <IconComponent className="h-4 w-4 text-primary" />
+                                                    ) : (
+                                                        <Home className="h-4 w-4 text-primary" />
+                                                    )}
+                                                    <span className="text-sm">{amenity}</span>
+                                                </div>
+                                            )
+                                        })}
                                     </div>
                                 </div>
 
