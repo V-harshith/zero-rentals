@@ -68,6 +68,7 @@ export interface Database {
                     owner_contact: string
                     owner_verified: boolean
                     private_room_price: number | null
+                    one_rk_price: number | null
                     double_sharing_price: number | null
                     triple_sharing_price: number | null
                     four_sharing_price: number | null

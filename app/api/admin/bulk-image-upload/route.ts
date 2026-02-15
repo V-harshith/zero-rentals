@@ -5,6 +5,11 @@ import { supabaseAdmin } from "@/lib/supabase-admin"
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
+// Increase body size limit for image uploads (prevents 413 Payload Too Large)
+export const bodyParser = {
+  sizeLimit: '10mb',
+}
+
 // Security: Allowed file types
 const ALLOWED_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp']
 const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp']

@@ -41,16 +41,18 @@ export default function ResetPasswordPage() {
   useEffect(() => {
     let timeoutId: ReturnType<typeof setTimeout> | null = null
     let isMounted = true
+    let sessionEstablished = false
 
     // Listen for auth state changes (including RECOVERY from email link)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (!isMounted) return
+      if (!isMounted || sessionEstablished) return
 
       console.log("[AUTH] Password Reset - Auth event:", event)
 
       if (event === 'PASSWORD_RECOVERY') {
         // User clicked the reset link from email - session is being created
         console.log("✅ PASSWORD_RECOVERY event detected")
+        sessionEstablished = true
         setHasValidSession(true)
         setSessionError(null)
         setIsCheckingSession(false)
@@ -58,12 +60,14 @@ export default function ResetPasswordPage() {
       } else if (event === 'SIGNED_IN' && session) {
         // Session established (could be from token in URL hash)
         console.log("✅ User signed in for password reset")
+        sessionEstablished = true
         setHasValidSession(true)
         setSessionError(null)
         setIsCheckingSession(false)
         if (timeoutId) clearTimeout(timeoutId)
       } else if (event === 'TOKEN_REFRESHED' && session) {
         // Token was refreshed, still valid
+        sessionEstablished = true
         setHasValidSession(true)
         setIsCheckingSession(false)
         if (timeoutId) clearTimeout(timeoutId)
@@ -72,27 +76,41 @@ export default function ResetPasswordPage() {
 
     // Also check for existing session (in case page was refreshed)
     const checkExistingSession = async () => {
-      // Give Supabase more time to process URL hash token (network delay)
-      await new Promise(resolve => setTimeout(resolve, 500))
+      // CRITICAL FIX: Give Supabase more time to process URL hash token
+      // The detectSessionInUrl option needs time to parse and validate tokens
+      await new Promise(resolve => setTimeout(resolve, 1500))
 
-      if (!isMounted) return
+      if (!isMounted || sessionEstablished) return
 
       const { data: { session } } = await supabase.auth.getSession()
 
       if (session) {
         console.log("✅ Existing session found for password reset")
+        sessionEstablished = true
         setHasValidSession(true)
         setSessionError(null)
         setIsCheckingSession(false)
       } else {
         // No session yet - might be waiting for RECOVERY event
-        // Wait longer (30 seconds) before showing error - network can be slow on mobile
-        timeoutId = setTimeout(() => {
-          if (isMounted && !hasValidSession) {
-            setIsCheckingSession(false)
-            setSessionError("Unable to verify reset link. This may be due to slow network. Please try again or request a new password reset.")
-          }
-        }, 30000) // 30 seconds - industry standard for auth operations
+        // Try one more time after a delay (Supabase may still be processing)
+        await new Promise(resolve => setTimeout(resolve, 2000))
+
+        if (!isMounted || sessionEstablished) return
+
+        const { data: { session: retrySession } } = await supabase.auth.getSession()
+
+        if (retrySession) {
+          console.log("✅ Session found on retry for password reset")
+          sessionEstablished = true
+          setHasValidSession(true)
+          setSessionError(null)
+          setIsCheckingSession(false)
+          return
+        }
+
+        // Still no session - show error
+        setIsCheckingSession(false)
+        setSessionError("This password reset link is invalid or has expired. Please request a new one.")
       }
     }
 
@@ -151,7 +169,7 @@ export default function ResetPasswordPage() {
 
       // Add delay before redirecting
       setTimeout(() => {
-        router.push("/auth/signin")
+        router.push("/login")
       }, 2000)
     } catch (error) {
       console.error("Password update error:", error)
@@ -192,7 +210,7 @@ export default function ResetPasswordPage() {
               Please request a new password reset link.
             </p>
             <Button asChild className="w-full">
-              <Link href="/auth/forgot-password">Request New Link</Link>
+              <Link href="/forgot-password">Request New Link</Link>
             </Button>
           </CardContent>
         </Card>
@@ -361,7 +379,7 @@ export default function ResetPasswordPage() {
 
               <p className="mt-4 text-center text-sm text-gray-500">
                 Remember your password?{" "}
-                <Link href="/auth/signin" className="text-primary hover:underline">
+                <Link href="/login" className="text-primary hover:underline">
                   Sign in
                 </Link>
               </p>

@@ -12,8 +12,8 @@ import { supabase } from "@/lib/supabase"
 import { mapPropertyFromDB, type PropertyRow } from "@/lib/data-mappers"
 import { type Property } from "@/lib/types"
 import { toast } from "sonner"
-import { updateProperty } from "@/lib/data-service"
 import Link from "next/link"
+import { useCsrf } from "@/lib/csrf-context"
 
 export function AllPropertiesTab() {
     const [properties, setProperties] = useState<Property[]>([])
@@ -25,6 +25,7 @@ export function AllPropertiesTab() {
     const [totalCount, setTotalCount] = useState(0)
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
     const [bulkDeleting, setBulkDeleting] = useState(false)
+    const { csrfToken, isLoading: isCsrfLoading } = useCsrf()
     const ITEMS_PER_PAGE = 20
 
     useEffect(() => {
@@ -74,15 +75,34 @@ export function AllPropertiesTab() {
     }
 
     const toggleFeatured = async (id: string, current: boolean) => {
+        // Check for CSRF token before making request
+        if (!csrfToken) {
+            toast.error('Security token not available. Please wait a moment and try again.')
+            return
+        }
+
         try {
             setUpdatingId(id)
-            const { error } = await updateProperty(id, { featured: !current })
-            if (error) throw error
+
+            // Call the admin API endpoint to toggle featured status
+            const response = await fetch(`/api/admin/properties/${id}/feature`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-csrf-token': csrfToken,
+                },
+                body: JSON.stringify({ featured: !current }),
+            })
+
+            if (!response.ok) {
+                const data = await response.json()
+                throw new Error(data.error || 'Failed to update featured status')
+            }
 
             setProperties(prev => prev.map(p => p.id === id ? { ...p, featured: !current } : p))
             toast.success(current ? "Property unfeatured" : "Property featured!")
-        } catch (error) {
-            toast.error("Failed to update featured status")
+        } catch (error: any) {
+            toast.error(error.message || "Failed to update featured status")
         } finally {
             setUpdatingId(null)
         }
@@ -338,7 +358,8 @@ export function AllPropertiesTab() {
                                                 variant={property.featured ? "default" : "outline"}
                                                 className={property.featured ? "bg-yellow-500 hover:bg-yellow-600 border-yellow-500" : ""}
                                                 onClick={() => toggleFeatured(property.id, property.featured)}
-                                                disabled={updatingId === property.id}
+                                                disabled={updatingId === property.id || isCsrfLoading}
+                                                title={property.featured ? "Click to unfeature" : "Click to feature"}
                                             >
                                                 <Star className={`h-4 w-4 ${property.featured ? "fill-white" : ""}`} />
                                             </Button>

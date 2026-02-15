@@ -74,10 +74,10 @@ export async function fulfillSubscriptionAction(data: {
         // 3. Map properties limit
         const limitMap: Record<string, number> = {
             'Free': 1,
-            'Silver': 3,
-            'Gold': 5,
-            'Platinum': 10,
-            'Elite': 999
+            'Silver': 1,
+            'Gold': 1,
+            'Platinum': 1,
+            'Elite': 1
         }
         const propertiesLimit = limitMap[data.planName] || 1
 

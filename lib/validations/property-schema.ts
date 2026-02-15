@@ -15,6 +15,7 @@ export const propertySchema = z.object({
   latitude: z.number().optional(),
   longitude: z.number().optional(),
   
+  one_rk_price: z.number().min(0).optional(),
   private_room_price: z.number().min(0).optional(),
   double_sharing_price: z.number().min(0).optional(),
   triple_sharing_price: z.number().min(0).optional(),

@@ -464,12 +464,19 @@ function OwnerProfilePage() {
                                 </div>
 
                                 <div className="space-y-2">
-                                    <Label htmlFor="email">Email</Label>
+                                    <Label htmlFor="email" className="flex items-center gap-2">
+                                        Email
+                                        <span className="text-xs text-muted-foreground flex items-center gap-1">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-lock"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                                            (cannot be changed)
+                                        </span>
+                                    </Label>
                                     <Input
                                         id="email"
                                         type="email"
                                         value={profileData.email}
-                                        onChange={(e) => setProfileData({ ...profileData, email: e.target.value })}
+                                        disabled
+                                        className="bg-muted"
                                     />
                                 </div>
 

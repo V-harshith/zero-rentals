@@ -14,7 +14,7 @@ let razorpayInstance: any = null
 const getRazorpay = () => {
     if (razorpayInstance) return razorpayInstance
 
-    const key_id = process.env.RAZORPAY_KEY_ID
+    const key_id = process.env.RAZORPAY_KEY_ID || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID
     const key_secret = process.env.RAZORPAY_KEY_SECRET
 
     if (!key_id || !key_secret) {

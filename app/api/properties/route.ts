@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase-server'
 import { getCurrentUser } from '@/lib/auth'
 import { csrfProtection } from '@/lib/csrf-server'
 import { rateLimit } from '@/lib/rate-limit'
+import { PLAN_TIER_RANK, getPlanTierRank } from '@/lib/constants'
 
 export async function GET(request: NextRequest) {
   try {
@@ -18,6 +19,30 @@ export async function GET(request: NextRequest) {
     const page = parseInt(searchParams.get('page') || '1')
     const limit = parseInt(searchParams.get('limit') || '20')
 
+    // Get owners with valid active subscriptions and their plan names
+    const today = new Date().toISOString()
+    const { data: validSubscribers, error: subError } = await supabase
+      .from('subscriptions')
+      .select('user_id, plan_name')
+      .eq('status', 'active')
+      .gt('end_date', today)
+
+    if (subError) {
+      console.error('Error fetching valid subscriptions:', subError)
+    }
+
+    // Create a map of owner_id to plan tier rank
+    const ownerTierMap = new Map<string, number>()
+    validSubscribers?.forEach(s => {
+      const rank = getPlanTierRank(s.plan_name)
+      // Only update if higher rank (or not set yet)
+      const existingRank = ownerTierMap.get(s.user_id)
+      if (!existingRank || rank > existingRank) {
+        ownerTierMap.set(s.user_id, rank)
+      }
+    })
+
+    // Build base query
     let query = supabase
       .from('properties')
       .select('*', { count: 'exact' })
@@ -33,24 +58,43 @@ export async function GET(request: NextRequest) {
     }
 
     if (roomType) {
-      query = query.eq('room_type', roomType)
+      // Map room type to price column - property matches if it has a price for this room type
+      // 1RK now has its own column separate from private_room_price (1BHK/Single)
+      const roomTypeToPriceColumn: Record<string, string> = {
+        'Private Room': 'private_room_price',
+        '1 RK': 'one_rk_price',
+        '1 BHK': 'private_room_price',
+        'Single': 'private_room_price',
+        'Double': 'double_sharing_price',
+        '2 BHK': 'double_sharing_price',
+        'Triple': 'triple_sharing_price',
+        '3 BHK': 'triple_sharing_price',
+        'Four Sharing': 'four_sharing_price',
+        '4 BHK': 'four_sharing_price'
+      }
+
+      const priceColumn = roomTypeToPriceColumn[roomType]
+      if (priceColumn) {
+        query = query.not(priceColumn, 'is', null)
+      }
     }
 
     // Price filter: Property matches if at least one room type price falls within the range
+    // Include one_rk_price for 1RK properties
     if (minPrice && maxPrice) {
       // Both min and max provided - check if any price falls within range
       query = query.or(
-        `and(private_room_price.gte.${minPrice},private_room_price.lte.${maxPrice}),and(double_sharing_price.gte.${minPrice},double_sharing_price.lte.${maxPrice}),and(triple_sharing_price.gte.${minPrice},triple_sharing_price.lte.${maxPrice})`
+        `and(one_rk_price.gte.${minPrice},one_rk_price.lte.${maxPrice}),and(private_room_price.gte.${minPrice},private_room_price.lte.${maxPrice}),and(double_sharing_price.gte.${minPrice},double_sharing_price.lte.${maxPrice}),and(triple_sharing_price.gte.${minPrice},triple_sharing_price.lte.${maxPrice})`
       )
     } else if (minPrice) {
       // Only min provided - any price >= minPrice
       query = query.or(
-        `private_room_price.gte.${minPrice},double_sharing_price.gte.${minPrice},triple_sharing_price.gte.${minPrice}`
+        `one_rk_price.gte.${minPrice},private_room_price.gte.${minPrice},double_sharing_price.gte.${minPrice},triple_sharing_price.gte.${minPrice}`
       )
     } else if (maxPrice) {
       // Only max provided - any price <= maxPrice
       query = query.or(
-        `private_room_price.lte.${maxPrice},double_sharing_price.lte.${maxPrice},triple_sharing_price.lte.${maxPrice}`
+        `one_rk_price.lte.${maxPrice},private_room_price.lte.${maxPrice},double_sharing_price.lte.${maxPrice},triple_sharing_price.lte.${maxPrice}`
       )
     }
 
@@ -59,7 +103,7 @@ export async function GET(request: NextRequest) {
       query = query.contains('amenities', amenitiesArray)
     }
 
-    // Always prioritize featured properties first, then apply the requested sort
+    // Apply sorting - always prioritize featured first, then apply requested sort
     switch (sortBy) {
       case 'price-asc':
         query = query
@@ -77,7 +121,6 @@ export async function GET(request: NextRequest) {
           .order('views', { ascending: false })
         break
       case 'featured':
-        // Explicit featured-only sort
         query = query
           .order('featured', { ascending: false })
           .order('created_at', { ascending: false })
@@ -90,7 +133,6 @@ export async function GET(request: NextRequest) {
         break
     }
 
-
     const from = (page - 1) * limit
     const to = from + limit - 1
     query = query.range(from, to)
@@ -99,8 +141,38 @@ export async function GET(request: NextRequest) {
 
     if (error) throw error
 
+    // Sort results by plan tier priority
+    // Order: Plan tier (highest first) -> Featured -> Requested sort
+    const sortedData = (data || []).sort((a: any, b: any) => {
+      const aTier = ownerTierMap.get(a.owner_id) ?? PLAN_TIER_RANK.FREE
+      const bTier = ownerTierMap.get(b.owner_id) ?? PLAN_TIER_RANK.FREE
+
+      // Different tiers: higher tier first
+      if (aTier !== bTier) {
+        return bTier - aTier
+      }
+
+      // Same tier: featured first
+      if (a.featured && !b.featured) return -1
+      if (!a.featured && b.featured) return 1
+
+      // Same tier and featured status: apply requested sort
+      switch (sortBy) {
+        case 'price-asc':
+          return (a.private_room_price || 0) - (b.private_room_price || 0)
+        case 'price-desc':
+          return (b.private_room_price || 0) - (a.private_room_price || 0)
+        case 'popular':
+          return (b.views || 0) - (a.views || 0)
+        case 'featured':
+        case 'date-desc':
+        default:
+          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      }
+    })
+
     return NextResponse.json({
-      data,
+      data: sortedData,
       pagination: {
         page,
         limit,
@@ -154,6 +226,53 @@ export async function POST(request: NextRequest) {
     const supabase = await createClient()
 
     const body = await request.json()
+
+    // 🔒 CRITICAL: Validate payment for additional properties
+    if (body.payment_status === 'paid') {
+      // Must have a payment_transaction_id
+      if (!body.payment_transaction_id) {
+        return NextResponse.json(
+          { error: 'Payment transaction ID required for paid properties' },
+          { status: 400 }
+        )
+      }
+
+      // Verify the payment exists in payment_logs and was successful
+      const { data: paymentLog, error: paymentError } = await supabase
+        .from('payment_logs')
+        .select('id, status, transaction_id')
+        .eq('transaction_id', body.payment_transaction_id)
+        .maybeSingle()
+
+      if (paymentError || !paymentLog) {
+        return NextResponse.json(
+          { error: 'Invalid payment transaction' },
+          { status: 400 }
+        )
+      }
+
+      if (paymentLog.status !== 'completed' && paymentLog.status !== 'success') {
+        return NextResponse.json(
+          { error: 'Payment not completed' },
+          { status: 400 }
+        )
+      }
+
+      // Verify the transaction hasn't been used for another property
+      const { data: existingProperty, error: existingError } = await supabase
+        .from('properties')
+        .select('id')
+        .eq('payment_transaction_id', body.payment_transaction_id)
+        .neq('id', body.id || '00000000-0000-0000-0000-000000000000') // Exclude current property if updating
+        .maybeSingle()
+
+      if (existingProperty) {
+        return NextResponse.json(
+          { error: 'Payment already used for another property' },
+          { status: 400 }
+        )
+      }
+    }
 
     const { data, error } = await supabase
       .from('properties')

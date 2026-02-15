@@ -36,7 +36,12 @@ export async function getAllUsers(): Promise<User[]> {
         throw new Error(`Failed to fetch users: ${error.message}`);
     }
 
-    return data as User[];
+    // Map database fields to User interface - compute verified from email_verified_at
+    return (data || []).map((user: any) => ({
+        ...user,
+        // A user is considered verified if either the verified flag is true OR email_verified_at is set
+        verified: user.verified === true || user.email_verified_at !== null
+    })) as User[];
 }
 
 /**
@@ -57,7 +62,10 @@ export async function updateUserStatus(userId: string, status: 'active' | 'suspe
 export async function verifyUser(userId: string): Promise<{ error: any }> {
     const { error } = await supabase
         .from('users')
-        .update({ verified: true })
+        .update({
+            verified: true,
+            email_verified_at: new Date().toISOString()
+        })
         .eq('id', userId);
 
     return { error };
@@ -77,12 +85,16 @@ export async function updateUserRole(userId: string, role: 'admin' | 'owner' | '
 
 /**
  * Update user profile data
+ * Note: Email cannot be changed through this function for security reasons
  */
 export async function updateUserProfile(userId: string, updates: Partial<User>): Promise<{ error: any }> {
     try {
+        // Remove email from updates to prevent email changes
+        const { email, ...safeUpdates } = updates
+
         const { error } = await supabase
             .from('users')
-            .update(updates)
+            .update(safeUpdates)
             .eq('id', userId)
 
         if (error) throw error

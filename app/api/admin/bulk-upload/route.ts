@@ -8,6 +8,11 @@ export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 export const maxDuration = 300 // 5 minutes for Vercel
 
+// Increase body size limit for Excel file uploads (prevents 413 Payload Too Large)
+export const bodyParser = {
+  sizeLimit: '10mb',
+}
+
 // ============================================================================
 // AMENITY MAPPING
 // ============================================================================
@@ -101,18 +106,20 @@ function generatePassword(): string {
 }
 
 function determineRoomType(row: Record<string, unknown>): string {
+    if (parsePrice(row['1RK'])) return '1RK'
     if (parsePrice(row['Private Room'])) return 'Single'
     if (parsePrice(row['Double Sharing'])) return 'Double'
-    if (parsePrice(row['Triple Sharing'])) return 'Triple'
+    if (parsePrice(row['Triple Sharing']) || parsePrice(row['TrippleSharing'])) return 'Triple'
     if (parsePrice(row['Four Sharing'])) return 'Four Sharing'
     return 'Single'
 }
 
 function getLowestPrice(row: Record<string, unknown>): number | null {
     const prices = [
+        parsePrice(row['1RK']),
         parsePrice(row['Private Room']),
         parsePrice(row['Double Sharing']),
-        parsePrice(row['Triple Sharing']),
+        parsePrice(row['Triple Sharing']) || parsePrice(row['TrippleSharing']),
         parsePrice(row['Four Sharing']),
     ].filter((p): p is number => p !== null)
 
@@ -291,6 +298,7 @@ export async function POST(request: NextRequest) {
                                                         name: ownerName,
                                                         phone: ownerPhone,
                                                         role: 'owner',
+                                                        email_verified_at: existingAuthUser.email_confirmed_at || new Date().toISOString(),
                                                     }, { onConflict: 'id' })
 
                                                     ownerCache.set(ownerEmail, { id: existingAuthUser.id, name: ownerName, phone: ownerPhone })
@@ -311,6 +319,7 @@ export async function POST(request: NextRequest) {
                                                 phone: ownerPhone,
                                                 role: 'owner',
                                                 verified: false,
+                                                email_verified_at: new Date().toISOString(),
                                             }, { onConflict: 'id' })
 
                                             ownerCache.set(ownerEmail, { id: authData.user.id, name: ownerName, phone: ownerPhone })
@@ -353,9 +362,10 @@ export async function POST(request: NextRequest) {
                                 owner_name: ownerName,
                                 owner_contact: ownerPhone,
 
+                                one_rk_price: parsePrice(row['1RK']),
                                 private_room_price: parsePrice(row['Private Room']),
                                 double_sharing_price: parsePrice(row['Double Sharing']),
-                                triple_sharing_price: parsePrice(row['Triple Sharing']),
+                                triple_sharing_price: parsePrice(row['Triple Sharing']) || parsePrice(row['TrippleSharing']),
                                 four_sharing_price: parsePrice(row['Four Sharing']),
                                 deposit: parsePrice(row['Deposit']),
 

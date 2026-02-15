@@ -133,6 +133,23 @@ export function GooglePlacesInput({
     }
   }
 
+  // Handle input focus - only show suggestions on explicit user interaction
+  const handleFocus = () => {
+    // Only show suggestions if user has typed something and we have results
+    // Don't auto-show on focus if the value hasn't changed
+    if (value && value.length >= 2 && suggestions.length > 0) {
+      setShowSuggestions(true)
+    }
+  }
+
+  // Handle input blur - hide suggestions after a short delay to allow click selection
+  const handleBlur = () => {
+    // Small delay to allow click events on suggestions to fire first
+    setTimeout(() => {
+      setShowSuggestions(false)
+    }, 200)
+  }
+
   // Clear input
   const handleClear = () => {
     onChange('')
@@ -170,9 +187,8 @@ export function GooglePlacesInput({
           ref={inputRef}
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          onFocus={() => {
-            if (suggestions.length > 0) setShowSuggestions(true)
-          }}
+          onFocus={handleFocus}
+          onBlur={handleBlur}
           placeholder={placeholder}
           className="pl-10 pr-10"
           autoComplete="off"

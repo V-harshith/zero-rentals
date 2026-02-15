@@ -7,50 +7,52 @@ import * as XLSX from "xlsx"
 // ============================================================================
 export async function GET() {
     try {
-        // Define template headers
+        // Define template headers (in exact order as per reference format)
         const headers = [
-            "PSN",                    // Unique Property Serial Number (required)
-            "Property Name",          // Property name/title (required)
-            "Email",                  // Owner email address (required)
-            "Owner Name",             // Owner full name (required)
-            "Owner Contact",          // Owner phone number (required)
+            "Country",                // Country (optional, defaults to India)
             "City",                   // City (required)
             "Area",                   // Area/Locality (required)
             "Locality",               // Specific locality (optional)
-            "Address",                // Full address (optional)
-            "Landmark",               // Nearby landmark (optional)
-            "Country",                // Country (optional, defaults to India)
             "PG's for",               // Target: Male/Female/Any (optional)
+            "Property Name",          // Property name/title (required)
+            "Owner Name",             // Owner full name (required)
+            "Owner Contact",          // Owner phone number (required)
+            "Landmark",               // Nearby landmark (optional)
+            "USP",                    // Unique selling points (optional)
+            "Facilities",             // Comma-separated amenities (optional)
             "Private Room",           // Price for private room (optional)
             "Double Sharing",         // Price for double sharing (optional)
             "Triple Sharing",         // Price for triple sharing (optional)
             "Four Sharing",           // Price for four sharing (optional)
             "Deposit",                // Security deposit amount (optional)
-            "Facilities",             // Comma-separated amenities (optional)
-            "USP",                    // Unique selling points (optional)
+            "Address",                // Full address (optional)
+            "PSN",                    // Unique Property Serial Number (required)
+            "Email",                  // Owner email address (required)
+            "1RK",                    // Price for 1RK (optional)
         ]
 
-        // Sample data row showing correct format
+        // Sample data row showing correct format (matching new column order)
         const sampleRow = {
-            "PSN": "PSN001",
-            "Property Name": "Sunrise PG for Gents",
-            "Email": "owner@example.com",
-            "Owner Name": "John Doe",
-            "Owner Contact": "9876543210",
+            "Country": "India",
             "City": "Bangalore",
             "Area": "Koramangala",
             "Locality": "5th Block",
-            "Address": "123, 4th Cross, 5th Block, Koramangala",
-            "Landmark": "Near Sony World Signal",
-            "Country": "India",
             "PG's for": "Gents/Male",
+            "Property Name": "Sunrise PG for Gents",
+            "Owner Name": "John Doe",
+            "Owner Contact": "9876543210",
+            "Landmark": "Near Sony World Signal",
+            "USP": "Homely food, 24/7 security, High speed internet",
+            "Facilities": "WiFi, AC, Food, Laundry, Parking, CCTV, Power Backup",
             "Private Room": 8000,
             "Double Sharing": 6000,
             "Triple Sharing": 4500,
             "Four Sharing": 3500,
             "Deposit": 15000,
-            "Facilities": "WiFi, AC, Food, Laundry, Parking, CCTV, Power Backup",
-            "USP": "Homely food, 24/7 security, High speed internet",
+            "Address": "123, 4th Cross, 5th Block, Koramangala",
+            "PSN": "PSN001",
+            "Email": "owner@example.com",
+            "1RK": 9000,
         }
 
         // Create workbook
@@ -60,28 +62,35 @@ export async function GET() {
         const instructionsData = [
             ["BULK IMPORT TEMPLATE - INSTRUCTIONS"],
             [],
+            ["COLUMN ORDER (must match exactly):"],
+            ["1. Country", "Defaults to 'India' if not provided"],
+            ["2. City", "City name (e.g., Bangalore, Hyderabad) - REQUIRED"],
+            ["3. Area", "Area/Locality name (e.g., Koramangala, Hitech City) - REQUIRED"],
+            ["4. Locality", "Specific locality within the area"],
+            ["5. PG's for", "Target audience: Male, Female, Gents, Ladies, Boys, Girls, or Any"],
+            ["6. Property Name", "Name of the property as it will appear on the site - REQUIRED"],
+            ["7. Owner Name", "Full name of the property owner - REQUIRED"],
+            ["8. Owner Contact", "Phone number with country code (e.g., 9876543210) - REQUIRED"],
+            ["9. Landmark", "Nearby landmark for easy location"],
+            ["10. USP", "Unique selling points or special features"],
+            ["11. Facilities", "Comma-separated amenities list"],
+            ["12. Private Room", "Monthly rent for private room (numbers only)"],
+            ["13. Double Sharing", "Monthly rent for double sharing (numbers only)"],
+            ["14. Triple Sharing", "Monthly rent for triple sharing (numbers only)"],
+            ["15. Four Sharing", "Monthly rent for four sharing (numbers only)"],
+            ["16. Deposit", "Security deposit amount (numbers only)"],
+            ["17. Address", "Complete street address"],
+            ["18. PSN", "Unique Property Serial Number (e.g., PSN001, PSN002) - REQUIRED"],
+            ["19. Email", "Valid owner email address (required for account creation) - REQUIRED"],
+            ["20. 1RK", "Monthly rent for 1RK (numbers only)"],
+            [],
             ["REQUIRED COLUMNS (Must be filled):"],
-            ["• PSN", "Unique Property Serial Number (e.g., PSN001, PSN002)"],
-            ["• Property Name", "Name of the property as it will appear on the site"],
-            ["• Email", "Valid owner email address (required for account creation)"],
-            ["• Owner Name", "Full name of the property owner"],
-            ["• Owner Contact", "Phone number with country code (e.g., 9876543210)"],
-            ["• City", "City name (e.g., Bangalore, Hyderabad)"],
-            ["• Area", "Area/Locality name (e.g., Koramangala, Hitech City)"],
+            ["• City, Area, Property Name, Owner Name, Owner Contact, PSN, Email"],
             [],
             ["OPTIONAL COLUMNS:"],
-            ["• Locality", "Specific locality within the area"],
-            ["• Address", "Complete street address"],
-            ["• Landmark", "Nearby landmark for easy location"],
-            ["• Country", "Defaults to 'India' if not provided"],
-            ["• PG's for", "Target audience: Male, Female, Gents, Ladies, Boys, Girls, or Any"],
-            ["• Private Room", "Monthly rent for private room (numbers only)"],
-            ["• Double Sharing", "Monthly rent for double sharing (numbers only)"],
-            ["• Triple Sharing", "Monthly rent for triple sharing (numbers only)"],
-            ["• Four Sharing", "Monthly rent for four sharing (numbers only)"],
-            ["• Deposit", "Security deposit amount (numbers only)"],
-            ["• Facilities", "Comma-separated amenities list"],
-            ["• USP", "Unique selling points or special features"],
+            ["• Country, Locality, PG's for, Landmark, USP, Facilities"],
+            ["• Private Room, Double Sharing, Triple Sharing, Four Sharing, 1RK"],
+            ["• Deposit, Address"],
             [],
             ["FACILITIES - Available Options (use comma-separated values):"],
             ["• WiFi / Wi-Fi / Internet", "• AC / Air Conditioning"],
@@ -95,7 +104,7 @@ export async function GET() {
             ["IMPORTANT NOTES:"],
             ["1. PSN must be unique across all imports"],
             ["2. Email must be a valid email format (not phone numbers)"],
-            ["3. At least one room price is required (Private, Double, Triple, or Four Sharing)"],
+            ["3. At least one room price is required (Private, Double, Triple, Four Sharing, or 1RK)"],
             ["4. Multiple properties can have the same owner (same email)"],
             ["5. New owners will receive login credentials via email"],
             ["6. Maximum 1000 properties per import"],
@@ -118,27 +127,28 @@ export async function GET() {
         const dataRows = [headers, sampleRow]
         const wsData = XLSX.utils.json_to_sheet(dataRows, { skipHeader: true })
 
-        // Set column widths for better readability
+        // Set column widths for better readability (matching new column order)
         const colWidths = [
-            { wch: 10 },  // PSN
-            { wch: 30 },  // Property Name
-            { wch: 25 },  // Email
-            { wch: 20 },  // Owner Name
-            { wch: 15 },  // Owner Contact
+            { wch: 12 },  // Country
             { wch: 15 },  // City
             { wch: 20 },  // Area
             { wch: 20 },  // Locality
-            { wch: 35 },  // Address
-            { wch: 25 },  // Landmark
-            { wch: 12 },  // Country
             { wch: 15 },  // PG's for
+            { wch: 30 },  // Property Name
+            { wch: 20 },  // Owner Name
+            { wch: 15 },  // Owner Contact
+            { wch: 25 },  // Landmark
+            { wch: 40 },  // USP
+            { wch: 50 },  // Facilities
             { wch: 14 },  // Private Room
             { wch: 16 },  // Double Sharing
             { wch: 16 },  // Triple Sharing
             { wch: 14 },  // Four Sharing
             { wch: 10 },  // Deposit
-            { wch: 50 },  // Facilities
-            { wch: 40 },  // USP
+            { wch: 35 },  // Address
+            { wch: 10 },  // PSN
+            { wch: 25 },  // Email
+            { wch: 10 },  // 1RK
         ]
         wsData['!cols'] = colWidths
 

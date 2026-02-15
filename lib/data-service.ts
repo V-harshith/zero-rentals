@@ -2,6 +2,7 @@ import { supabase } from '@/lib/supabase'
 import type { Property, User, SearchFilters, Inquiry, Payment } from '@/lib/types'
 import { mapPropertyFromDB, mapPropertyToDB, type PropertyRow } from '@/lib/data-mappers'
 import { PropertySchema } from '@/lib/validation'
+import { PLAN_TIER_RANK, getPlanTierRank } from '@/lib/constants'
 
 
 // ============================================================================
@@ -56,21 +57,34 @@ function buildSearchQuery(filters: SearchFilters) {
   }
 
   if (filters.roomType?.length) {
-    // Map display labels to database values
-    const roomTypeMap: Record<string, string> = {
-      'Private Room': 'Single',
-      '1 RK': '1RK',
-      '1 BHK': 'Single',
-      '2 BHK': 'Double',
-      '3 BHK': 'Triple',
-      '4 BHK': 'Four Sharing',
-      'Single': 'Single',
-      'Double': 'Double',
-      'Triple': 'Triple',
-      'Four Sharing': 'Four Sharing'
+    // Map display labels to database values and build price-based filter
+    // A property should appear if it has a price set for ANY of the selected room types
+    const roomTypeToPriceColumn: Record<string, string> = {
+      'Private Room': 'private_room_price',
+      '1 RK': 'private_room_price',
+      '1 BHK': 'private_room_price',
+      'Single': 'private_room_price',
+      'Double': 'double_sharing_price',
+      '2 BHK': 'double_sharing_price',
+      'Triple': 'triple_sharing_price',
+      '3 BHK': 'triple_sharing_price',
+      'Four Sharing': 'four_sharing_price',
+      '4 BHK': 'four_sharing_price'
     }
-    const mappedTypes = filters.roomType.map(t => roomTypeMap[t] || t)
-    query = query.in('room_type', mappedTypes)
+
+    // Get unique price columns for the selected room types
+    const priceColumns = filters.roomType
+      .map(t => roomTypeToPriceColumn[t])
+      .filter((col): col is string => col !== undefined)
+
+    // Remove duplicates
+    const uniquePriceColumns = [...new Set(priceColumns)]
+
+    if (uniquePriceColumns.length > 0) {
+      // Build OR condition: property matches if ANY of the price columns is not null
+      const orConditions = uniquePriceColumns.map(col => `${col}.not.is.null`)
+      query = query.or(orConditions.join(','))
+    }
   }
 
   if (filters.amenities?.length) {
@@ -160,43 +174,65 @@ async function incrementPropertyViews(id: string, currentViews: number) {
 
 export async function getProperties(): Promise<Property[]> {
   try {
-    // 🔥 CRITICAL FIX: Only show properties from owners with valid subscriptions
     const today = new Date().toISOString()
 
-    // Get owners with valid active subscriptions first
+    // Get owners with valid active subscriptions and their plan names
     const { data: validSubscribers, error: subError } = await supabase
       .from('subscriptions')
-      .select('user_id')
+      .select('user_id, plan_name')
       .eq('status', 'active')
       .gt('end_date', today)
 
     if (subError) {
       console.error('Error fetching valid subscriptions:', subError)
-      return []
     }
 
-    const validOwnerIds = validSubscribers?.map(s => s.user_id) || []
+    // Create a map of owner_id to plan tier rank
+    const ownerTierMap = new Map<string, number>()
+    validSubscribers?.forEach(s => {
+      const rank = getPlanTierRank(s.plan_name)
+      // Only update if higher rank (or not set yet)
+      const existingRank = ownerTierMap.get(s.user_id)
+      if (!existingRank || rank > existingRank) {
+        ownerTierMap.set(s.user_id, rank)
+      }
+    })
 
-    // If no valid subscribers, return empty (or handle free tier separately if needed)
-    if (validOwnerIds.length === 0) {
-      return []
-    }
-
+    // Get all active, available properties
     const { data, error } = await supabase
       .from('properties')
       .select('*, owner:users!owner_id(name, email, phone, avatar_url, verified)')
       .eq('status', 'active')
       .eq('availability', 'Available')
-      .in('owner_id', validOwnerIds)
       .order('created_at', { ascending: false })
-      .limit(20)
+      .limit(50)
 
     if (error) {
-      // Don't throw - return empty array to prevent app crash
+      console.error('Error fetching properties:', error)
       return []
     }
 
-    return ((data || []) as PropertyRow[]).map(mapPropertyFromDB)
+    const properties = (data || []) as PropertyRow[]
+
+    // Sort: Plan tier (highest first) -> Featured -> Created date
+    const sortedProperties = properties.sort((a, b) => {
+      const aTier = ownerTierMap.get(a.owner_id || '') ?? PLAN_TIER_RANK.FREE
+      const bTier = ownerTierMap.get(b.owner_id || '') ?? PLAN_TIER_RANK.FREE
+
+      // Different tiers: higher tier first
+      if (aTier !== bTier) {
+        return bTier - aTier
+      }
+
+      // Same tier: featured first
+      if (a.featured && !b.featured) return -1
+      if (!a.featured && b.featured) return 1
+
+      // Same tier and featured status: newest first
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    })
+
+    return sortedProperties.map(mapPropertyFromDB)
   } catch {
     return []
   }
@@ -204,43 +240,62 @@ export async function getProperties(): Promise<Property[]> {
 
 export async function getFeaturedProperties(limit = 6): Promise<Property[]> {
   try {
-    // 🔥 CRITICAL FIX: Only show properties from owners with valid subscriptions
     const today = new Date().toISOString()
 
-    // Get owners with valid active subscriptions first
+    // Get owners with valid active subscriptions and their plan names
     const { data: validSubscribers, error: subError } = await supabase
       .from('subscriptions')
-      .select('user_id')
+      .select('user_id, plan_name')
       .eq('status', 'active')
       .gt('end_date', today)
 
     if (subError) {
       console.error('Error fetching valid subscriptions:', subError)
-      return []
     }
 
-    const validOwnerIds = validSubscribers?.map(s => s.user_id) || []
+    // Create a map of owner_id to plan tier rank
+    const ownerTierMap = new Map<string, number>()
+    validSubscribers?.forEach(s => {
+      const rank = getPlanTierRank(s.plan_name)
+      // Only update if higher rank (or not set yet)
+      const existingRank = ownerTierMap.get(s.user_id)
+      if (!existingRank || rank > existingRank) {
+        ownerTierMap.set(s.user_id, rank)
+      }
+    })
 
-    // If no valid subscribers, return empty
-    if (validOwnerIds.length === 0) {
-      return []
-    }
-
+    // Get all featured properties
     const { data, error } = await supabase
       .from('properties')
       .select('*, owner:users!owner_id(name, email, phone, avatar_url, verified)')
       .eq('status', 'active')
       .eq('availability', 'Available')
       .eq('featured', true)
-      .in('owner_id', validOwnerIds)
       .order('created_at', { ascending: false })
-      .limit(limit)
+      .limit(limit * 2) // Fetch more to allow for sorting
 
     if (error) {
+      console.error('Error fetching featured properties:', error)
       return []
     }
 
-    return ((data || []) as PropertyRow[]).map(mapPropertyFromDB)
+    const properties = (data || []) as PropertyRow[]
+
+    // Sort: Plan tier (highest first) -> Created date
+    const sortedProperties = properties.sort((a, b) => {
+      const aTier = ownerTierMap.get(a.owner_id || '') ?? PLAN_TIER_RANK.FREE
+      const bTier = ownerTierMap.get(b.owner_id || '') ?? PLAN_TIER_RANK.FREE
+
+      // Different tiers: higher tier first
+      if (aTier !== bTier) {
+        return bTier - aTier
+      }
+
+      // Same tier: newest first
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    })
+
+    return sortedProperties.slice(0, limit).map(mapPropertyFromDB)
   } catch {
     return []
   }
@@ -294,6 +349,30 @@ export async function getPropertyById(id: string): Promise<Property | null> {
 
 export async function searchProperties(filters: SearchFilters): Promise<Property[]> {
   try {
+    const today = new Date().toISOString()
+
+    // Get owners with valid active subscriptions and their plan names
+    const { data: validSubscribers, error: subError } = await supabase
+      .from('subscriptions')
+      .select('user_id, plan_name')
+      .eq('status', 'active')
+      .gt('end_date', today)
+
+    if (subError) {
+      console.error('Error fetching valid subscriptions:', subError)
+    }
+
+    // Create a map of owner_id to plan tier rank
+    const ownerTierMap = new Map<string, number>()
+    validSubscribers?.forEach(s => {
+      const rank = getPlanTierRank(s.plan_name)
+      // Only update if higher rank (or not set yet)
+      const existingRank = ownerTierMap.get(s.user_id)
+      if (!existingRank || rank > existingRank) {
+        ownerTierMap.set(s.user_id, rank)
+      }
+    })
+
     const query = buildSearchQuery(filters)
     const { data, error } = await query
 
@@ -301,8 +380,28 @@ export async function searchProperties(filters: SearchFilters): Promise<Property
       return [] // Don't throw - return empty array
     }
 
-    const properties = (data as PropertyRow[]).map(mapPropertyFromDB)
-    return filterByPriceRange(properties, filters)
+    const properties = (data as PropertyRow[])
+
+    // Sort: Plan tier (highest first) -> Featured -> Created date
+    const sortedProperties = properties.sort((a, b) => {
+      const aTier = ownerTierMap.get(a.owner_id || '') ?? PLAN_TIER_RANK.FREE
+      const bTier = ownerTierMap.get(b.owner_id || '') ?? PLAN_TIER_RANK.FREE
+
+      // Different tiers: higher tier first
+      if (aTier !== bTier) {
+        return bTier - aTier
+      }
+
+      // Same tier: featured first
+      if (a.featured && !b.featured) return -1
+      if (!a.featured && b.featured) return 1
+
+      // Same tier and featured status: newest first
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    })
+
+    const mappedProperties = sortedProperties.map(mapPropertyFromDB)
+    return filterByPriceRange(mappedProperties, filters)
   } catch {
     return []
   }
@@ -421,15 +520,17 @@ export async function updateProperty(
     if (updates.preferredTenant) dbUpdates.preferred_tenant = updates.preferredTenant
 
     // Handle room prices - save all individual room prices
+    // 1RK has its own column (one_rk_price), separate from private_room_price (1BHK/Single)
     if (updates.roomPrices) {
-      if (updates.roomPrices['1rk'] !== undefined) dbUpdates.private_room_price = updates.roomPrices['1rk']
+      if (updates.roomPrices['1rk'] !== undefined) dbUpdates.one_rk_price = updates.roomPrices['1rk']
       if (updates.roomPrices.single !== undefined) dbUpdates.private_room_price = updates.roomPrices.single
       if (updates.roomPrices.double !== undefined) dbUpdates.double_sharing_price = updates.roomPrices.double
       if (updates.roomPrices.triple !== undefined) dbUpdates.triple_sharing_price = updates.roomPrices.triple
       if (updates.roomPrices.four !== undefined) dbUpdates.four_sharing_price = updates.roomPrices.four
     } else if (updates.price !== undefined) {
       // Legacy single-price fallback
-      if (updates.roomType === 'Single' || updates.roomType === '1RK') dbUpdates.private_room_price = updates.price
+      if (updates.roomType === '1RK') dbUpdates.one_rk_price = updates.price
+      else if (updates.roomType === 'Single') dbUpdates.private_room_price = updates.price
       else if (updates.roomType === 'Double') dbUpdates.double_sharing_price = updates.price
       else if (updates.roomType === 'Triple') dbUpdates.triple_sharing_price = updates.price
       else if (updates.roomType === 'Four Sharing') dbUpdates.four_sharing_price = updates.price

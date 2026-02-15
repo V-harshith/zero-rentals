@@ -148,9 +148,51 @@ export default function BulkImportPage() {
             if (res.ok) {
                 const data = await res.json()
                 setPreviewData(data)
+            } else {
+                const errorData = await res.json().catch(() => ({ error: "Failed to load preview" }))
+                toast.error(errorData.error || "Failed to load preview data")
+                // Set empty preview data so review step can still render
+                setPreviewData({
+                    job_id: jobId,
+                    status: "error",
+                    summary: {
+                        total_properties: 0,
+                        new_owners: 0,
+                        existing_owners_matched: 0,
+                        total_images: 0,
+                        matched_images: 0,
+                        properties_with_images: 0,
+                        properties_without_images: 0,
+                        orphaned_images: 0,
+                    },
+                    properties: [],
+                    psns_without_images: [],
+                    orphaned_images: [],
+                    new_owners_preview: [],
+                })
             }
         } catch (error) {
             console.error("Failed to load preview:", error)
+            toast.error("Failed to load preview data. Please try again.")
+            // Set empty preview data so review step can still render
+            setPreviewData({
+                job_id: jobId,
+                status: "error",
+                summary: {
+                    total_properties: 0,
+                    new_owners: 0,
+                    existing_owners_matched: 0,
+                    total_images: 0,
+                    matched_images: 0,
+                    properties_with_images: 0,
+                    properties_without_images: 0,
+                    orphaned_images: 0,
+                },
+                properties: [],
+                psns_without_images: [],
+                orphaned_images: [],
+                new_owners_preview: [],
+            })
         }
     }
 
@@ -298,6 +340,14 @@ export default function BulkImportPage() {
                                             <ExcelUploadStep
                                                 jobId={jobId}
                                                 onComplete={handleExcelComplete}
+                                                onCancel={() => {
+                                                    if (confirm("Cancel this import? All progress will be lost.")) {
+                                                        setJobId(null)
+                                                        setJob(null)
+                                                        setCurrentStep("excel")
+                                                        setCompletedSteps(new Set())
+                                                    }
+                                                }}
                                             />
                                         )}
 
@@ -306,16 +356,45 @@ export default function BulkImportPage() {
                                                 jobId={jobId}
                                                 onComplete={handleImagesComplete}
                                                 onBack={() => setCurrentStep("excel")}
+                                                onCancel={() => {
+                                                    if (confirm("Cancel this import? All progress will be lost.")) {
+                                                        setJobId(null)
+                                                        setJob(null)
+                                                        setCurrentStep("excel")
+                                                        setCompletedSteps(new Set())
+                                                    }
+                                                }}
+                                                onSkip={() => {
+                                                    // Skip image upload and go directly to review
+                                                    setCompletedSteps((prev) => new Set([...prev, "images"]))
+                                                    setCurrentStep("review")
+                                                    loadPreviewData()
+                                                }}
                                             />
                                         )}
 
-                                        {currentStep === "review" && previewData && (
-                                            <ReviewStep
-                                                jobId={jobId}
-                                                previewData={previewData}
-                                                onComplete={handleImportComplete}
-                                                onBack={() => setCurrentStep("images")}
-                                            />
+                                        {currentStep === "review" && (
+                                            previewData ? (
+                                                <ReviewStep
+                                                    jobId={jobId}
+                                                    previewData={previewData}
+                                                    onComplete={handleImportComplete}
+                                                    onBack={() => setCurrentStep("images")}
+                                                    onCancel={() => {
+                                                        if (confirm("Cancel this import? All progress will be lost.")) {
+                                                            setJobId(null)
+                                                            setJob(null)
+                                                            setCurrentStep("excel")
+                                                            setCompletedSteps(new Set())
+                                                        }
+                                                    }}
+                                                />
+                                            ) : (
+                                                <div className="flex flex-col items-center justify-center py-12">
+                                                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground mb-4" />
+                                                    <p className="text-muted-foreground">Loading preview data...</p>
+                                                </div>
+                                            )
                                         )}
 
                                         {currentStep === "results" && resultsData && (

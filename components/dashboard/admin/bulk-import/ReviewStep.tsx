@@ -24,9 +24,10 @@ interface ReviewStepProps {
     previewData: any
     onComplete: (data: any) => void
     onBack: () => void
+    onCancel?: () => void
 }
 
-export function ReviewStep({ jobId, previewData, onComplete, onBack }: ReviewStepProps) {
+export function ReviewStep({ jobId, previewData, onComplete, onBack, onCancel }: ReviewStepProps) {
     const [confirming, setConfirming] = useState(false)
     const [progress, setProgress] = useState(0)
     const [status, setStatus] = useState("")
@@ -34,6 +35,47 @@ export function ReviewStep({ jobId, previewData, onComplete, onBack }: ReviewSte
     const summary = previewData?.summary || {}
     const properties = previewData?.properties || []
     const newOwners = previewData?.new_owners_preview || []
+
+    // Show empty state if no properties
+    if (properties.length === 0) {
+        return (
+            <div className="space-y-6">
+                <div className="text-center">
+                    <h2 className="text-xl font-semibold mb-2">Review Import</h2>
+                    <p className="text-muted-foreground">
+                        No properties found to review
+                    </p>
+                </div>
+
+                <Alert variant="destructive" className="bg-red-50">
+                    <AlertTriangle className="h-4 w-4" />
+                    <AlertDescription>
+                        No valid properties were found for this import. Please go back and check your Excel file.
+                    </AlertDescription>
+                </Alert>
+
+                <div className="flex gap-3">
+                    <Button
+                        variant="outline"
+                        onClick={onBack}
+                        className="flex-1"
+                    >
+                        <ArrowLeft className="h-4 w-4 mr-2" />
+                        Back to Images
+                    </Button>
+                    {onCancel && (
+                        <Button
+                            variant="ghost"
+                            onClick={onCancel}
+                            className="text-muted-foreground"
+                        >
+                            Cancel
+                        </Button>
+                    )}
+                </div>
+            </div>
+        )
+    }
 
     const handleConfirm = async () => {
         setConfirming(true)
@@ -307,6 +349,17 @@ export function ReviewStep({ jobId, previewData, onComplete, onBack }: ReviewSte
                     <ArrowLeft className="h-4 w-4 mr-2" />
                     Back
                 </Button>
+
+                {onCancel && (
+                    <Button
+                        variant="ghost"
+                        onClick={onCancel}
+                        disabled={confirming}
+                        className="text-muted-foreground"
+                    >
+                        Cancel
+                    </Button>
+                )}
 
                 <Button
                     onClick={handleConfirm}

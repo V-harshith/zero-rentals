@@ -73,7 +73,7 @@ export default function PricingPage() {
       iconBg: "bg-gradient-to-br from-slate-400 to-slate-600",
       description: "Great for testing the waters",
       features: [
-        "3 property listings",
+        "1 property listing",
         "Max 10 photos per property",
         "Featured in search results",
         "Basic analytics dashboard",
@@ -92,7 +92,7 @@ export default function PricingPage() {
       iconBg: "bg-gradient-to-br from-yellow-400 via-yellow-500 to-amber-600",
       description: "Most popular for PG owners",
       features: [
-        "5 property listings",
+        "1 property listing",
         "Max 20 photos per property",
         "Top featured placement",
         "Advanced analytics & insights",
@@ -113,7 +113,7 @@ export default function PricingPage() {
       iconBg: "bg-gradient-to-br from-cyan-400 via-blue-500 to-indigo-600",
       description: "Best for professional PG chains",
       features: [
-        "10 property listings",
+        "1 property listing",
         "Max 30 photos per property",
         "Premium featured placement",
         "Complete analytics suite",
@@ -133,7 +133,7 @@ export default function PricingPage() {
       iconBg: "bg-gradient-to-br from-purple-500 via-pink-500 to-rose-500",
       description: "Ultimate plan for large businesses",
       features: [
-        "Unlimited property listings",
+        "1 property listing",
         "Max 50 photos per property",
         "Highest visibility",
         "Dedicated account manager",

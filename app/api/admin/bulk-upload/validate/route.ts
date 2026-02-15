@@ -16,7 +16,7 @@ const OPTIONAL_COLUMNS = [
     'Country', 'Locality', 'Landmark', 'Address', 'Email',
     "PG's For", "PG's for",
     'USP', 'Facilities',
-    'Private Room', 'Double Sharing', 'Triple Sharing', 'Four Sharing',
+    'Private Room', 'Double Sharing', 'Triple Sharing', 'TrippleSharing', 'Four Sharing',
     'Deposit', 'Location', 'PSN',
 ]
 
@@ -108,7 +108,7 @@ export async function POST(request: NextRequest) {
             }
 
             // Check pricing - at least one price should exist
-            const hasPrice = ['Private Room', 'Double Sharing', 'Triple Sharing', 'Four Sharing'].some(col => {
+            const hasPrice = ['Private Room', 'Double Sharing', 'Triple Sharing', 'TrippleSharing', 'Four Sharing'].some(col => {
                 const val = row[col]
                 if (val === null || val === undefined || val === '' || val === 'None' || val === '-') return false
                 const num = Number(val)

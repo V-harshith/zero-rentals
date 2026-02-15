@@ -62,18 +62,37 @@ export async function getTierFeatures(userId: string): Promise<TierFeatures> {
 /**
  * STRICTLY Checks if a user can post a new property.
  * Counts 'active' AND 'pending' properties to prevent abuse.
+ * For paid properties, only counts if payment_expires_at is in the future.
  */
 export async function checkPropertyLimit(userId: string): Promise<LimitCheckResult> {
     try {
-        // 1. Get Current Property Count (Active + Pending)
-        const { count, error: countError } = await supabase
+        const now = new Date().toISOString()
+
+        // 1. Get all active/pending properties for this user
+        const { data: properties, error: countError } = await supabase
             .from('properties')
-            .select('*', { count: 'exact', head: true })
+            .select('payment_status, payment_expires_at')
             .eq('owner_id', userId)
             .in('status', ['active', 'pending'])
 
         if (countError) throw countError
-        const currentCount = count || 0
+
+        // 2. Count properties with expiry validation:
+        // - 'included' properties: always count
+        // - 'paid' properties: only count if payment_expires_at > now
+        // - 'expired' properties: don't count
+        const currentCount = (properties || []).filter(p => {
+            // Included properties (first property in plan) always count
+            if (p.payment_status === 'included') return true
+
+            // Paid properties only count if not expired
+            if (p.payment_status === 'paid') {
+                return p.payment_expires_at && p.payment_expires_at > now
+            }
+
+            // Any other status (including 'expired') doesn't count
+            return false
+        }).length
 
         // 2. Get Active Subscription
         const today = new Date().toISOString()

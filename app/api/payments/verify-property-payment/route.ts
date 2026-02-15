@@ -59,6 +59,34 @@ export async function POST(request: NextRequest) {
             }
         )
 
+        // 🔒 CRITICAL: Check for replay attack - verify transaction_id hasn't been used
+        const { data: existingPayment } = await supabaseAdmin
+            .from('payment_logs')
+            .select('id, status')
+            .eq('transaction_id', razorpay_payment_id)
+            .maybeSingle()
+
+        if (existingPayment) {
+            return NextResponse.json(
+                { error: 'Payment already processed' },
+                { status: 400 }
+            )
+        }
+
+        // Also check if transaction_id is already used for another property
+        const { data: existingPropertyPayment } = await supabaseAdmin
+            .from('properties')
+            .select('id')
+            .eq('payment_transaction_id', razorpay_payment_id)
+            .maybeSingle()
+
+        if (existingPropertyPayment) {
+            return NextResponse.json(
+                { error: 'Payment already used for another property' },
+                { status: 400 }
+            )
+        }
+
         // Update payment log
         await supabaseAdmin
             .from('payment_logs')

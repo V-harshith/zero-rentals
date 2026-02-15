@@ -1,8 +1,8 @@
 "use client"
 
-import { useEffect, useState, useRef } from "react"
+import { useEffect, useState, useCallback } from "react"
 import { useAuth } from "@/lib/auth-context"
-import { useRouter } from "next/navigation"
+import { useFavorites } from "@/lib/favorites-context"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { PropertyCard } from "@/components/property-card"
@@ -22,23 +22,11 @@ interface Favorite {
 
 function FavoritesPage() {
   const { user, loading: authLoading } = useAuth()
-  const router = useRouter()
+  const { favoriteIds, isLoading: favoritesLoading, refreshFavorites } = useFavorites()
   const [favorites, setFavorites] = useState<Favorite[]>([])
   const [isLoading, setIsLoading] = useState(true)
-  const hasLoaded = useRef(false)
 
-  // Only fetch once on mount - use ref to prevent re-fetches
-  useEffect(() => {
-    // Skip if still loading auth or already loaded
-    if (authLoading || hasLoaded.current) return
-    
-    // Mark as loaded immediately to prevent re-runs
-    hasLoaded.current = true
-    
-    fetchFavorites()
-  }, [authLoading])
-
-  const fetchFavorites = async () => {
+  const fetchFavorites = useCallback(async () => {
     try {
       setIsLoading(true)
       const response = await fetch("/api/favorites")
@@ -55,13 +43,16 @@ function FavoritesPage() {
     } finally {
       setIsLoading(false)
     }
-  }
+  }, [])
 
-  // Handle favorite removal with optimistic UI update
-  const handleFavoriteRemoved = (propertyId: string) => {
-    // Optimistically remove from UI immediately
-    setFavorites(prev => prev.filter(fav => fav.property_id !== propertyId))
-  }
+  // Fetch favorites when user is available and when favoriteIds change
+  useEffect(() => {
+    // Wait for auth to finish loading and user to be available
+    if (authLoading || !user) return
+
+    fetchFavorites()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authLoading, user, favoriteIds])
 
   return (
     <div className="min-h-screen bg-muted/30">

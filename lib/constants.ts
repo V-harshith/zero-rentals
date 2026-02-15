@@ -4,11 +4,33 @@
  */
 export const PLAN_LIMITS = {
     FREE: 1,           // 1 property included
-    SILVER: 3,         // 3 properties included
-    GOLD: 5,           // 5 properties included
-    PLATINUM: 10,      // 10 properties included
-    ELITE: 999,        // Unlimited (practically)
+    SILVER: 1,         // 1 property included
+    GOLD: 1,           // 1 property included
+    PLATINUM: 1,       // 1 property included
+    ELITE: 1,          // 1 property included
 } as const
+
+/**
+ * Plan tier ranking for property sorting
+ * Higher number = higher priority in search results
+ */
+export const PLAN_TIER_RANK = {
+    'ELITE': 5,
+    'PLATINUM': 4,
+    'GOLD': 3,
+    'SILVER': 2,
+    'FREE': 1,
+} as const
+
+/**
+ * Get the tier rank for a plan name
+ * Handles case insensitivity and unknown plans
+ */
+export function getPlanTierRank(planName: string | null | undefined): number {
+    if (!planName) return PLAN_TIER_RANK.FREE
+    const normalizedName = planName.toUpperCase().trim()
+    return PLAN_TIER_RANK[normalizedName as keyof typeof PLAN_TIER_RANK] ?? PLAN_TIER_RANK.FREE
+}
 
 export const PLAN_NAMES = {
     SILVER: "Silver",

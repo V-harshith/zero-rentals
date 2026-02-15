@@ -23,9 +23,11 @@ interface ImageUploadStepProps {
     jobId: string
     onComplete: (data: any) => void
     onBack: () => void
+    onCancel?: () => void
+    onSkip?: () => void
 }
 
-export function ImageUploadStep({ jobId, onComplete, onBack }: ImageUploadStepProps) {
+export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }: ImageUploadStepProps) {
     const [files, setFiles] = useState<File[]>([])
     const [compressedFiles, setCompressedFiles] = useState<File[]>([])
     const [uploading, setUploading] = useState(false)
@@ -35,7 +37,14 @@ export function ImageUploadStep({ jobId, onComplete, onBack }: ImageUploadStepPr
     const [result, setResult] = useState<any>(null)
     const [error, setError] = useState<string | null>(null)
     const [compressionStats, setCompressionStats] = useState<{ original: number; compressed: number } | null>(null)
+    const [uploadComplete, setUploadComplete] = useState(false)
+    const [warnings, setWarnings] = useState<string[]>([])
     const folderInputRef = useRef<HTMLInputElement>(null)
+
+    // Maximum recommended images per PSN
+    const MAX_IMAGES_PER_PSN = 10
+    // Hard limit for total images
+    const MAX_TOTAL_IMAGES = 500
 
     // Compress images before upload (max 2MB)
     const compressImages = async (imageFiles: File[]): Promise<File[]> => {
@@ -106,6 +115,38 @@ export function ImageUploadStep({ jobId, onComplete, onBack }: ImageUploadStepPr
         setError(null)
         setProgress(0)
         setCompressionStats(null)
+        setWarnings([])
+
+        // Pre-upload validation: Check image counts per PSN
+        const psnCounts = imageFiles.reduce((acc, file) => {
+            const path = file.webkitRelativePath || file.name
+            const parts = path.split(/[/\\]/)
+            // Use second-to-last part (folder name containing images) - matches server
+            const psn = parts.length >= 2 ? parts[parts.length - 2] : null
+
+            // Accept alphanumeric PSNs (not just digits) to match server regex /^[a-zA-Z0-9-_]+$/
+            if (psn && /^[a-zA-Z0-9-_]+$/i.test(psn)) {
+                acc[psn] = (acc[psn] || 0) + 1
+            }
+            return acc
+        }, {} as Record<string, number>)
+
+        const psnWarnings: string[] = []
+        for (const [psn, count] of Object.entries(psnCounts)) {
+            if (count > MAX_IMAGES_PER_PSN) {
+                psnWarnings.push(
+                    `Property ${psn} has ${count} images (max ${MAX_IMAGES_PER_PSN} recommended). Only first ${MAX_IMAGES_PER_PSN} will be used.`
+                )
+            }
+        }
+
+        if (psnWarnings.length > 0) {
+            setWarnings(psnWarnings)
+            toast.warning(`${psnWarnings.length} propert${psnWarnings.length === 1 ? 'y' : 'ies'} exceed the recommended image limit`, {
+                description: "Only the first 10 images per property will be used",
+                duration: 6000,
+            })
+        }
 
         // Compress images
         setCompressing(true)
@@ -192,6 +233,11 @@ export function ImageUploadStep({ jobId, onComplete, onBack }: ImageUploadStepPr
                                 setStatus(data.status)
                             }
 
+                            // Handle warnings from API response
+                            if (data.warnings && data.warnings.length > 0) {
+                                setWarnings(data.warnings)
+                            }
+
                             if (data.completed || data.progress === 100) {
                                 setResult(data)
 
@@ -222,10 +268,9 @@ export function ImageUploadStep({ jobId, onComplete, onBack }: ImageUploadStepPr
                                     })
                                 }
 
-                                // Auto-advance after delay (give time to read notifications)
-                                setTimeout(() => {
-                                    onComplete(data)
-                                }, 2000)
+                                // Mark upload as complete - let user click Next to proceed
+                                setUploadComplete(true)
+                                setResult(data)
                             }
                         } catch (e: any) {
                             console.error("Parse error:", e)
@@ -249,8 +294,16 @@ export function ImageUploadStep({ jobId, onComplete, onBack }: ImageUploadStepPr
         setError(null)
         setProgress(0)
         setStatus("")
+        setUploadComplete(false)
+        setWarnings([])
         if (folderInputRef.current) {
             folderInputRef.current.value = ""
+        }
+    }
+
+    const handleProceed = () => {
+        if (result) {
+            onComplete(result)
         }
     }
 
@@ -336,14 +389,30 @@ export function ImageUploadStep({ jobId, onComplete, onBack }: ImageUploadStepPr
                             <p className="text-sm font-medium mb-2">Detected PSN folders:</p>
                             <div className="flex flex-wrap gap-2">
                                 {psnList.slice(0, 10).map(psn => (
-                                    <Badge key={psn} variant="outline">
+                                    <Badge key={psn} variant="outline" className={psnInfo[psn] > MAX_IMAGES_PER_PSN ? "border-yellow-500 text-yellow-700 bg-yellow-50" : ""}>
                                         {psn} ({psnInfo[psn]} imgs)
+                                        {psnInfo[psn] > MAX_IMAGES_PER_PSN && " ⚠"}
                                     </Badge>
                                 ))}
                                 {psnList.length > 10 && (
                                     <Badge variant="outline">+{psnList.length - 10} more</Badge>
                                 )}
                             </div>
+                        </div>
+                    )}
+
+                    {/* Pre-upload Warnings */}
+                    {warnings.length > 0 && !uploadComplete && (
+                        <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded">
+                            <p className="text-sm font-medium text-yellow-800 mb-2 flex items-center gap-2">
+                                <AlertTriangle className="h-4 w-4" />
+                                Image Limit Warnings:
+                            </p>
+                            <ul className="text-xs text-yellow-700 space-y-1">
+                                {warnings.map((warning, idx) => (
+                                    <li key={idx}>• {warning}</li>
+                                ))}
+                            </ul>
                         </div>
                     )}
                 </div>
@@ -420,6 +489,19 @@ export function ImageUploadStep({ jobId, onComplete, onBack }: ImageUploadStepPr
                             </p>
                         </div>
                     )}
+
+                    {warnings.length > 0 && (
+                        <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded">
+                            <p className="text-sm font-medium text-yellow-800 mb-2">
+                                ⚠ Image Limit Warnings:
+                            </p>
+                            <ul className="text-xs text-yellow-700 space-y-1">
+                                {warnings.map((warning, idx) => (
+                                    <li key={idx}>• {warning}</li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
                 </div>
             )}
 
@@ -451,7 +533,7 @@ export function ImageUploadStep({ jobId, onComplete, onBack }: ImageUploadStepPr
             )}
 
             {/* Action Buttons */}
-            <div className="flex gap-3">
+            <div className="flex flex-wrap gap-3">
                 <Button
                     variant="outline"
                     onClick={onBack}
@@ -461,7 +543,18 @@ export function ImageUploadStep({ jobId, onComplete, onBack }: ImageUploadStepPr
                     Back
                 </Button>
 
-                {files.length > 0 && !result && (
+                {onCancel && (
+                    <Button
+                        variant="ghost"
+                        onClick={onCancel}
+                        disabled={uploading || compressing}
+                        className="text-muted-foreground"
+                    >
+                        Cancel
+                    </Button>
+                )}
+
+                {files.length > 0 && !uploadComplete && (
                     <Button
                         onClick={handleUpload}
                         disabled={uploading || compressing || (compressedFiles.length === 0 && files.length === 0)}
@@ -483,6 +576,27 @@ export function ImageUploadStep({ jobId, onComplete, onBack }: ImageUploadStepPr
                                 Upload {compressedFiles.length || files.length} Images
                             </>
                         )}
+                    </Button>
+                )}
+
+                {uploadComplete && result && (
+                    <Button
+                        onClick={handleProceed}
+                        className="flex-1 gap-2"
+                    >
+                        Next: Review Import
+                        <ArrowRight className="h-4 w-4" />
+                    </Button>
+                )}
+
+                {!uploadComplete && files.length === 0 && onSkip && (
+                    <Button
+                        variant="outline"
+                        onClick={onSkip}
+                        disabled={uploading || compressing}
+                        className="flex-1"
+                    >
+                        Skip Images
                     </Button>
                 )}
             </div>

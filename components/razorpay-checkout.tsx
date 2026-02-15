@@ -57,16 +57,31 @@ export function RazorpayCheckout({
                 throw new Error("Razorpay SDK failed to load. Check your internet connection.")
             }
 
-            // 3. Open Razorpay Modal
+            // 3. Check if Razorpay is available
+            if (typeof window.Razorpay !== 'function') {
+                throw new Error("Razorpay SDK not initialized. Please refresh and try again.")
+            }
+
+            // 4. Check key is configured
+            const razorpayKey = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID
+            if (!razorpayKey) {
+                throw new Error("Payment gateway key not configured. Please contact support.")
+            }
+
+            // 5. Open Razorpay Modal
             const options = {
-                key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
-                amount: order.amount,
+                key: razorpayKey,
+                amount: Number(order.amount),
                 currency: order.currency,
                 name: "ZeroRentals",
                 description: `${planName} Plan - ${duration}`,
                 image: "/zerorentals-logo.png",
                 order_id: order.id,
-                handler: async function (response: any) {
+                handler: async function (response: {
+                    razorpay_payment_id: string;
+                    razorpay_order_id: string;
+                    razorpay_signature: string;
+                }) {
                     try {
                         const fulfillResult = await fulfillSubscriptionAction({
                             userId: user.id,
@@ -99,7 +114,7 @@ export function RazorpayCheckout({
                 },
             }
 
-            const paymentObject = new (window as any).Razorpay(options)
+            const paymentObject = new window.Razorpay(options)
             paymentObject.open()
 
         } catch (error: any) {

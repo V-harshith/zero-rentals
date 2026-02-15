@@ -25,6 +25,10 @@ const nextConfig = {
   experimental: {
     optimizeCss: true,
     optimizePackageImports: ['lucide-react', '@radix-ui/react-icons'],
+    // Increase body size limit for file uploads (prevents 413 Payload Too Large)
+    serverActions: {
+      bodySizeLimit: '10mb',
+    },
   },
   // SECURITY: Add security headers
   async headers() {

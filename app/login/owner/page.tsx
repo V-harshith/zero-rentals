@@ -53,7 +53,7 @@ export default function OwnerLoginPage() {
             await login(email, password)
         } catch (error: any) {
             console.error("Login failed:", error)
-            if (error.message?.includes("verify your email")) {
+            if (error.message?.includes("verify your email") || error.message === 'EMAIL_NOT_VERIFIED') {
                 toast.error("Email not verified", {
                     description: "Please check your inbox or resend the verification email.",
                     action: {

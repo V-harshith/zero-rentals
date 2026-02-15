@@ -43,22 +43,24 @@ export function FavoritesProvider({ children }: { children: React.ReactNode }) {
   const [isSyncing, setIsSyncing] = useState(false)
   const [syncQueue, setSyncQueue] = useState<PendingAction[]>([])
   const syncTimerRef = useRef<NodeJS.Timeout | undefined>(undefined)
-  const hasFetchedRef = useRef(false)
+  const hasFetchedRef = useRef<string | false>(false)
 
-  // Load from cache on mount
+  // Load from cache and fetch favorites when user is available
   useEffect(() => {
-    const cached = loadFromCache()
-    if (cached && cached.userId === user?.id) {
-      setFavoriteIds(new Set(cached.ids))
-      setFavoriteRecords(new Map(cached.records || []))
-    }
-  }, [])
+    // Only proceed if we have a logged-in tenant user
+    if (user?.role === "tenant") {
+      // Try to load from cache first for immediate UI display
+      const cached = loadFromCache()
+      if (cached && cached.userId === user.id) {
+        setFavoriteIds(new Set(cached.ids))
+        setFavoriteRecords(new Map(cached.records || []))
+      }
 
-  // Fetch favorites when user logs in
-  useEffect(() => {
-    if (user?.role === "tenant" && !hasFetchedRef.current) {
-      hasFetchedRef.current = true
-      loadFavorites()
+      // Always fetch fresh data from server (if not already fetched for this user)
+      if (!hasFetchedRef.current || hasFetchedRef.current !== user.id) {
+        hasFetchedRef.current = user.id
+        loadFavorites()
+      }
     } else if (!user) {
       // Clear on logout
       hasFetchedRef.current = false

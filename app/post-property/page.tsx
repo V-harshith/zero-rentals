@@ -52,6 +52,22 @@ const INITIAL_DATA: FormData = {
   images: []
 }
 
+// Load Razorpay script
+const loadScript = (src: string) => {
+  return new Promise((resolve) => {
+    const existingScript = document.querySelector(`script[src="${src}"]`);
+    if (existingScript) {
+      resolve(true);
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = src;
+    script.onload = () => resolve(true);
+    script.onerror = () => resolve(false);
+    document.body.appendChild(script);
+  });
+};
+
 function PostPropertyPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -226,30 +242,49 @@ function PostPropertyPage() {
 
   const checkSubscriptionAndLimit = async (userId: string) => {
     try {
+      const now = new Date().toISOString()
+
       // 1. Check for active subscription
       const { data: subscription } = await supabase
         .from('subscriptions')
-        .select('status, plan_name')
+        .select('status, plan_name, properties_limit')
         .eq('user_id', userId)
         .eq('status', 'active')
-        .gt('end_date', new Date().toISOString())
+        .gt('end_date', now)
         .maybeSingle()
 
       setHasSubscription(!!subscription)
 
-      // 2. Count existing properties (for all users)
-      const { count, error } = await supabase
+      // 2. Count existing properties with payment expiry check:
+      //    - 'included' properties: always count toward limit
+      //    - 'paid' properties: only count if payment_expires_at > now
+      //    - 'expired' properties: don't count
+      const { data: properties, error } = await supabase
         .from('properties')
-        .select('*', { count: 'exact', head: true })
+        .select('payment_status, payment_expires_at')
         .eq('owner_id', userId)
-        .neq('status', 'deleted')
+        .in('status', ['active', 'pending'])
 
       if (error) {
         console.error("Error checking property count:", error)
         return
       }
 
-      setExistingPropertyCount(count || 0)
+      // Count properties with expiry validation
+      const validPropertyCount = (properties || []).filter(p => {
+        // Included properties (first property in plan) always count
+        if (p.payment_status === 'included') return true
+
+        // Paid properties only count if not expired
+        if (p.payment_status === 'paid') {
+          return p.payment_expires_at && p.payment_expires_at > now
+        }
+
+        // Any other status doesn't count
+        return false
+      }).length
+
+      setExistingPropertyCount(validPropertyCount)
 
       // 3. Enforce business logic:
       //    - First property: MUST have subscription (redirect to pricing)
@@ -261,8 +296,9 @@ function PostPropertyPage() {
           return
         }
 
-        // Has subscription but already has 1+ properties → show payment modal for addon
-        if ((count || 0) >= 1) {
+        // Has subscription but already at limit → show payment modal for addon
+        const propertyLimit = subscription?.properties_limit || 1
+        if (validPropertyCount >= propertyLimit) {
           setShowPaymentModal(true)
         }
         // Has subscription and 0 properties → allow to post (first property included)
@@ -873,7 +909,22 @@ function PostPropertyPage() {
                       if (!orderRes.ok) {
                         throw new Error(orderData.error || 'Failed to create order')
                       }
-                      
+
+                      // Load Razorpay script
+                      const scriptLoaded = await loadScript("https://checkout.razorpay.com/v1/checkout.js");
+                      if (!scriptLoaded) {
+                        toast.error("Failed to load payment gateway. Please check your internet connection.");
+                        setIsProcessingPayment(false);
+                        return;
+                      }
+
+                      // Check if Razorpay is available
+                      if (typeof window.Razorpay !== 'function') {
+                        toast.error("Payment gateway not available. Please refresh and try again.");
+                        setIsProcessingPayment(false);
+                        return;
+                      }
+
                       // Initialize Razorpay
                       const options = {
                         key: orderData.keyId,
@@ -883,38 +934,45 @@ function PostPropertyPage() {
                         description: 'Additional Property Listing',
                         order_id: orderData.orderId,
                         handler: async function (response: any) {
-                          // Verify payment
-                          const verifyRes = await fetch('/api/payments/verify-property-payment', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                              razorpay_order_id: response.razorpay_order_id,
-                              razorpay_payment_id: response.razorpay_payment_id,
-                              razorpay_signature: response.razorpay_signature,
-                              plan: selectedPlan,
-                              days: orderData.days
+                          try {
+                            // Verify payment
+                            const verifyRes = await fetch('/api/payments/verify-property-payment', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({
+                                razorpay_order_id: response.razorpay_order_id,
+                                razorpay_payment_id: response.razorpay_payment_id,
+                                razorpay_signature: response.razorpay_signature,
+                                plan: selectedPlan,
+                                days: orderData.days
+                              })
                             })
-                          })
-                          const verifyData = await verifyRes.json()
-                          
-                          if (verifyData.success) {
-                            setPropertyPayment(verifyData.propertyPayment)
-                            setShowPaymentModal(false)
-                            toast.success('Payment successful! You can now post your property.')
-                          } else {
-                            toast.error('Payment verification failed')
+                            const verifyData = await verifyRes.json()
+
+                            if (verifyData.success) {
+                              setPropertyPayment(verifyData.propertyPayment)
+                              setShowPaymentModal(false)
+                              toast.success('Payment successful! You can now post your property.')
+                            } else {
+                              toast.error('Payment verification failed: ' + (verifyData.error || 'Unknown error'))
+                            }
+                          } catch (error: any) {
+                            console.error('Payment verification error:', error)
+                            toast.error('Payment verification failed: ' + error.message)
+                          } finally {
+                            setIsProcessingPayment(false)
                           }
-                          setIsProcessingPayment(false)
                         },
                         modal: {
                           ondismiss: function() {
                             setIsProcessingPayment(false)
+                            toast.info('Payment cancelled. You can try again when ready.')
                           }
                         },
                         theme: { color: '#4F46E5' }
                       }
                       
-                      const razorpay = new (window as any).Razorpay(options)
+                      const razorpay = new window.Razorpay(options)
                       razorpay.open()
                     } catch (error: any) {
                       toast.error(error.message || 'Payment failed')

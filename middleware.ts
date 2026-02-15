@@ -8,7 +8,11 @@ export async function middleware(request: NextRequest) {
   const { response, user, supabase } = await updateSession(request)
 
   const path = request.nextUrl.pathname
-  const isAuthRoute = path.startsWith('/login') || path.startsWith('/register')
+  const isAuthRoute = path.startsWith('/login') ||
+                      path.startsWith('/register') ||
+                      path.startsWith('/reset-password') ||
+                      path.startsWith('/forgot-password') ||
+                      path.startsWith('/auth/')
   const isAdminRoute = path.startsWith('/dashboard/admin') || path.startsWith('/api/admin')
   const isOwnerRoute = path.startsWith('/dashboard/owner') || path.startsWith('/property/add') || path.startsWith('/property/edit')
   const isProtectedRoute = isAdminRoute || isOwnerRoute || path.startsWith('/dashboard/tenant') || path.startsWith('/profile')

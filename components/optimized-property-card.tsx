@@ -40,7 +40,7 @@ export function OptimizedPropertyCard({ property, index = 0, priority = false }:
         >
             <Card className="overflow-hidden h-full flex flex-col hover:shadow-2xl transition-all duration-300 group">
                 {/* Image Container */}
-                <div className="relative h-48 overflow-hidden bg-gray-200">
+                <div className="relative h-48 w-full overflow-hidden bg-gray-200">
                     {/* Blur Placeholder */}
                     {!imageLoaded && (
                         <div className="absolute inset-0 bg-gradient-to-br from-gray-200 to-gray-300 animate-pulse" />

@@ -48,8 +48,47 @@ export default function AdminLoginPage() {
         e.preventDefault()
         setIsLoading(true)
 
-        await login(email, password)
-        setIsLoading(false)
+        try {
+            await login(email, password)
+        } catch (error: any) {
+            console.error("Login failed:", error)
+
+            if (error.message?.includes('verify your email') || error.message === 'EMAIL_NOT_VERIFIED') {
+                toast.error("Email not verified", {
+                    description: "Please check your inbox or resend the verification email.",
+                    action: {
+                        label: "Resend Email",
+                        onClick: async () => {
+                            const toastId = toast.loading("Sending verification email...")
+                            try {
+                                const res = await fetch('/api/auth/resend-verification', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ email })
+                                })
+                                const data = await res.json()
+
+                                if (!res.ok) {
+                                    if (data.message === 'Email already verified') {
+                                        toast.success("Email already verified! Please login.", { id: toastId })
+                                        return
+                                    }
+                                    throw new Error(data.error || "Failed to send email")
+                                }
+
+                                toast.success("Verification email sent!", { id: toastId })
+                            } catch (err: any) {
+                                toast.error(err.message, { id: toastId })
+                            }
+                        }
+                    }
+                })
+            } else {
+                toast.error(error.message || "Login failed")
+            }
+        } finally {
+            setIsLoading(false)
+        }
     }
 
     return (

@@ -190,13 +190,10 @@ async function fetchUserProfile(userId: string) {
 }
 
 function validateUserStatus(userData: any) {
-  // Relaxing verification check for easier dev experience
-  // In production, we should enforce this based on project requirements
-  /*
+  // Enforce email verification check
   if (!userData.email_verified_at) {
     throw new Error('EMAIL_NOT_VERIFIED')
   }
-  */
 
   if (userData.status !== 'active') {
     throw new Error('Your account has been suspended. Please contact support.')

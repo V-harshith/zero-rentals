@@ -50,7 +50,7 @@ export function PropertyCard({ property, showFavorite = true, priority = false }
             <Card className="group hover:shadow-xl transition-all duration-300 hover:-translate-y-1 cursor-pointer h-full flex flex-col overflow-hidden">
                 <CardContent className="p-0 flex flex-col h-full">
                     {/* Image */}
-                    <div className="relative h-48 w-full bg-gray-200 shrink-0">
+                    <div className="relative h-48 w-full bg-gray-200 shrink-0 overflow-hidden">
                         {property?.images && property.images.length > 0 ? (
                             <Image
                                 src={property.images[0]}
@@ -148,7 +148,31 @@ export function PropertyCard({ property, showFavorite = true, priority = false }
                                 </div>
                                 <div className="text-xs text-muted-foreground">per month</div>
                             </div>
-                            <Badge variant="outline">{property.roomType}</Badge>
+                            <div className="flex flex-wrap gap-1 justify-end">
+                                {property.roomPrices?.['1rk'] && (
+                                    <Badge variant="outline">1RK</Badge>
+                                )}
+                                {property.roomPrices?.single && !property.roomPrices?.['1rk'] && (
+                                    <Badge variant="outline">
+                                        {property.propertyType === 'Rent' ? '1BHK' : 'Single'}
+                                    </Badge>
+                                )}
+                                {property.roomPrices?.double && (
+                                    <Badge variant="outline">
+                                        {property.propertyType === 'Rent' ? '2BHK' : 'Double'}
+                                    </Badge>
+                                )}
+                                {property.roomPrices?.triple && (
+                                    <Badge variant="outline">
+                                        {property.propertyType === 'Rent' ? '3BHK' : 'Triple'}
+                                    </Badge>
+                                )}
+                                {property.roomPrices?.four && (
+                                    <Badge variant="outline">
+                                        {property.propertyType === 'Rent' ? '4BHK+' : 'Four'}
+                                    </Badge>
+                                )}
+                            </div>
                         </div>
 
                         {/* Amenities */}

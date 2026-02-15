@@ -5,6 +5,11 @@ import { getCurrentUser } from '@/lib/auth'
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
+// Increase body size limit for image uploads (prevents 413 Payload Too Large)
+export const bodyParser = {
+  sizeLimit: '10mb',
+}
+
 export async function POST(request: NextRequest) {
   try {
     const user = await getCurrentUser()

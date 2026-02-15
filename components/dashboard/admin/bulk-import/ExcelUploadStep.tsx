@@ -12,19 +12,22 @@ import {
     Loader2,
     X,
     Download,
+    ArrowRight,
 } from "lucide-react"
 import { toast } from "sonner"
 
 interface ExcelUploadStepProps {
     jobId: string
     onComplete: (data: any) => void
+    onCancel?: () => void
 }
 
-export function ExcelUploadStep({ jobId, onComplete }: ExcelUploadStepProps) {
+export function ExcelUploadStep({ jobId, onComplete, onCancel }: ExcelUploadStepProps) {
     const [file, setFile] = useState<File | null>(null)
     const [uploading, setUploading] = useState(false)
     const [result, setResult] = useState<any>(null)
     const [error, setError] = useState<string | null>(null)
+    const [canProceed, setCanProceed] = useState(false)
     const fileInputRef = useRef<HTMLInputElement>(null)
 
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -89,10 +92,8 @@ export function ExcelUploadStep({ jobId, onComplete }: ExcelUploadStepProps) {
                     })
                 }
 
-                // Auto-advance after delay to allow reading notifications
-                setTimeout(() => {
-                    onComplete(data)
-                }, 2000)
+                // Allow user to proceed - don't auto-advance
+                setCanProceed(true)
             } else {
                 toast.error("No valid properties found in Excel", {
                     description: data.errors?.length > 0 ? `Found ${data.errors.length} validation errors` : "Check required columns",
@@ -111,8 +112,15 @@ export function ExcelUploadStep({ jobId, onComplete }: ExcelUploadStepProps) {
         setFile(null)
         setResult(null)
         setError(null)
+        setCanProceed(false)
         if (fileInputRef.current) {
             fileInputRef.current.value = ""
+        }
+    }
+
+    const handleProceed = () => {
+        if (result) {
+            onComplete(result)
         }
     }
 
@@ -315,6 +323,30 @@ export function ExcelUploadStep({ jobId, onComplete }: ExcelUploadStepProps) {
                     )}
                 </Button>
             )}
+
+            {/* Navigation Buttons */}
+            <div className="flex gap-3">
+                {onCancel && (
+                    <Button
+                        variant="outline"
+                        onClick={onCancel}
+                        disabled={uploading}
+                        className="flex-1"
+                    >
+                        Cancel Import
+                    </Button>
+                )}
+                {canProceed && result && (
+                    <Button
+                        onClick={handleProceed}
+                        size="lg"
+                        className="flex-1 gap-2"
+                    >
+                        Next: Upload Images
+                        <ArrowRight className="h-4 w-4" />
+                    </Button>
+                )}
+            </div>
         </div>
     )
 }

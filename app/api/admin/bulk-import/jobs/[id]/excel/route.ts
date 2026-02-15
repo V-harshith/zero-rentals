@@ -89,16 +89,57 @@ function parsePrice(value: unknown): number | null {
 }
 
 function determineRoomType(row: Record<string, unknown>): string {
-    if (parsePrice(row['Private Room'])) return 'Single'
-    if (parsePrice(row['Double Sharing'])) return 'Double'
-    // Handle typo in Excel: "TrippleSharing" (3 p's) vs "Triple Sharing" (correct)
-    if (parsePrice(row['Triple Sharing']) || parsePrice(row['TrippleSharing'])) return 'Triple'
-    if (parsePrice(row['Four Sharing'])) return 'Four Sharing'
+    if (parsePrice(getColumnValue(row, COLUMN_NAMES.ONE_RK))) return '1RK'
+    if (parsePrice(getColumnValue(row, COLUMN_NAMES.PRIVATE_ROOM))) return 'Single'
+    if (parsePrice(getColumnValue(row, COLUMN_NAMES.DOUBLE_SHARING))) return 'Double'
+    if (parsePrice(getColumnValue(row, COLUMN_NAMES.TRIPLE_SHARING))) return 'Triple'
+    if (parsePrice(getColumnValue(row, COLUMN_NAMES.FOUR_SHARING))) return 'Four Sharing'
     return 'Single'
 }
 
 function generatePassword(): string {
     return crypto.randomBytes(8).toString('base64url').slice(0, 12) + '!A1'
+}
+
+// ============================================================================
+// COLUMN MAPPING - Support both old and new Excel formats
+// ============================================================================
+
+/**
+ * Helper function to get values from multiple possible column names.
+ * Returns the first non-empty value found, or undefined if none match.
+ */
+function getColumnValue(row: Record<string, unknown>, possibleNames: string[]): unknown {
+    for (const name of possibleNames) {
+        if (row[name] !== undefined && row[name] !== null && row[name] !== '') {
+            return row[name]
+        }
+    }
+    return undefined
+}
+
+// Column name mappings for backward compatibility
+const COLUMN_NAMES = {
+    PSN: ['PSN', 'psn'],
+    PROPERTY_NAME: ['Property Name', 'title', 'property_name', 'name'],
+    EMAIL: ['Email', 'email', 'owner_email'],
+    OWNER_NAME: ['Owner Name', 'owner_name', 'ownerName'],
+    OWNER_CONTACT: ['Owner Contact', 'owner_contact', 'ownerContact', 'phone'],
+    CITY: ['City', 'city'],
+    AREA: ['Area', 'area', 'locality'],
+    ADDRESS: ['Address', 'address', 'street_address'],
+    COUNTRY: ['Country', 'country'],
+    LOCALITY: ['Locality', 'locality'],
+    LANDMARK: ['Landmark', 'landmark'],
+    USP: ['USP', 'usp'],
+    FACILITIES: ['Facilities', 'facilities'],
+    PG_FOR: ["PG's for", "PG's For", "pg_for", "PGFor"],
+    PRIVATE_ROOM: ['Private Room', 'private_room_price'],
+    DOUBLE_SHARING: ['Double Sharing', 'double_sharing_price'],
+    TRIPLE_SHARING: ['Triple Sharing', 'triple_sharing_price', 'TrippleSharing'],
+    FOUR_SHARING: ['Four Sharing', 'four_sharing_price'],
+    ONE_RK: ['1RK', 'one_rk_price'],
+    DEPOSIT: ['Deposit', 'deposit'],
 }
 
 // ============================================================================
@@ -203,14 +244,14 @@ export async function POST(
             const rowNum = i + 2 // Excel row number (1-based + header)
 
             try {
-                // Required fields
-                const psn = String(row['PSN'] || '').trim()
-                const propertyName = String(row['Property Name'] || '').trim()
-                const ownerEmail = String(row['Email'] || '').trim().toLowerCase()
-                const ownerName = String(row['Owner Name'] || '').trim()
-                const ownerPhone = String(row['Owner Contact'] || '').trim()
-                const city = String(row['City'] || '').trim()
-                const area = String(row['Area'] || '').trim()
+                // Required fields - using getColumnValue for backward compatibility
+                const psn = String(getColumnValue(row, COLUMN_NAMES.PSN) || '').trim()
+                const propertyName = String(getColumnValue(row, COLUMN_NAMES.PROPERTY_NAME) || '').trim()
+                const ownerEmail = String(getColumnValue(row, COLUMN_NAMES.EMAIL) || '').trim().toLowerCase()
+                const ownerName = String(getColumnValue(row, COLUMN_NAMES.OWNER_NAME) || '').trim()
+                const ownerPhone = String(getColumnValue(row, COLUMN_NAMES.OWNER_CONTACT) || '').trim()
+                const city = String(getColumnValue(row, COLUMN_NAMES.CITY) || '').trim()
+                const area = String(getColumnValue(row, COLUMN_NAMES.AREA) || '').trim()
 
                 // Validate required fields
                 if (!psn) {
@@ -262,50 +303,60 @@ export async function POST(
                     continue
                 }
 
-                // Parse pricing
-                const pgFor = String(row["PG's for"] || row["PG's For"] || '')
-                const privateRoomPrice = parsePrice(row['Private Room'])
-                const doubleSharingPrice = parsePrice(row['Double Sharing'])
-                // Handle typo: "TrippleSharing" vs "Triple Sharing"
-                const tripleSharingPrice = parsePrice(row['Triple Sharing']) || parsePrice(row['TrippleSharing'])
-                const fourSharingPrice = parsePrice(row['Four Sharing'])
+                // Parse pricing - using getColumnValue for backward compatibility
+                const pgFor = String(getColumnValue(row, COLUMN_NAMES.PG_FOR) || '')
+                const oneRkPrice = parsePrice(getColumnValue(row, COLUMN_NAMES.ONE_RK))
+                const privateRoomPrice = parsePrice(getColumnValue(row, COLUMN_NAMES.PRIVATE_ROOM))
+                const doubleSharingPrice = parsePrice(getColumnValue(row, COLUMN_NAMES.DOUBLE_SHARING))
+                const tripleSharingPrice = parsePrice(getColumnValue(row, COLUMN_NAMES.TRIPLE_SHARING))
+                const fourSharingPrice = parsePrice(getColumnValue(row, COLUMN_NAMES.FOUR_SHARING))
 
                 // At least one price should be present
-                if (!privateRoomPrice && !doubleSharingPrice && !tripleSharingPrice && !fourSharingPrice) {
+                if (!oneRkPrice && !privateRoomPrice && !doubleSharingPrice && !tripleSharingPrice && !fourSharingPrice) {
                     errors.push(`Row ${rowNum}: At least one room price is required`)
                     continue
                 }
 
+                // Get optional fields with backward compatibility
+                const landmark = String(getColumnValue(row, COLUMN_NAMES.LANDMARK) || '')
+                const usp = String(getColumnValue(row, COLUMN_NAMES.USP) || '').replace(/^None$/i, '')
+                const facilities = String(getColumnValue(row, COLUMN_NAMES.FACILITIES) || '')
+                const locality = String(getColumnValue(row, COLUMN_NAMES.LOCALITY) || area)
+                const address = String(getColumnValue(row, COLUMN_NAMES.ADDRESS) || `${propertyName}, ${area}`)
+                const country = String(getColumnValue(row, COLUMN_NAMES.COUNTRY) || 'India')
+                const deposit = parsePrice(getColumnValue(row, COLUMN_NAMES.DEPOSIT))
+
                 // Build full address for Google Maps
-                const fullAddress = `${propertyName}, ${area}, ${city}${row['Landmark'] ? ', Near ' + row['Landmark'] : ''}`
+                const fullAddress = `${propertyName}, ${area}, ${city}${landmark ? ', Near ' + landmark : ''}`
                 const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(fullAddress)}`
 
                 // Build property data - matches normal property posting structure
                 const propertyData = {
                     title: propertyName,
-                    description: String(row['USP'] || row['Landmark'] || '').replace(/^None$/i, '') || `${propertyName} - ${getPreferredTenant(pgFor)} ${getPropertyType(pgFor)}`,
+                    description: usp || landmark || `${propertyName} - ${getPreferredTenant(pgFor)} ${getPropertyType(pgFor)}`,
                     property_type: getPropertyType(pgFor),
                     room_type: determineRoomType(row),
 
                     city: city,
                     area: area,
-                    locality: String(row['Locality'] || area),
-                    address: String(row['Address'] || `${propertyName}, ${area}`),
-                    landmark: String(row['Landmark'] || ''),
+                    locality: locality,
+                    address: address,
+                    landmark: landmark,
                     google_maps_url: googleMapsUrl,
 
-                    country: String(row['Country'] || 'India'),
+                    country: country,
                     owner_contact: ownerPhone,
 
+                    one_rk_price: oneRkPrice,
                     private_room_price: privateRoomPrice,
                     double_sharing_price: doubleSharingPrice,
                     triple_sharing_price: tripleSharingPrice,
                     four_sharing_price: fourSharingPrice,
-                    deposit: parsePrice(row['Deposit']),
+                    deposit: deposit,
 
-                    amenities: mapAmenities(String(row['Facilities'] || '')),
+                    amenities: mapAmenities(facilities),
                     preferred_tenant: getPreferredTenant(pgFor),
-                    usp: String(row['USP'] || '').replace(/^None$/i, ''),
+                    usp: usp,
 
                     // Default values matching normal property post
                     status: 'active',
@@ -318,13 +369,13 @@ export async function POST(
                     owner_verified: false,
 
                     // Additional fields for better filtering
-                    laundry: String(row['Facilities'] || '').toLowerCase().includes('laundry') ||
-                             String(row['Facilities'] || '').toLowerCase().includes('washing'),
-                    room_cleaning: String(row['Facilities'] || '').toLowerCase().includes('house keeping') ||
-                                   String(row['Facilities'] || '').toLowerCase().includes('housekeeping') ||
-                                   String(row['Facilities'] || '').toLowerCase().includes('cleaning'),
-                    warden: String(row['Facilities'] || '').toLowerCase().includes('warden'),
-                    parking: String(row['Facilities'] || '').toLowerCase().includes('parking') ? 'Bike' : 'None',
+                    laundry: facilities.toLowerCase().includes('laundry') ||
+                             facilities.toLowerCase().includes('washing'),
+                    room_cleaning: facilities.toLowerCase().includes('house keeping') ||
+                                   facilities.toLowerCase().includes('housekeeping') ||
+                                   facilities.toLowerCase().includes('cleaning'),
+                    warden: facilities.toLowerCase().includes('warden'),
+                    parking: facilities.toLowerCase().includes('parking') ? 'Bike' : 'None',
                 }
 
                 // Track owner

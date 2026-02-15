@@ -40,9 +40,26 @@ function extractPSNFromPath(filepath: string): string | null {
 }
 
 // ============================================================================
+// ARCHITECTURE: Image Upload Limits
+// ----------------------------------------------------------------------------
+// - Total images per import: 500 (hard limit to prevent memory/timeout issues)
+// - Images per property (PSN): 10 recommended (warning if exceeded)
+//   Only first 10 images will be used during property creation
+// ============================================================================
+
+// ============================================================================
 // POST /api/admin/bulk-import/jobs/[id]/images
 // Upload image folder
 // ============================================================================
+
+// Increase body size limit for image uploads (prevents 413 Payload Too Large)
+export const bodyParser = {
+  sizeLimit: '10mb',
+}
+
+// Maximum recommended images per PSN (warning threshold)
+const MAX_IMAGES_PER_PSN = 10
+
 export async function POST(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
@@ -165,11 +182,22 @@ export async function POST(
                     }
                 }
 
+                // Check for PSNs with too many images (generate warnings)
+                const warnings: string[] = []
+                for (const [psn, images] of Object.entries(imagesByPSN)) {
+                    if (images.length > MAX_IMAGES_PER_PSN) {
+                        warnings.push(
+                            `Property ${psn} has ${images.length} images (max ${MAX_IMAGES_PER_PSN} recommended). Only first ${MAX_IMAGES_PER_PSN} will be used.`
+                        )
+                    }
+                }
+
                 send({
                     status: `Matched ${Object.keys(imagesByPSN).length} PSNs, ${orphanedImages.length} orphaned`,
                     matched_psns: Object.keys(imagesByPSN).length,
                     orphaned_count: orphanedImages.length,
                     progress: 10,
+                    warnings: warnings.length > 0 ? warnings : undefined,
                 })
 
                 // Upload images to storage
@@ -324,6 +352,16 @@ export async function POST(
                     },
                 })
 
+                // Regenerate warnings for final response (based on uploaded images)
+                const finalWarnings: string[] = []
+                for (const [psn, images] of Object.entries(uploadedImages)) {
+                    if (images.length > MAX_IMAGES_PER_PSN) {
+                        finalWarnings.push(
+                            `Property ${psn} has ${images.length} images (max ${MAX_IMAGES_PER_PSN} recommended). Only first ${MAX_IMAGES_PER_PSN} will be used.`
+                        )
+                    }
+                }
+
                 send({
                     status: "Images uploaded successfully",
                     progress: 100,
@@ -334,6 +372,7 @@ export async function POST(
                     unmatched_psns: expectedPSNs.filter(psn => !uploadedImages[psn]),
                     failed_files: failedUploads,
                     invalid_files: invalidFiles,
+                    warnings: finalWarnings.length > 0 ? finalWarnings : undefined,
                 })
 
                 controller.close()

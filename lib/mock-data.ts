@@ -341,7 +341,29 @@ export function filterProperties(filters: Partial<SearchFilters>): Property[] {
     }
 
     if (filters.roomType && filters.roomType.length > 0) {
-        filtered = filtered.filter(p => filters.roomType!.includes(p.roomType))
+        // Map room types to price keys - property matches if it has a price for ANY selected room type
+        const roomTypeToPriceKey: Record<string, string> = {
+            'Private Room': 'single',
+            '1 RK': '1rk',
+            '1 BHK': 'single',
+            'Single': 'single',
+            'Double': 'double',
+            '2 BHK': 'double',
+            'Triple': 'triple',
+            '3 BHK': 'triple',
+            'Four Sharing': 'four',
+            '4 BHK': 'four'
+        }
+
+        filtered = filtered.filter(p => {
+            // Property matches if it has a price set for ANY of the selected room types
+            return filters.roomType!.some(roomType => {
+                const priceKey = roomTypeToPriceKey[roomType] as keyof Property['roomPrices']
+                if (!priceKey) return false
+                // Check if property has a price for this room type
+                return p.roomPrices?.[priceKey] !== undefined && p.roomPrices?.[priceKey] !== null
+            })
+        })
     }
 
     if (filters.minPrice !== undefined) {

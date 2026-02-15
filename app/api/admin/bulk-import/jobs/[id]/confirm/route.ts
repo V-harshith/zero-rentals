@@ -195,6 +195,7 @@ export async function POST(
                                             phone: ownerData.phone,
                                             role: 'owner',
                                             verified: false,
+                                            email_verified_at: existingUser.email_confirmed_at || new Date().toISOString(),
                                         }, { onConflict: 'id' })
 
                                         createdOwners.push({
@@ -221,6 +222,7 @@ export async function POST(
                                 phone: ownerData.phone,
                                 role: 'owner',
                                 verified: false,
+                                email_verified_at: new Date().toISOString(),
                                 created_at: new Date().toISOString(),
                             })
 

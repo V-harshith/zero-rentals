@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { motion } from "framer-motion"
 import { Button } from "@/components/ui/button"
 import { Search, MapPin } from "lucide-react"
@@ -18,40 +18,85 @@ interface SearchBarProps {
     className?: string
 }
 
+// Parse URL parameters to initialize filter state
+function parseUrlParams(params: URLSearchParams) {
+    const type = params.get("type") as "PG" | "Co-living" | "Rent" | null
+    const activeType = type && PROPERTY_TYPES.includes(type) ? type : "PG"
+
+    const gender = params.get("gender") as "Male" | "Female" | "Any" | "Couple" | null
+    const validGender: "Male" | "Female" | "Any" | "Couple" =
+        gender && ["Male", "Female", "Any", "Couple"].includes(gender)
+            ? gender
+            : activeType === "Co-living" ? "Couple" : "Any"
+
+    const roomType = params.get("roomType")
+    const selectedRoomType = roomType || ""
+
+    const amenitiesParam = params.get("amenities")
+    const selectedAmenities = amenitiesParam ? amenitiesParam.split(",") : []
+
+    const preferredTenant = params.get("preferredTenant") || "Any"
+
+    const minPrice = parseInt(params.get("minPrice") || "0")
+    const maxPrice = parseInt(params.get("maxPrice") || "50000")
+    const priceRange: [number, number] = [minPrice, maxPrice]
+
+    const location = params.get("location") || ""
+
+    return {
+        activeType,
+        gender: validGender,
+        selectedRoomType,
+        selectedAmenities,
+        preferredTenant,
+        priceRange,
+        location
+    }
+}
+
 export function SearchBar({ className }: SearchBarProps) {
     const router = useRouter()
+    const searchParams = useSearchParams()
     const { userLocation } = useLocation()
 
+    // Parse initial state from URL parameters
+    const initialState = parseUrlParams(searchParams)
+
     // State
-    const [activeType, setActiveType] = useState<"PG" | "Co-living" | "Rent">("PG")
-    const [locationValue, setLocationValue] = useState("")
+    const [activeType, setActiveType] = useState<"PG" | "Co-living" | "Rent">(initialState.activeType)
+    const [locationValue, setLocationValue] = useState(initialState.location)
     const [selectedPlace, setSelectedPlace] = useState<{ placeId: string; address: string } | null>(null)
     const [sessionToken] = useState(() => generateSessionToken())
 
     // Filter State - Gender defaults based on property type
-    const [gender, setGender] = useState<"Male" | "Female" | "Any" | "Couple">(
-        activeType === "Co-living" ? "Couple" : "Any"
-    )
+    const [gender, setGender] = useState<"Male" | "Female" | "Any" | "Couple">(initialState.gender)
 
-    // Reset gender, room type, and amenities when property type changes
+    // Advanced Filter State
+    const [selectedRoomTypes, setSelectedRoomTypes] = useState<string[]>([])
+    const [selectedRoomType, setSelectedRoomType] = useState<string>(initialState.selectedRoomType)
+    const [selectedAmenities, setSelectedAmenities] = useState<string[]>(initialState.selectedAmenities)
+    const [preferredTenant, setPreferredTenant] = useState<string>(initialState.preferredTenant)
+    const [priceRange, setPriceRange] = useState<[number, number]>(initialState.priceRange)
+    const [isSearching, setIsSearching] = useState(false)
+
+    // Reset gender, room type, and amenities when property type changes (but not on initial load)
+    const isInitialMount = useRef(true)
     useEffect(() => {
+        if (isInitialMount.current) {
+            isInitialMount.current = false
+            return
+        }
         setGender(activeType === "Co-living" ? "Couple" : "Any")
         setSelectedRoomType("")
         setSelectedRoomTypes([])
+        setSelectedAmenities([])
+        setPreferredTenant("Any")
+        setPriceRange([0, 50000])
         // Clear "Meals" amenity when switching to Rent
         if (activeType === "Rent") {
             setSelectedAmenities(prev => prev.filter(a => a !== "Meals"))
         }
     }, [activeType])
-
-    // Advanced Filter State
-    const [showAdvanced, setShowAdvanced] = useState(false)
-    const [selectedRoomTypes, setSelectedRoomTypes] = useState<string[]>([])
-    const [selectedRoomType, setSelectedRoomType] = useState<string>("")
-    const [selectedAmenities, setSelectedAmenities] = useState<string[]>([])
-    const [preferredTenant, setPreferredTenant] = useState<string>("Any")
-    const [priceRange, setPriceRange] = useState<[number, number]>([0, 50000])
-    const [isSearching, setIsSearching] = useState(false)
 
     const activeFilterCount = selectedRoomTypes.length + selectedAmenities.length +
         (preferredTenant !== "Any" ? 1 : 0)

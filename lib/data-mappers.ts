@@ -29,6 +29,7 @@ export interface PropertyRow {
     owner_verified: boolean
 
     // Pricing
+    one_rk_price: number | null
     private_room_price: number | null
     double_sharing_price: number | null
     triple_sharing_price: number | null
@@ -84,20 +85,16 @@ export interface PropertyRow {
  * Convert database row to frontend Property type
  */
 export function mapPropertyFromDB(row: PropertyRow): Property {
-    // Determine primary price based on room type
-    let price = 0
-    if ((row.room_type === 'Single' || row.room_type === '1RK') && row.private_room_price) {
-        price = row.private_room_price
-    } else if (row.room_type === 'Double' && row.double_sharing_price) {
-        price = row.double_sharing_price
-    } else if (row.room_type === 'Triple' && row.triple_sharing_price) {
-        price = row.triple_sharing_price
-    } else if (row.room_type === 'Four Sharing' && row.four_sharing_price) {
-        price = row.four_sharing_price
-    } else {
-        // Fallback to lowest available price
-        price = row.private_room_price || row.double_sharing_price || row.triple_sharing_price || row.four_sharing_price || 0
-    }
+    // Determine primary price as the minimum of all available room prices
+    const availablePrices = [
+        row.one_rk_price,
+        row.private_room_price,
+        row.double_sharing_price,
+        row.triple_sharing_price,
+        row.four_sharing_price
+    ].filter((p): p is number => p !== null && p !== undefined && p > 0)
+
+    const price = availablePrices.length > 0 ? Math.min(...availablePrices) : 0
 
     // Prefer joined owner data if available, fallback to snapshot data
     const ownerData = {
@@ -115,8 +112,8 @@ export function mapPropertyFromDB(row: PropertyRow): Property {
         description: row.description || '',
         price,
         roomPrices: {
-            '1rk': row.room_type === '1RK' ? row.private_room_price || undefined : undefined,
-            single: row.room_type === 'Single' || row.private_room_price ? row.private_room_price || undefined : undefined,
+            '1rk': row.one_rk_price || undefined,
+            single: row.private_room_price || undefined,
             double: row.double_sharing_price || undefined,
             triple: row.triple_sharing_price || undefined,
             four: row.four_sharing_price || undefined,
@@ -192,8 +189,11 @@ export function mapPropertyToDB(
 
         // Handle multiple room prices
         // If roomPrices is provided, use it; otherwise fall back to legacy single price
-        private_room_price: property.roomPrices?.['1rk'] || property.roomPrices?.single ||
-            ((property.roomType === 'Single' || property.roomType === '1RK' || property.roomType === 'Apartment') ? property.price : null),
+        // 1RK has its own column (one_rk_price), separate from private_room_price (1BHK/Single)
+        one_rk_price: property.roomPrices?.['1rk'] ||
+            (property.roomType === '1RK' ? property.price : null),
+        private_room_price: property.roomPrices?.single ||
+            ((property.roomType === 'Single' || property.roomType === 'Apartment') ? property.price : null),
         double_sharing_price: property.roomPrices?.double ||
             (property.roomType === 'Double' ? property.price : null),
         triple_sharing_price: property.roomPrices?.triple ||
