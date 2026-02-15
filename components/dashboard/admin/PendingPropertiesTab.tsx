@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { useCsrf } from "@/lib/csrf-context"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { CheckCircle, XCircle, Loader2, MapPin, Eye } from "lucide-react"
@@ -30,8 +31,15 @@ export function PendingPropertiesTab({
         p.owner.name.toLowerCase().includes(searchQuery.toLowerCase())
     )
     const [actionLoading, setActionLoading] = useState<{ id: string, type: 'approve' | 'reject' } | null>(null)
+    const { csrfToken, isLoading: isCsrfLoading } = useCsrf()
 
     const handleApprove = async (propertyId: string) => {
+        // Check for CSRF token before making request
+        if (!csrfToken) {
+            toast.error('Security token not available. Please wait a moment and try again.')
+            return
+        }
+
         setActionLoading({ id: propertyId, type: 'approve' })
 
         try {
@@ -40,7 +48,7 @@ export function PendingPropertiesTab({
                 onOptimisticRemove(propertyId)
             }
 
-            const { error } = await approveProperty(propertyId)
+            const { error } = await approveProperty(propertyId, csrfToken)
 
             if (error) {
                 // Refresh to restore the property if approval failed
@@ -50,14 +58,20 @@ export function PendingPropertiesTab({
             toast.success('Property approved and published')
             // Refresh in background to ensure consistency
             onRefresh()
-        } catch {
-            toast.error('Failed to approve property')
+        } catch (err: any) {
+            toast.error(err?.message || 'Failed to approve property')
         } finally {
             setActionLoading(null)
         }
     }
 
     const handleReject = async (propertyId: string) => {
+        // Check for CSRF token before making request
+        if (!csrfToken) {
+            toast.error('Security token not available. Please wait a moment and try again.')
+            return
+        }
+
         setActionLoading({ id: propertyId, type: 'reject' })
 
         try {
@@ -66,7 +80,7 @@ export function PendingPropertiesTab({
                 onOptimisticRemove(propertyId)
             }
 
-            const { error } = await rejectProperty(propertyId)
+            const { error } = await rejectProperty(propertyId, undefined, csrfToken)
 
             if (error) {
                 // Refresh to restore the property if rejection failed
@@ -76,8 +90,8 @@ export function PendingPropertiesTab({
             toast.success('Property rejected')
             // Refresh in background to ensure consistency
             onRefresh()
-        } catch {
-            toast.error('Failed to reject property')
+        } catch (err: any) {
+            toast.error(err?.message || 'Failed to reject property')
         } finally {
             setActionLoading(null)
         }
@@ -161,7 +175,7 @@ export function PendingPropertiesTab({
                                         variant="default"
                                         className="gap-2"
                                         onClick={() => handleApprove(property.id)}
-                                        disabled={isActionInProgress}
+                                        disabled={isActionInProgress || isCsrfLoading}
                                     >
                                         {isApproveLoading ? (
                                             <Loader2 className="h-4 w-4 animate-spin" />
@@ -186,7 +200,7 @@ export function PendingPropertiesTab({
                                         variant="destructive"
                                         className="gap-2"
                                         onClick={() => handleReject(property.id)}
-                                        disabled={isActionInProgress}
+                                        disabled={isActionInProgress || isCsrfLoading}
                                     >
                                         {isRejectLoading ? (
                                             <Loader2 className="h-4 w-4 animate-spin" />

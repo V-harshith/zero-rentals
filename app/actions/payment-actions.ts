@@ -33,6 +33,18 @@ export async function fulfillSubscriptionAction(data: {
     razorpaySignature: string
 }) {
     try {
+        // 🔥 CRITICAL FIX: Idempotency check - prevent duplicate processing
+        const { data: existingPayment } = await supabaseAdmin
+            .from('payment_logs')
+            .select('id, status')
+            .eq('transaction_id', data.razorpayPaymentId)
+            .maybeSingle()
+
+        if (existingPayment?.status === 'success') {
+            console.log('Payment already processed (idempotency):', data.razorpayPaymentId)
+            return { success: true, message: 'Payment already processed' }
+        }
+
         // 1. Verify Signature
         const isValid = verifyRazorpaySignature(
             data.razorpayOrderId,

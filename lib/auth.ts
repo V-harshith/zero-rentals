@@ -121,7 +121,7 @@ async function sendVerificationViaAction(email: string, name: string, token: str
     console.log("Auth: Importing email action...")
     const { sendVerificationEmailAction } = await import('@/app/actions/auth-actions')
     console.log("Auth: Sending email...")
-    const result = await sendVerificationEmailAction(email, name, token)
+    const result = await sendVerificationEmailAction(email, name, token, role)
 
     if (result.success) {
       console.log(`Verification email sent to: ${email}`)
@@ -405,14 +405,14 @@ export async function signOut() {
 }
 
 export async function getCurrentUser() {
-  const MAX_RETRIES = 2
-  const TIMEOUT_MS = 10000 // 10 seconds for slower connections
+  const MAX_RETRIES = 3
+  const TIMEOUT_MS = 30000 // 30 seconds for slower connections
   let attempt = 0
 
   // Wrap entire operation in a timeout
   const timeoutPromise = new Promise<null>((resolve) => {
     setTimeout(() => {
-      console.warn('[AUTH] getCurrentUser: Operation timed out after 10s')
+      console.warn(`[AUTH] getCurrentUser: Operation timed out after ${TIMEOUT_MS / 1000}s`)
       resolve(null)
     }, TIMEOUT_MS)
   })
@@ -420,9 +420,17 @@ export async function getCurrentUser() {
   const getUserPromise = async (): Promise<any> => {
     while (attempt <= MAX_RETRIES) {
       try {
-        // CRITICAL FIX: Use getUser() instead of getSession()
-        // getUser() validates the token with the server and reads from cookies
-        // This ensures we get the session that middleware just refreshed
+        // CRITICAL FIX: First check getSession() for faster local validation
+        // Then use getUser() for server-side validation if needed
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+
+        // If no session exists locally, return null immediately
+        if (!sessionError && !session) {
+          console.log("[AUTH] No local session found")
+          return null
+        }
+
+        // Use getUser() for server-side validation
         const { data: { user }, error: userError } = await supabase.auth.getUser()
 
         if (userError) {
@@ -434,15 +442,18 @@ export async function getCurrentUser() {
             return null
           }
 
-          // Network error - retry if we have attempts left
-          if (attempt < MAX_RETRIES && 
-              (userError.message?.includes("fetch") || 
-               userError.message?.includes("network"))) {
-            attempt++
-            console.log(`[AUTH] Network error, retrying... (${attempt}/${MAX_RETRIES})`)
-            await new Promise(resolve => setTimeout(resolve, 1000 * attempt))
-            continue
-          }
+          // Network error - retry with exponential backoff if we have attempts left
+        if (attempt < MAX_RETRIES &&
+            (userError.message?.includes("fetch") ||
+             userError.message?.includes("network") ||
+             userError.message?.includes("timeout") ||
+             userError.message?.includes("aborted"))) {
+          attempt++
+          const backoffMs = Math.min(1000 * Math.pow(2, attempt), 8000) // Exponential backoff: 2s, 4s, 8s max
+          console.log(`[AUTH] Network error, retrying with exponential backoff... (${attempt}/${MAX_RETRIES}, ${backoffMs}ms)`)
+          await new Promise(resolve => setTimeout(resolve, backoffMs))
+          continue
+        }
 
           return null
         }
@@ -568,14 +579,17 @@ export async function getCurrentUser() {
           return null
         }
 
-        // Network error - retry if we have attempts left
-        if (attempt < MAX_RETRIES && 
-            (error.message?.includes("Failed to fetch") || 
+        // Network error - retry with exponential backoff if we have attempts left
+        if (attempt < MAX_RETRIES &&
+            (error.message?.includes("Failed to fetch") ||
              error.message?.includes("Network") ||
-             error.message?.includes("fetch"))) {
+             error.message?.includes("fetch") ||
+             error.message?.includes("timeout") ||
+             error.message?.includes("aborted"))) {
           attempt++
-          console.log(`[AUTH] Unexpected error, retrying... (${attempt}/${MAX_RETRIES})`)
-          await new Promise(resolve => setTimeout(resolve, 1000 * attempt))
+          const backoffMs = Math.min(1000 * Math.pow(2, attempt), 8000) // Exponential backoff: 2s, 4s, 8s max
+          console.log(`[AUTH] Network error, retrying with exponential backoff... (${attempt}/${MAX_RETRIES}, ${backoffMs}ms)`)
+          await new Promise(resolve => setTimeout(resolve, backoffMs))
           continue
         }
 

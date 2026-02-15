@@ -254,13 +254,16 @@ export function ImageUploadStep({ jobId, onComplete, onBack }: ImageUploadStepPr
         }
     }
 
-    // Extract PSN info from files for preview
+    // Extract PSN info from files for preview (matches server-side logic)
+    // Server uses: parts[parts.length - 2] (second-to-last path segment)
     const psnInfo = files.reduce((acc, file) => {
         const path = file.webkitRelativePath || file.name
         const parts = path.split(/[/\\]/)
-        const psn = parts.length > 1 ? parts[1] : null
+        // Use second-to-last part (folder name containing images) - matches server
+        const psn = parts.length >= 2 ? parts[parts.length - 2] : null
 
-        if (psn && /^\d+$/.test(psn)) {
+        // Accept alphanumeric PSNs (not just digits) to match server regex /^[a-zA-Z0-9-_]+$/
+        if (psn && /^[a-zA-Z0-9-_]+$/i.test(psn)) {
             acc[psn] = (acc[psn] || 0) + 1
         }
         return acc
@@ -461,7 +464,7 @@ export function ImageUploadStep({ jobId, onComplete, onBack }: ImageUploadStepPr
                 {files.length > 0 && !result && (
                     <Button
                         onClick={handleUpload}
-                        disabled={uploading || compressing || compressedFiles.length === 0}
+                        disabled={uploading || compressing || (compressedFiles.length === 0 && files.length === 0)}
                         className="flex-1"
                     >
                         {compressing ? (

@@ -160,11 +160,34 @@ async function incrementPropertyViews(id: string, currentViews: number) {
 
 export async function getProperties(): Promise<Property[]> {
   try {
+    // 🔥 CRITICAL FIX: Only show properties from owners with valid subscriptions
+    const today = new Date().toISOString()
+
+    // Get owners with valid active subscriptions first
+    const { data: validSubscribers, error: subError } = await supabase
+      .from('subscriptions')
+      .select('user_id')
+      .eq('status', 'active')
+      .gt('end_date', today)
+
+    if (subError) {
+      console.error('Error fetching valid subscriptions:', subError)
+      return []
+    }
+
+    const validOwnerIds = validSubscribers?.map(s => s.user_id) || []
+
+    // If no valid subscribers, return empty (or handle free tier separately if needed)
+    if (validOwnerIds.length === 0) {
+      return []
+    }
+
     const { data, error } = await supabase
       .from('properties')
       .select('*, owner:users!owner_id(name, email, phone, avatar_url, verified)')
       .eq('status', 'active')
       .eq('availability', 'Available')
+      .in('owner_id', validOwnerIds)
       .order('created_at', { ascending: false })
       .limit(20)
 
@@ -181,12 +204,35 @@ export async function getProperties(): Promise<Property[]> {
 
 export async function getFeaturedProperties(limit = 6): Promise<Property[]> {
   try {
+    // 🔥 CRITICAL FIX: Only show properties from owners with valid subscriptions
+    const today = new Date().toISOString()
+
+    // Get owners with valid active subscriptions first
+    const { data: validSubscribers, error: subError } = await supabase
+      .from('subscriptions')
+      .select('user_id')
+      .eq('status', 'active')
+      .gt('end_date', today)
+
+    if (subError) {
+      console.error('Error fetching valid subscriptions:', subError)
+      return []
+    }
+
+    const validOwnerIds = validSubscribers?.map(s => s.user_id) || []
+
+    // If no valid subscribers, return empty
+    if (validOwnerIds.length === 0) {
+      return []
+    }
+
     const { data, error } = await supabase
       .from('properties')
       .select('*, owner:users!owner_id(name, email, phone, avatar_url, verified)')
       .eq('status', 'active')
       .eq('availability', 'Available')
       .eq('featured', true)
+      .in('owner_id', validOwnerIds)
       .order('created_at', { ascending: false })
       .limit(limit)
 
@@ -507,40 +553,59 @@ export async function getPendingProperties(): Promise<Property[]> {
   }
 }
 
-export async function approveProperty(id: string): Promise<{ error: any }> {
+export async function approveProperty(id: string, csrfToken?: string): Promise<{ error: any }> {
   try {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    }
+
+    if (csrfToken) {
+      headers['x-csrf-token'] = csrfToken
+    }
+
     const response = await fetch(`/api/admin/properties/${id}/approve`, {
       method: 'PUT',
+      headers,
     })
 
     if (!response.ok) {
       const data = await response.json()
+      console.error('[approveProperty] API error:', data)
       return { error: data.error || 'Failed to approve property' }
     }
 
     return { error: null }
   } catch (error) {
+    console.error('[approveProperty] Request error:', error)
     return { error }
   }
 }
 
-export async function rejectProperty(id: string, reason: string = 'Admin Action'): Promise<{ error: any }> {
+export async function rejectProperty(id: string, reason: string = 'Admin Action', csrfToken?: string): Promise<{ error: any }> {
   try {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    }
+
+    if (csrfToken) {
+      headers['x-csrf-token'] = csrfToken
+    }
+
     const response = await fetch(`/api/admin/properties/${id}/reject`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers,
       body: JSON.stringify({ reason }),
     })
 
     if (!response.ok) {
       const data = await response.json()
+      console.error('[rejectProperty] API error:', data)
       return { error: data.error || 'Failed to reject property' }
     }
 
     return { error: null }
   } catch (error) {
+    console.error('[rejectProperty] Request error:', error)
     return { error }
   }
 }
@@ -651,6 +716,8 @@ export async function getAllPayments(): Promise<Payment[]> {
       status: item.status,
       providerOrderId: item.provider_order_id,
       providerPaymentId: item.provider_payment_id,
+      plan_name: item.plan_name,
+      payment_method: item.payment_method,
       metadata: item.metadata,
       createdAt: item.created_at,
       user: usersMap[item.user_id] ? {

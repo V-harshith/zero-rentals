@@ -11,6 +11,7 @@ import {
     CheckCircle,
     Loader2,
     X,
+    Download,
 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -115,6 +116,33 @@ export function ExcelUploadStep({ jobId, onComplete }: ExcelUploadStepProps) {
         }
     }
 
+    const downloadTemplate = async () => {
+        try {
+            const response = await fetch('/api/admin/bulk-import/template')
+
+            if (!response.ok) {
+                throw new Error('Failed to download template')
+            }
+
+            // Get the blob from response
+            const blob = await response.blob()
+
+            // Create download link
+            const url = window.URL.createObjectURL(blob)
+            const link = document.createElement('a')
+            link.href = url
+            link.download = 'zero-rentals-bulk-import-template.xlsx'
+            document.body.appendChild(link)
+            link.click()
+            document.body.removeChild(link)
+            window.URL.revokeObjectURL(url)
+
+            toast.success('Template downloaded successfully')
+        } catch (err: any) {
+            toast.error(err.message || 'Failed to download template')
+        }
+    }
+
     return (
         <div className="space-y-6">
             {/* Header */}
@@ -123,6 +151,18 @@ export function ExcelUploadStep({ jobId, onComplete }: ExcelUploadStepProps) {
                 <p className="text-muted-foreground">
                     Upload your property data. Required columns: PSN, Property Name, Email, Owner Name, City, Area
                 </p>
+            </div>
+
+            {/* Download Template Button */}
+            <div className="flex justify-center">
+                <Button
+                    variant="outline"
+                    onClick={downloadTemplate}
+                    className="gap-2"
+                >
+                    <Download className="h-4 w-4" />
+                    Download Template
+                </Button>
             </div>
 
             {/* File Upload Area */}
@@ -176,7 +216,11 @@ export function ExcelUploadStep({ jobId, onComplete }: ExcelUploadStepProps) {
                 <AlertDescription>
                     <strong>Required columns:</strong> PSN, Property Name, Email, Owner Name, Owner Contact, City, Area
                     <br />
-                    <strong>Optional:</strong> Private Room, Double Sharing, Triple Sharing, Four Sharing, Deposit, Facilities, USP, Landmark
+                    <strong>Optional:</strong> Private Room, Double Sharing, Triple Sharing, Four Sharing, Deposit, Facilities, USP, Landmark, PG&apos;s for
+                    <br />
+                    <span className="text-xs text-muted-foreground mt-1 block">
+                        Tip: Download the template above to see the correct format with sample data
+                    </span>
                 </AlertDescription>
             </Alert>
 

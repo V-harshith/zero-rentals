@@ -2,6 +2,7 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import {
     Table,
     TableBody,
@@ -10,15 +11,17 @@ import {
     TableHeader,
     TableRow,
 } from "@/components/ui/table"
-import { Loader2, IndianRupee } from "lucide-react"
+import { Loader2, IndianRupee, RefreshCw } from "lucide-react"
 import type { Payment } from "@/lib/types"
 
 interface PaymentsTabProps {
     payments: Payment[]
     loading: boolean
+    onRefresh?: () => void
+    lastUpdated?: Date | null
 }
 
-export function PaymentsTab({ payments, loading }: PaymentsTabProps) {
+export function PaymentsTab({ payments, loading, onRefresh, lastUpdated }: PaymentsTabProps) {
     if (loading) {
         return (
             <Card>
@@ -32,19 +35,46 @@ export function PaymentsTab({ payments, loading }: PaymentsTabProps) {
         )
     }
 
-    const totalRevenue = payments.reduce((sum, p) => sum + p.amount, 0)
+    // Only count completed/successful payments toward revenue
+    const totalRevenue = payments.reduce((sum, p) => {
+        if (p.status === 'success' || p.status === 'completed') {
+            return sum + p.amount
+        }
+        return sum
+    }, 0)
 
     return (
         <Card>
             <CardHeader>
-                <div className="flex items-center justify-between">
-                    <CardTitle>Payments ({payments.length})</CardTitle>
-                    <div className="flex items-center gap-2 text-green-600 bg-green-50 px-4 py-2 rounded-lg">
-                        <IndianRupee className="h-5 w-5" />
-                        <span className="font-bold text-lg">
-                            {totalRevenue.toLocaleString()}
-                        </span>
-                        <span className="text-sm">Total Revenue</span>
+                <div className="flex items-center justify-between flex-wrap gap-4">
+                    <div className="flex items-center gap-4">
+                        <CardTitle>Payments ({payments.length})</CardTitle>
+                        {onRefresh && (
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={onRefresh}
+                                disabled={loading}
+                                className="gap-2"
+                            >
+                                <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                                Refresh
+                            </Button>
+                        )}
+                    </div>
+                    <div className="flex items-center gap-4">
+                        {lastUpdated && (
+                            <span className="text-sm text-muted-foreground">
+                                Last updated: {lastUpdated.toLocaleTimeString()}
+                            </span>
+                        )}
+                        <div className="flex items-center gap-2 text-green-600 bg-green-50 px-4 py-2 rounded-lg">
+                            <IndianRupee className="h-5 w-5" />
+                            <span className="font-bold text-lg">
+                                {totalRevenue.toLocaleString()}
+                            </span>
+                            <span className="text-sm">Total Revenue</span>
+                        </div>
                     </div>
                 </div>
             </CardHeader>
@@ -89,7 +119,11 @@ export function PaymentsTab({ payments, loading }: PaymentsTabProps) {
                                         <TableCell>
                                             <Badge
                                                 variant={
-                                                    payment.status === 'success' ? 'default' : 'secondary'
+                                                    payment.status === 'success' || payment.status === 'completed'
+                                                        ? 'default'
+                                                        : payment.status === 'failed' || payment.status === 'refunded'
+                                                            ? 'destructive'
+                                                            : 'secondary'
                                                 }
                                             >
                                                 {payment.status}

@@ -2,6 +2,7 @@ import { NextRequest } from "next/server"
 import { createClient } from "@/lib/supabase-server"
 import { supabaseAdmin } from "@/lib/supabase-admin"
 import crypto from "crypto"
+import { decrypt, decryptLegacy } from "@/lib/encryption"
 
 // ============================================================================
 // Helper: Generate secure password
@@ -32,6 +33,57 @@ export async function POST(
                 controller.enqueue(encoder.encode(JSON.stringify(data) + '\n'))
             }
 
+            // Track results (moved outside try for catch block access)
+            const createdOwners: { email: string; id: string; password: string }[] = []
+            const createdPropertyIds: string[] = []
+            let adminUserId: string | null = null
+
+            // ============================================================================
+            // Helper: Rollback created data on critical failure
+            // ============================================================================
+            const rollbackCreatedData = async (adminId: string) => {
+                try {
+                    // Delete created properties
+                    for (const propId of createdPropertyIds) {
+                        await supabaseAdmin
+                            .from('properties')
+                            .delete()
+                            .eq('id', propId)
+                    }
+
+                    // Delete created owners (auth users)
+                    for (const owner of createdOwners) {
+                        if (owner.password !== '[ALREADY EXISTS]') {
+                            await supabaseAdmin.auth.admin.deleteUser(owner.id)
+                            await supabaseAdmin
+                                .from('users')
+                                .delete()
+                                .eq('id', owner.id)
+                        }
+                    }
+
+                    // Log rollback
+                    await supabaseAdmin.from("bulk_import_audit_log").insert({
+                        job_id: jobId,
+                        admin_id: adminId,
+                        action: "rollback_executed",
+                        details: {
+                            properties_rolled_back: createdPropertyIds.length,
+                            owners_rolled_back: createdOwners.filter(o => o.password !== '[ALREADY EXISTS]').length,
+                        },
+                    })
+                } catch (rollbackError) {
+                    console.error("Rollback failed:", rollbackError)
+                    // Log rollback failure
+                    await supabaseAdmin.from("bulk_import_audit_log").insert({
+                        job_id: jobId,
+                        admin_id: adminId,
+                        action: "rollback_failed",
+                        details: { error: (rollbackError as Error).message },
+                    })
+                }
+            }
+
             try {
                 // Auth check
                 const supabase = await createClient()
@@ -42,6 +94,9 @@ export async function POST(
                     controller.close()
                     return
                 }
+
+                // Store for catch block access
+                adminUserId = authUser.id
 
                 // Verify job
                 const { data: job, error: jobError } = await supabaseAdmin
@@ -81,8 +136,6 @@ export async function POST(
                 const newOwnersFromExcel = job.new_owners as any[] || []
 
                 // Track results
-                const createdOwners: { email: string; id: string; password: string }[] = []
-                const createdPropertyIds: string[] = []
                 const failedItems: any[] = []
 
                 // ============================================================================
@@ -102,8 +155,18 @@ export async function POST(
 
                     await Promise.all(batch.map(async (ownerData) => {
                         try {
-                            // Decrypt password (stored as base64)
-                            const password = Buffer.from(ownerData.password_encrypted, 'base64').toString()
+                            // Decrypt password (supports both AES and legacy base64)
+                            let password: string
+                            try {
+                                password = decrypt(ownerData.password_encrypted)
+                            } catch {
+                                // Try legacy base64 decryption
+                                const legacy = decryptLegacy(ownerData.password_encrypted)
+                                if (!legacy) {
+                                    throw new Error('Failed to decrypt password')
+                                }
+                                password = legacy
+                            }
 
                             // Create auth user
                             const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
@@ -166,6 +229,27 @@ export async function POST(
                                 // Continue - auth user is created, which is the important part
                             }
 
+                            // 🔥 CRITICAL: Create free subscription so properties appear on homepage
+                            try {
+                                const startDate = new Date()
+                                const endDate = new Date()
+                                endDate.setFullYear(endDate.getFullYear() + 100) // 100 years = effectively permanent
+
+                                await supabaseAdmin.from('subscriptions').insert({
+                                    user_id: authData.user.id,
+                                    plan_name: 'Free',
+                                    plan_duration: 'lifetime',
+                                    amount: 0,
+                                    status: 'active',
+                                    properties_limit: 1,
+                                    start_date: startDate.toISOString(),
+                                    end_date: endDate.toISOString(),
+                                })
+                            } catch (subError) {
+                                console.error("Error creating subscription for owner:", subError)
+                                // Log but continue - property will still be created
+                            }
+
                             createdOwners.push({
                                 email: ownerData.email,
                                 id: authData.user.id,
@@ -222,6 +306,36 @@ export async function POST(
                             .single()
                         if (user) {
                             ownerEmailToId.set(email, user.id)
+
+                            // 🔥 CRITICAL: Ensure existing owners have a subscription
+                            try {
+                                const { data: existingSub } = await supabaseAdmin
+                                    .from('subscriptions')
+                                    .select('id')
+                                    .eq('user_id', user.id)
+                                    .eq('status', 'active')
+                                    .maybeSingle()
+
+                                if (!existingSub) {
+                                    const startDate = new Date()
+                                    const endDate = new Date()
+                                    endDate.setFullYear(endDate.getFullYear() + 100)
+
+                                    await supabaseAdmin.from('subscriptions').insert({
+                                        user_id: user.id,
+                                        plan_name: 'Free',
+                                        plan_duration: 'lifetime',
+                                        amount: 0,
+                                        status: 'active',
+                                        properties_limit: 1,
+                                        start_date: startDate.toISOString(),
+                                        end_date: endDate.toISOString(),
+                                    })
+                                }
+                            } catch (subError) {
+                                console.error("Error checking/creating subscription for existing owner:", subError)
+                                // Continue - property will still be created
+                            }
                         }
                     }
                 }
@@ -258,10 +372,13 @@ export async function POST(
                                 ...prop.property_data,
                                 owner_id: ownerId,
                                 owner_name: prop.owner_name,
+                                owner_contact: prop.owner_phone || prop.property_data?.owner_contact || '',
                                 images: imageUrls,
                                 created_at: new Date().toISOString(),
                                 updated_at: new Date().toISOString(),
                                 published_at: new Date().toISOString(),
+                                status: 'active',
+                                availability: 'Available',
                             }
 
                             // Insert property
@@ -343,8 +460,20 @@ export async function POST(
                         login_url: 'https://zerorentals.com/login/owner',
                     }))
 
-                // Encrypt credentials for storage
-                const credentialsEncrypted = Buffer.from(JSON.stringify(credentialsForDownload)).toString('base64')
+                // Encrypt credentials for storage (AES-256-GCM if configured, fallback to base64)
+                let credentialsEncrypted: string
+                try {
+                    const { encrypt, isEncryptionConfigured } = await import('@/lib/encryption')
+                    if (isEncryptionConfigured()) {
+                        credentialsEncrypted = encrypt(JSON.stringify(credentialsForDownload))
+                    } else {
+                        console.warn('CREDENTIALS_ENCRYPTION_KEY not set, using base64 fallback')
+                        credentialsEncrypted = Buffer.from(JSON.stringify(credentialsForDownload)).toString('base64')
+                    }
+                } catch (e) {
+                    console.error('Encryption failed, using base64 fallback:', e)
+                    credentialsEncrypted = Buffer.from(JSON.stringify(credentialsForDownload)).toString('base64')
+                }
 
                 // ============================================================================
                 // STEP 4: Update job as complete
@@ -403,6 +532,11 @@ export async function POST(
 
             } catch (error: any) {
                 console.error("Import confirmation error:", error)
+
+                // Rollback any created data on critical failure
+                if (adminUserId) {
+                    await rollbackCreatedData(adminUserId)
+                }
 
                 // Update job with error
                 await supabaseAdmin

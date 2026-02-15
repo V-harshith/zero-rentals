@@ -87,13 +87,13 @@ async function fulfillSubscription(
             else endDate.setUTCMonth(endDate.getUTCMonth() + 1) // Default 1 month
         }
 
-        // Map properties limit
+        // Map properties limit (aligned with constants.ts)
         const limitMap: Record<string, number> = {
             'Free': 1,
             'Silver': 3,
             'Gold': 5,
             'Platinum': 10,
-            'Elite': 20
+            'Elite': 999
         }
         const propertiesLimit = limitMap[planName] || 1
 

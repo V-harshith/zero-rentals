@@ -3,6 +3,7 @@ import * as XLSX from "xlsx"
 import { createClient } from "@/lib/supabase-server"
 import { supabaseAdmin } from "@/lib/supabase-admin"
 import crypto from "crypto"
+import { encrypt, isEncryptionConfigured } from "@/lib/encryption"
 
 // ============================================================================
 // AMENITY MAPPING
@@ -242,6 +243,10 @@ export async function POST(
                     errors.push(`Row ${rowNum}: Owner Name is required`)
                     continue
                 }
+                if (!ownerPhone) {
+                    errors.push(`Row ${rowNum}: Owner Contact is required`)
+                    continue
+                }
                 if (!city) {
                     errors.push(`Row ${rowNum}: City is required`)
                     continue
@@ -290,6 +295,7 @@ export async function POST(
                     google_maps_url: googleMapsUrl,
 
                     country: String(row['Country'] || 'India'),
+                    owner_contact: ownerPhone,
 
                     private_room_price: privateRoomPrice,
                     double_sharing_price: doubleSharingPrice,
@@ -377,13 +383,30 @@ export async function POST(
                 step: "image_upload",
                 total_properties: properties.length,
                 parsed_properties: properties,
-                new_owners: newOwners.map(o => ({
-                    email: o.email,
-                    name: o.name,
-                    phone: o.phone,
-                    password_encrypted: Buffer.from(o.password).toString('base64'),
-                    properties: o.properties,
-                })),
+                new_owners: newOwners.map(o => {
+                    // Use AES-256-GCM encryption if configured, fallback to base64 for development
+                    let encryptedPassword: string
+                    try {
+                        if (isEncryptionConfigured()) {
+                            encryptedPassword = encrypt(o.password)
+                        } else {
+                            // Fallback for development (should use encryption in production)
+                            console.warn('CREDENTIALS_ENCRYPTION_KEY not set, using base64 fallback')
+                            encryptedPassword = Buffer.from(o.password).toString('base64')
+                        }
+                    } catch (e) {
+                        console.error('Encryption failed, using base64 fallback:', e)
+                        encryptedPassword = Buffer.from(o.password).toString('base64')
+                    }
+
+                    return {
+                        email: o.email,
+                        name: o.name,
+                        phone: o.phone,
+                        password_encrypted: encryptedPassword,
+                        properties: o.properties,
+                    }
+                }),
                 existing_owners_matched: existingOwners.length,
                 excel_uploaded_at: new Date().toISOString(),
             })

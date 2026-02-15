@@ -15,7 +15,7 @@ function extractPSNFromPath(filepath: string): string | null {
     // Format: "Harshth Prop Pics/1053/image.jpg" or "1053/image.jpg"
     if (parts.length >= 2) {
         const potentialPsn = parts[parts.length - 2] // Second to last is folder name
-        if (/^\d+$/.test(potentialPsn)) {
+        if (/^[a-zA-Z0-9-_]+$/.test(potentialPsn)) {
             return potentialPsn
         }
     }
@@ -24,11 +24,11 @@ function extractPSNFromPath(filepath: string): string | null {
     const filename = parts[parts.length - 1] || ''
     const nameWithoutExt = filename.replace(/\.[^/.]+$/, '')
 
-    // Patterns: "155", "PSN-155", "155-1", "155_1"
+    // Patterns: "155", "PSN-155", "155-1", "155_1", "ABC123", "PSN-ABC123"
     const patterns = [
-        /^(\d+)$/,           // 155
-        /^PSN-?(\d+)$/i,     // PSN-155, PSN155
-        /^(\d+)[-_]\d+$/,    // 155-1, 155_1
+        /^([a-zA-Z0-9]+)$/,           // 155, ABC123
+        /^PSN-?([a-zA-Z0-9]+)$/i,     // PSN-155, PSN155, PSN-ABC123
+        /^([a-zA-Z0-9]+)[-_]\d+$/,    // 155-1, 155_1, ABC123-1
     ]
 
     for (const pattern of patterns) {

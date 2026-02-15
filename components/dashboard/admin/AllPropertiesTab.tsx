@@ -30,9 +30,19 @@ export function AllPropertiesTab() {
     useEffect(() => {
         fetchProperties()
 
+        // Add visibility change listener for auto-refresh when tab becomes visible
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'visible') {
+                console.log('[ADMIN] AllPropertiesTab became visible - refreshing data')
+                fetchProperties()
+            }
+        }
+
+        document.addEventListener('visibilitychange', handleVisibilityChange)
+
         // Cleanup function to handle component unmount
         return () => {
-            // Any pending timeouts will be cleared by the finally block
+            document.removeEventListener('visibilitychange', handleVisibilityChange)
         }
     }, [currentPage])
 

@@ -1,37 +1,124 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
 import Image from "next/image"
-import { CheckCircle2, ArrowRight } from "lucide-react"
+import { CheckCircle2, ArrowRight, Loader2, AlertCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { supabase } from "@/lib/supabase"
 
 export default function EmailVerifiedPage() {
     const router = useRouter()
     const searchParams = useSearchParams()
     const [countdown, setCountdown] = useState(5)
+    const [isRedirecting, setIsRedirecting] = useState(false)
+    const [redirectError, setRedirectError] = useState<string | null>(null)
+    const [sessionReady, setSessionReady] = useState(false)
 
     // Get redirect URL from query params or default to /login
     const redirectUrl = searchParams.get('redirect') || '/login'
     const role = searchParams.get('role')
 
+    // Check if session is established
+    const checkSession = useCallback(async () => {
+        try {
+            const { data: { session } } = await supabase.auth.getSession()
+            if (session) {
+                console.log('[VERIFIED] Session established, ready to redirect')
+                setSessionReady(true)
+                return true
+            }
+            console.log('[VERIFIED] No session yet, waiting...')
+            return false
+        } catch (error) {
+            console.error('[VERIFIED] Error checking session:', error)
+            return false
+        }
+    }, [])
+
     // Countdown timer
     useEffect(() => {
         const interval = setInterval(() => {
-            setCountdown((prev) => prev - 1)
+            setCountdown((prev) => {
+                if (prev <= 1) {
+                    clearInterval(interval)
+                    return 0
+                }
+                return prev - 1
+            })
         }, 1000)
 
         return () => clearInterval(interval)
     }, [])
 
-    // Separate effect for navigation to avoid setState during render
+    // Check session periodically
     useEffect(() => {
-        if (countdown <= 0) {
-            router.push(redirectUrl)
+        // Check immediately
+        checkSession()
+
+        // Then check every second until we have a session
+        const interval = setInterval(async () => {
+            const hasSession = await checkSession()
+            if (hasSession) {
+                clearInterval(interval)
+            }
+        }, 1000)
+
+        return () => clearInterval(interval)
+    }, [checkSession])
+
+    // Handle redirect when countdown reaches 0
+    useEffect(() => {
+        if (countdown <= 0 && !isRedirecting && !redirectError) {
+            handleRedirect()
         }
-    }, [countdown, router, redirectUrl])
+    }, [countdown, isRedirecting, redirectError])
+
+    const handleRedirect = async () => {
+        if (isRedirecting) return
+
+        setIsRedirecting(true)
+        console.log('[VERIFIED] Attempting redirect to:', redirectUrl)
+
+        try {
+            // Ensure we have a session before redirecting
+            const { data: { session } } = await supabase.auth.getSession()
+
+            if (!session) {
+                console.warn('[VERIFIED] No session found, waiting...')
+                // Wait up to 3 more seconds for session
+                await new Promise(resolve => setTimeout(resolve, 3000))
+
+                const { data: { session: retrySession } } = await supabase.auth.getSession()
+                if (!retrySession) {
+                    throw new Error('Session not established. Please log in manually.')
+                }
+            }
+
+            // Try Next.js router first
+            try {
+                await router.push(redirectUrl)
+                // If router.push doesn't throw but also doesn't navigate,
+                // we need to check if we're still on this page after a short delay
+                setTimeout(() => {
+                    if (window.location.pathname.includes('/auth/verified')) {
+                        console.log('[VERIFIED] Router push may have failed, trying window.location')
+                        window.location.href = redirectUrl
+                    }
+                }, 1000)
+            } catch (routerError) {
+                console.error('[VERIFIED] Router push failed:', routerError)
+                // Fallback to window.location
+                window.location.href = redirectUrl
+            }
+        } catch (error: any) {
+            console.error('[VERIFIED] Redirect failed:', error)
+            setRedirectError(error.message || 'Failed to redirect. Please click the button below.')
+            setIsRedirecting(false)
+        }
+    }
 
     // Role-specific messages
     const roleMessages: Record<string, string> = {
@@ -70,18 +157,59 @@ export default function EmailVerifiedPage() {
                             {message}
                         </p>
 
-                        <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                            <p className="text-sm text-green-700">
-                                Redirecting in <span className="font-bold text-lg">{countdown}</span> seconds...
-                            </p>
-                        </div>
+                        {redirectError ? (
+                            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                                <AlertCircle className="h-5 w-5 text-red-600 mx-auto mb-2" />
+                                <p className="text-sm text-red-700">{redirectError}</p>
+                            </div>
+                        ) : (
+                            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                                {isRedirecting ? (
+                                    <div className="flex items-center justify-center gap-2">
+                                        <Loader2 className="h-4 w-4 animate-spin text-green-600" />
+                                        <p className="text-sm text-green-700">
+                                            Redirecting to dashboard...
+                                        </p>
+                                    </div>
+                                ) : (
+                                    <p className="text-sm text-green-700">
+                                        Redirecting in <span className="font-bold text-lg">{countdown}</span> seconds...
+                                    </p>
+                                )}
+                            </div>
+                        )}
 
-                        <Link href={redirectUrl}>
-                            <Button className="w-full h-12">
-                                Continue to Dashboard
-                                <ArrowRight className="h-4 w-4 ml-2" />
+                        {!sessionReady && !redirectError && (
+                            <p className="text-xs text-muted-foreground">
+                                <Loader2 className="h-3 w-3 inline animate-spin mr-1" />
+                                Establishing session...
+                            </p>
+                        )}
+
+                        <Link href={redirectUrl} onClick={(e) => {
+                            e.preventDefault()
+                            handleRedirect()
+                        }}>
+                            <Button className="w-full h-12" disabled={isRedirecting}>
+                                {isRedirecting ? (
+                                    <>
+                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                        Redirecting...
+                                    </>
+                                ) : (
+                                    <>
+                                        Continue to Dashboard
+                                        <ArrowRight className="h-4 w-4 ml-2" />
+                                    </>
+                                )}
                             </Button>
                         </Link>
+
+                        {redirectError && (
+                            <p className="text-xs text-muted-foreground">
+                                If you continue to have issues, please try logging in manually.
+                            </p>
+                        )}
                     </CardContent>
                 </Card>
             </div>

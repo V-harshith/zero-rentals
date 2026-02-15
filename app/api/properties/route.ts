@@ -151,23 +151,7 @@ export async function POST(request: NextRequest) {
       }, { status: 403 })
     }
 
-    // Fallback: Direct database check for 1 property limit
     const supabase = await createClient()
-    const { data: existingProperties, error: countError } = await supabase
-      .from('properties')
-      .select('id')
-      .eq('owner_id', user.id)
-      .neq('status', 'deleted')
-
-    if (countError) {
-      console.error('Error checking property count:', countError)
-    } else if (existingProperties && existingProperties.length >= 1) {
-      return NextResponse.json({
-        error: 'You can only post 1 property. Please delete your existing property to post a new one.',
-        current: existingProperties.length,
-        limit: 1
-      }, { status: 403 })
-    }
 
     const body = await request.json()
 

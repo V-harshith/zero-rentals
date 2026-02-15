@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase-server"
 import { supabaseAdmin } from "@/lib/supabase-admin"
+import { decrypt, decryptLegacy } from "@/lib/encryption"
 
 // ============================================================================
 // GET /api/admin/bulk-import/jobs/[id]/credentials
@@ -36,15 +37,26 @@ export async function GET(
             return NextResponse.json({ error: "Access denied" }, { status: 403 })
         }
 
-        // Parse credentials
+        // Parse credentials (supports both AES and legacy base64)
         let credentials: any[] = []
 
         if (job.credentials_encrypted) {
             try {
-                const decrypted = Buffer.from(job.credentials_encrypted, 'base64').toString()
+                // Try AES decryption first
+                const decrypted = decrypt(job.credentials_encrypted)
                 credentials = JSON.parse(decrypted)
             } catch (e) {
-                console.error("Failed to decrypt credentials:", e)
+                // Try legacy base64 decryption
+                const legacy = decryptLegacy(job.credentials_encrypted)
+                if (legacy) {
+                    try {
+                        credentials = JSON.parse(legacy)
+                    } catch (parseError) {
+                        console.error("Failed to parse legacy credentials:", parseError)
+                    }
+                } else {
+                    console.error("Failed to decrypt credentials:", e)
+                }
             }
         }
 

@@ -49,33 +49,51 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Ref to prevent duplicate getCurrentUser calls
   const isLoadingUserRef = useRef(false)
   const hasInitializedRef = useRef(false)
+  const pendingLoadPromiseRef = useRef<Promise<void> | null>(null)
+  const lastLoadTimeRef = useRef<number>(0)
+  const COOLDOWN_MS = 5000 // 5-second cooldown between requests
 
-  // Memoized function to load user - prevents duplicate calls
+  // Memoized function to load user - prevents duplicate calls with deduplication
   const loadUser = useCallback(async (source: string) => {
-    // Skip if already loading
-    if (isLoadingUserRef.current) {
+    // Check cooldown to prevent rapid successive calls
+    const now = Date.now()
+    if (now - lastLoadTimeRef.current < COOLDOWN_MS) {
+      console.log(`[AUTH] Skipping loadUser from "${source}" - within cooldown period`)
       return
     }
 
-    isLoadingUserRef.current = true
-
-    try {
-      const currentUser = await getCurrentUser()
-      if (currentUser) {
-        setUser({
-          ...currentUser,
-          role: currentUser.role as UserType,
-          type: currentUser.role as UserType,
-        } as UserWithLegacyType)
-        initializeSessionManagement()
-      } else {
-        setUser(null)
-      }
-    } catch {
-      setUser(null)
-    } finally {
-      isLoadingUserRef.current = false
+    // Skip if already loading - return existing promise for deduplication
+    if (isLoadingUserRef.current && pendingLoadPromiseRef.current) {
+      console.log(`[AUTH] Reusing pending loadUser promise from "${source}"`)
+      return pendingLoadPromiseRef.current
     }
+
+    isLoadingUserRef.current = true
+    lastLoadTimeRef.current = now
+
+    const loadPromise = (async () => {
+      try {
+        const currentUser = await getCurrentUser()
+        if (currentUser) {
+          setUser({
+            ...currentUser,
+            role: currentUser.role as UserType,
+            type: currentUser.role as UserType,
+          } as UserWithLegacyType)
+          initializeSessionManagement()
+        } else {
+          setUser(null)
+        }
+      } catch {
+        setUser(null)
+      } finally {
+        isLoadingUserRef.current = false
+        pendingLoadPromiseRef.current = null
+      }
+    })()
+
+    pendingLoadPromiseRef.current = loadPromise
+    return loadPromise
   }, [])
 
   // Load user on mount and listen for auth changes
@@ -84,15 +102,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (hasInitializedRef.current) return
     hasInitializedRef.current = true
 
-    // Safety timeout to prevent permanent loading state
+    // Safety timeout to prevent permanent loading state (20 seconds)
     const safetyTimeout = setTimeout(() => {
       setIsLoading((current) => {
         if (current) {
+          console.log('[AUTH] Safety timeout reached - forcing loading state to false')
           return false
         }
         return current
       })
-    }, 15000)
+    }, 20000)
 
     // Initial user load - don't set isLoading false here
     // Wait for INITIAL_SESSION event to ensure session is fully restored
@@ -118,6 +137,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } else if (event === "SIGNED_OUT") {
         setUser(null)
         setIsLoading(false)
+      } else if (event === "TOKEN_REFRESHED") {
+        // Session was refreshed - reload user to ensure we have latest data
+        console.log('[AUTH] Token refreshed - reloading user data')
+        await loadUser("TOKEN_REFRESHED")
       }
     })
 
@@ -134,10 +157,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     window.addEventListener('storage', handleStorageChange)
 
+    // CRITICAL FIX: Listen for visibility changes to recover session when tab becomes active
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        console.log('[AUTH] Tab became visible - checking session recovery')
+        // Only reload if we don't have a user and aren't already loading
+        if (!user && !isLoadingUserRef.current) {
+          loadUser("visibility-change")
+        }
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
     return () => {
       clearTimeout(safetyTimeout)
       subscription.unsubscribe()
       window.removeEventListener('storage', handleStorageChange)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
   }, [loadUser])
 

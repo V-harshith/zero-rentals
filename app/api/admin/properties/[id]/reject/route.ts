@@ -107,7 +107,11 @@ export async function PUT(
     }
 
     return NextResponse.json({ data })
-  } catch (error) {
-    return NextResponse.json({ error: 'Failed to reject property' }, { status: 500 })
+  } catch (error: any) {
+    console.error('[ADMIN REJECT] Error:', error?.message || error)
+    return NextResponse.json(
+      { error: error?.message || 'Failed to reject property' },
+      { status: 500 }
+    )
   }
 }

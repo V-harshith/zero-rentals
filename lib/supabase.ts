@@ -4,6 +4,8 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 
 // Configure Supabase client with persistent storage
+// CRITICAL: Uses cookies by default to match middleware behavior
+// This ensures session consistency between client and server
 export const supabase = createBrowserClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     // Enable automatic token refresh
@@ -12,8 +14,8 @@ export const supabase = createBrowserClient(supabaseUrl, supabaseAnonKey, {
     persistSession: true,
     // Detect session from URL (for email verification links)
     detectSessionInUrl: true,
-    // Use localStorage for session persistence
-    storage: typeof window !== 'undefined' ? window.localStorage : undefined,
+    // NOTE: No storage override - uses cookies by default to match middleware
+    // This ensures session consistency between client and server
     // Flow type for PKCE (more secure)
     flowType: 'pkce',
   },

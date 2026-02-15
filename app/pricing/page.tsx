@@ -56,7 +56,7 @@ export default function PricingPage() {
       description: "Perfect for getting started",
       features: [
         "1 property listing",
-        "Max 10 photos per property",
+        "Max 5 photos per property",
         "Standard visibility",
         "Email support (48 hours)",
         "Valid for 30 days per listing",
@@ -73,7 +73,7 @@ export default function PricingPage() {
       iconBg: "bg-gradient-to-br from-slate-400 to-slate-600",
       description: "Great for testing the waters",
       features: [
-        "1 property listing",
+        "3 property listings",
         "Max 10 photos per property",
         "Featured in search results",
         "Basic analytics dashboard",
@@ -92,8 +92,8 @@ export default function PricingPage() {
       iconBg: "bg-gradient-to-br from-yellow-400 via-yellow-500 to-amber-600",
       description: "Most popular for PG owners",
       features: [
-        "1 property listing",
-        "Max 10 photos per property",
+        "5 property listings",
+        "Max 20 photos per property",
         "Top featured placement",
         "Advanced analytics & insights",
         "Priority email support (12 hours)",
@@ -113,8 +113,8 @@ export default function PricingPage() {
       iconBg: "bg-gradient-to-br from-cyan-400 via-blue-500 to-indigo-600",
       description: "Best for professional PG chains",
       features: [
-        "1 property listing",
-        "Max 10 photos per property",
+        "10 property listings",
+        "Max 30 photos per property",
         "Premium featured placement",
         "Complete analytics suite",
         "24/7 priority support",
@@ -133,8 +133,8 @@ export default function PricingPage() {
       iconBg: "bg-gradient-to-br from-purple-500 via-pink-500 to-rose-500",
       description: "Ultimate plan for large businesses",
       features: [
-        "1 property listing",
-        "Max 10 photos per property",
+        "Unlimited property listings",
+        "Max 50 photos per property",
         "Highest visibility",
         "Dedicated account manager",
         "API access for integrations",

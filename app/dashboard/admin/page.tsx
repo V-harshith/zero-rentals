@@ -14,9 +14,12 @@ import React, { useEffect, useState, useCallback, useRef, Suspense } from "react
 import Link from "next/link"
 import { toast } from "sonner"
 import { getPendingProperties, getAllPayments, getTotalPropertyCount } from "@/lib/data-service"
+import { supabase } from "@/lib/supabase"
+import type { RealtimeChannel } from "@supabase/supabase-js"
 import type { Property, Payment } from "@/lib/types"
 import { getAllUsers, type User as AdminUser } from "@/lib/user-service"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
+import { useCsrf } from "@/lib/csrf-context"
 
 // Import modular components
 import { PendingPropertiesTab } from "@/components/dashboard/admin/PendingPropertiesTab"
@@ -128,6 +131,7 @@ function MobileNav({ userName, onLogout }: { userName: string; onLogout: () => v
 
 function AdminDashboard() {
   const { user, logout } = useAuth()
+  const { csrfToken } = useCsrf()
   const searchParams = useSearchParams()
 
   // Data states
@@ -156,6 +160,20 @@ function AdminDashboard() {
 
   // Ref to track if a tab data load is in progress (prevents race conditions)
   const loadingTabsRef = useRef<Set<string>>(new Set())
+
+  // Real-time subscriptions ref for cleanup
+  const subscriptionsRef = useRef<RealtimeChannel[]>([])
+
+  // Last updated timestamps for data freshness
+  const [lastUpdated, setLastUpdated] = useState<{
+    pending: Date | null
+    users: Date | null
+    payments: Date | null
+  }>({
+    pending: null,
+    users: null,
+    payments: null,
+  })
 
   useEffect(() => {
     // Initial load
@@ -196,12 +214,83 @@ function AdminDashboard() {
     }
 
     initDashboard()
-  }, [user])
 
-  const loadPendingProperties = async () => {
+    // Setup real-time subscriptions for data sync
+    if (user) {
+      console.log('[ADMIN] Setting up real-time subscriptions')
+
+      // Subscribe to properties table changes
+      const propertiesChannel = supabase
+        .channel('admin-properties-changes')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'properties' },
+          (payload) => {
+            console.log('[ADMIN] Properties change received:', payload.eventType)
+            // Refresh pending properties if a property was inserted/updated/deleted
+            if (activeTab === 'pending') {
+              loadPendingProperties(true)
+            }
+          }
+        )
+        .subscribe()
+
+      // Subscribe to users table changes
+      const usersChannel = supabase
+        .channel('admin-users-changes')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'users' },
+          (payload) => {
+            console.log('[ADMIN] Users change received:', payload.eventType)
+            if (activeTab === 'users' || activeTab === 'overview') {
+              loadUsers(true)
+            }
+          }
+        )
+        .subscribe()
+
+      // Subscribe to payments table changes
+      const paymentsChannel = supabase
+        .channel('admin-payments-changes')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'payments' },
+          (payload) => {
+            console.log('[ADMIN] Payments change received:', payload.eventType)
+            if (activeTab === 'payments' || activeTab === 'overview') {
+              loadPayments(true)
+            }
+          }
+        )
+        .subscribe()
+
+      subscriptionsRef.current = [propertiesChannel, usersChannel, paymentsChannel]
+    }
+
+    return () => {
+      // Cleanup subscriptions on unmount
+      subscriptionsRef.current.forEach(channel => {
+        supabase.removeChannel(channel)
+      })
+      subscriptionsRef.current = []
+    }
+  }, [user, activeTab])
+
+  const loadPendingProperties = async (force = false) => {
     try {
+      // Skip if data is fresh (within 10 seconds) unless forced
+      if (!force && lastUpdated.pending) {
+        const age = Date.now() - lastUpdated.pending.getTime()
+        if (age < 10000) {
+          console.log('[ADMIN] Skipping pending properties load - data is fresh')
+          return
+        }
+      }
+
       const properties = await getPendingProperties()
       setPendingProperties(properties)
+      setLastUpdated(prev => ({ ...prev, pending: new Date() }))
     } catch (error) {
       toast.error("Failed to load pending properties")
     }
@@ -222,7 +311,16 @@ function AdminDashboard() {
     setPendingProperties(prev => prev.filter(p => p.id !== propertyId))
   }
 
-  const loadUsers = async () => {
+  const loadUsers = async (force = false) => {
+    // Skip if data is fresh (within 10 seconds) unless forced
+    if (!force && lastUpdated.users) {
+      const age = Date.now() - lastUpdated.users.getTime()
+      if (age < 10000) {
+        console.log('[ADMIN] Skipping users load - data is fresh')
+        return
+      }
+    }
+
     setLoadingUsers(true)
     const timeoutId = setTimeout(() => {
       setLoadingUsers((current) => {
@@ -237,6 +335,7 @@ function AdminDashboard() {
     try {
       const data = await getAllUsers()
       setUsers(data)
+      setLastUpdated(prev => ({ ...prev, users: new Date() }))
     } catch (error) {
       toast.error("Failed to load users")
     } finally {
@@ -245,7 +344,16 @@ function AdminDashboard() {
     }
   }
 
-  const loadPayments = async () => {
+  const loadPayments = async (force = false) => {
+    // Skip if data is fresh (within 10 seconds) unless forced
+    if (!force && lastUpdated.payments) {
+      const age = Date.now() - lastUpdated.payments.getTime()
+      if (age < 10000) {
+        console.log('[ADMIN] Skipping payments load - data is fresh')
+        return
+      }
+    }
+
     setLoadingPayments(true)
     const timeoutId = setTimeout(() => {
       setLoadingPayments((current) => {
@@ -260,6 +368,7 @@ function AdminDashboard() {
     try {
       const data = await getAllPayments()
       setPayments(data)
+      setLastUpdated(prev => ({ ...prev, payments: new Date() }))
     } catch (error) {
       toast.error("Failed to load payments")
     } finally {
@@ -269,38 +378,56 @@ function AdminDashboard() {
   }
 
   const handleTabChange = (value: string) => {
+    const previousTab = activeTab
     setActiveTab(value)
+
+    // Force refresh when switching tabs to ensure fresh data
+    const forceRefresh = previousTab !== value
 
     // Lazy load data only when tab is clicked
     // Use ref to prevent race conditions from rapid tab clicks
-    if (value === 'users' && users.length === 0 && !loadingUsers && !loadingTabsRef.current.has('users')) {
+    if (value === 'users' && !loadingUsers && !loadingTabsRef.current.has('users')) {
       loadingTabsRef.current.add('users')
-      loadUsers().finally(() => loadingTabsRef.current.delete('users'))
+      loadUsers(forceRefresh).finally(() => loadingTabsRef.current.delete('users'))
     }
-    if (value === 'payments' && payments.length === 0 && !loadingPayments && !loadingTabsRef.current.has('payments')) {
+    if (value === 'payments' && !loadingPayments && !loadingTabsRef.current.has('payments')) {
       loadingTabsRef.current.add('payments')
-      loadPayments().finally(() => loadingTabsRef.current.delete('payments'))
+      loadPayments(forceRefresh).finally(() => loadingTabsRef.current.delete('payments'))
     }
     if (value === 'overview') {
       // Load all data for stats if not already loaded
-      if (users.length === 0 && !loadingTabsRef.current.has('users')) {
+      if (!loadingTabsRef.current.has('users')) {
         loadingTabsRef.current.add('users')
-        loadUsers().finally(() => loadingTabsRef.current.delete('users'))
+        loadUsers(forceRefresh).finally(() => loadingTabsRef.current.delete('users'))
       }
-      if (payments.length === 0 && !loadingTabsRef.current.has('payments')) {
+      if (!loadingTabsRef.current.has('payments')) {
         loadingTabsRef.current.add('payments')
-        loadPayments().finally(() => loadingTabsRef.current.delete('payments'))
+        loadPayments(forceRefresh).finally(() => loadingTabsRef.current.delete('payments'))
+      }
+    }
+    if (value === 'pending') {
+      // Refresh pending properties when switching to pending tab
+      if (!loadingTabsRef.current.has('pending')) {
+        loadingTabsRef.current.add('pending')
+        loadPendingProperties(forceRefresh).finally(() => loadingTabsRef.current.delete('pending'))
       }
     }
   }
 
   const handleExportUsers = async (role?: string) => {
+    // Check for CSRF token before making request
+    if (!csrfToken) {
+      toast.error('Security token not available. Please refresh the page.')
+      return
+    }
+
     setExporting(true)
     try {
       const response = await fetch('/api/admin/export-users', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'x-csrf-token': csrfToken,
         },
         body: JSON.stringify({
           role: role || 'all',
@@ -325,20 +452,27 @@ function AdminDashboard() {
       window.URL.revokeObjectURL(url)
       document.body.removeChild(a)
       toast.success('Users exported successfully')
-    } catch (error) {
-      toast.error("Failed to export users")
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to export users')
     } finally {
       setExporting(false)
     }
   }
 
   const handleExportProperties = async () => {
+    // Check for CSRF token before making request
+    if (!csrfToken) {
+      toast.error('Security token not available. Please refresh the page.')
+      return
+    }
+
     setExporting(true)
     try {
       const response = await fetch('/api/admin/export-properties', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'x-csrf-token': csrfToken,
         },
         body: JSON.stringify({
           format: 'csv',
@@ -362,8 +496,8 @@ function AdminDashboard() {
       window.URL.revokeObjectURL(url)
       document.body.removeChild(a)
       toast.success('Properties exported successfully')
-    } catch (error) {
-      toast.error("Failed to export properties")
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to export properties')
     } finally {
       setExporting(false)
     }
@@ -624,6 +758,8 @@ function AdminDashboard() {
             <PaymentsTab
               payments={payments}
               loading={loadingPayments}
+              onRefresh={() => loadPayments(true)}
+              lastUpdated={lastUpdated.payments}
             />
           </TabsContent>
 
@@ -687,7 +823,11 @@ function AdminDashboard() {
                       variant="outline"
                       className="w-full"
                     >
-                      <Download className="h-4 w-4 mr-2" />
+                      {exporting ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <Download className="h-4 w-4 mr-2" />
+                      )}
                       Export Owners
                     </Button>
                     <Button
@@ -696,7 +836,11 @@ function AdminDashboard() {
                       variant="outline"
                       className="w-full"
                     >
-                      <Download className="h-4 w-4 mr-2" />
+                      {exporting ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <Download className="h-4 w-4 mr-2" />
+                      )}
                       Export Tenants
                     </Button>
                     <Button
@@ -705,7 +849,11 @@ function AdminDashboard() {
                       variant="outline"
                       className="w-full"
                     >
-                      <Download className="h-4 w-4 mr-2" />
+                      {exporting ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <Download className="h-4 w-4 mr-2" />
+                      )}
                       Export Properties
                     </Button>
                   </div>

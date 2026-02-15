@@ -27,6 +27,7 @@ import { Search, Loader2, CheckCircle, XCircle, Trash2 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
 import { updateUserStatus, verifyUser, type User } from "@/lib/user-service"
+import { useCsrf } from "@/lib/csrf-context"
 
 interface UsersManagementTabProps {
     users: User[]
@@ -45,6 +46,7 @@ export function UsersManagementTab({
     const [deletingUserId, setDeletingUserId] = useState<string | null>(null)
     const [userToDelete, setUserToDelete] = useState<User | null>(null)
     const [showDeleteDialog, setShowDeleteDialog] = useState(false)
+    const { csrfToken } = useCsrf()
 
     // Filter users based on search query prop
     const filteredUsers = users.filter(
@@ -115,7 +117,8 @@ export function UsersManagementTab({
             const response = await fetch(`/api/admin/users/${userToDelete.id}/delete`, {
                 method: 'DELETE',
                 headers: {
-                    'Authorization': `Bearer ${session.access_token}`
+                    'Authorization': `Bearer ${session.access_token}`,
+                    ...(csrfToken ? { 'x-csrf-token': csrfToken } : {})
                 }
             })
 

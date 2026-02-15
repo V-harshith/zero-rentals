@@ -94,6 +94,7 @@ function PostPropertyPage() {
     plan: string
     expiresAt: string
   } | null>(null)
+  const [isCheckingAccess, setIsCheckingAccess] = useState(true)
 
   // --- Fetch Subscription Limit ---
   useEffect(() => {
@@ -207,54 +208,68 @@ function PostPropertyPage() {
     if (user) {
       setIsAdmin(user.role === 'admin')
       // Admin bypasses ALL checks
-      if (user.role === 'admin') return
+      if (user.role === 'admin') {
+        setIsCheckingAccess(false)
+        return
+      }
+
+      // Edit mode bypasses subscription check (user already has property)
+      if (isEditMode) {
+        setIsCheckingAccess(false)
+        return
+      }
 
       // For owners: check subscription first, then property limit
       checkSubscriptionAndLimit(user.id)
     }
-  }, [user])
+  }, [user, isEditMode])
 
   const checkSubscriptionAndLimit = async (userId: string) => {
-    // 1. Check for active subscription
-    const { data: subscription } = await supabase
-      .from('subscriptions')
-      .select('status, plan_name')
-      .eq('user_id', userId)
-      .eq('status', 'active')
-      .gt('end_date', new Date().toISOString())
-      .maybeSingle()
+    try {
+      // 1. Check for active subscription
+      const { data: subscription } = await supabase
+        .from('subscriptions')
+        .select('status, plan_name')
+        .eq('user_id', userId)
+        .eq('status', 'active')
+        .gt('end_date', new Date().toISOString())
+        .maybeSingle()
 
-    setHasSubscription(!!subscription)
+      setHasSubscription(!!subscription)
 
-    // 2. Count existing properties (for all users)
-    const { count, error } = await supabase
-      .from('properties')
-      .select('*', { count: 'exact', head: true })
-      .eq('owner_id', userId)
-      .neq('status', 'deleted')
+      // 2. Count existing properties (for all users)
+      const { count, error } = await supabase
+        .from('properties')
+        .select('*', { count: 'exact', head: true })
+        .eq('owner_id', userId)
+        .neq('status', 'deleted')
 
-    if (error) {
-      console.error("Error checking property count:", error)
-      return
-    }
-
-    setExistingPropertyCount(count || 0)
-
-    // 3. Enforce business logic:
-    //    - First property: MUST have subscription (redirect to pricing)
-    //    - Second+ property: Show upgrade/payment modal
-    if (!isEditMode) {
-      // No subscription at all → redirect to pricing (first property requires plan)
-      if (!subscription) {
-        router.push('/pricing?redirect=post-property')
+      if (error) {
+        console.error("Error checking property count:", error)
         return
       }
 
-      // Has subscription but already has 1+ properties → show payment modal for addon
-      if ((count || 0) >= 1) {
-        setShowPaymentModal(true)
+      setExistingPropertyCount(count || 0)
+
+      // 3. Enforce business logic:
+      //    - First property: MUST have subscription (redirect to pricing)
+      //    - Second+ property: Show upgrade/payment modal
+      if (!isEditMode) {
+        // No subscription at all → redirect to pricing (first property requires plan)
+        if (!subscription) {
+          router.push('/pricing?redirect=post-property')
+          return
+        }
+
+        // Has subscription but already has 1+ properties → show payment modal for addon
+        if ((count || 0) >= 1) {
+          setShowPaymentModal(true)
+        }
+        // Has subscription and 0 properties → allow to post (first property included)
       }
-      // Has subscription and 0 properties → allow to post (first property included)
+    } finally {
+      // Check complete - hide loading state
+      setIsCheckingAccess(false)
     }
   }
 
@@ -714,6 +729,19 @@ function PostPropertyPage() {
     } finally {
       setIsSubmitting(false)
     }
+  }
+
+  // Show loading screen while checking subscription access (prevents flicker)
+  if (isCheckingAccess && !isEditMode && user?.role !== 'admin') {
+    return (
+      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center">
+        <div className="text-center space-y-4">
+          <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto" />
+          <h2 className="text-xl font-semibold text-gray-900">Checking Access...</h2>
+          <p className="text-gray-600">Please wait while we verify your subscription</p>
+        </div>
+      </div>
+    )
   }
 
   return (

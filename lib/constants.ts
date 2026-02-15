@@ -1,13 +1,13 @@
 /**
  * Centralized Plan Limits
- * All plans include 1 property. Additional properties require separate payment.
+ * Aligned with fulfillment logic in payment-actions.ts
  */
 export const PLAN_LIMITS = {
     FREE: 1,           // 1 property included
-    SILVER: 1,         // 1 property included (additional = paid)
-    GOLD: 1,           // 1 property included (additional = paid)
-    PLATINUM: 1,       // 1 property included (additional = paid)
-    ELITE: 1,          // 1 property included (additional = paid)
+    SILVER: 3,         // 3 properties included
+    GOLD: 5,           // 5 properties included
+    PLATINUM: 10,      // 10 properties included
+    ELITE: 999,        // Unlimited (practically)
 } as const
 
 export const PLAN_NAMES = {
