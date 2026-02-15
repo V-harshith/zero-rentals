@@ -125,31 +125,47 @@ export default function BulkImportPage() {
         }
     }
 
-    // Handle Excel upload complete
-    const handleExcelComplete = useCallback((data: any) => {
-        setExcelData(data)
-        setCompletedSteps((prev) => new Set([...prev, "excel"]))
-        setCurrentStep("images")
-    }, [])
-
-    // Handle image upload complete
-    const handleImagesComplete = useCallback((data: any) => {
-        setImageData(data)
-        setCompletedSteps((prev) => new Set([...prev, "images"]))
-        setCurrentStep("review")
-        loadPreviewData()
-    }, [])
-
-    // Load preview data
-    const loadPreviewData = async () => {
+    // Load preview data - defined before handlers that use it
+    const loadPreviewData = useCallback(async (retryCount = 0) => {
         if (!jobId) return
+        console.log(`[Preview] Loading preview data for job ${jobId}...`)
         try {
-            const res = await fetch(`/api/admin/bulk-import/jobs/${jobId}/preview`)
+            // Add timeout to fetch request
+            const controller = new AbortController()
+            const timeoutId = setTimeout(() => controller.abort(), 30000) // 30 second timeout
+
+            const res = await fetch(`/api/admin/bulk-import/jobs/${jobId}/preview`, {
+                signal: controller.signal,
+            })
+            clearTimeout(timeoutId)
+
+            console.log(`[Preview] Response status: ${res.status}`)
+
             if (res.ok) {
                 const data = await res.json()
+                console.log(`[Preview] Data loaded successfully:`, {
+                    total_properties: data.summary?.total_properties,
+                    total_images: data.summary?.total_images,
+                    properties_count: data.properties?.length,
+                })
                 setPreviewData(data)
             } else {
-                const errorData = await res.json().catch(() => ({ error: "Failed to load preview" }))
+                const errorText = await res.text()
+                console.error(`[Preview] API error (${res.status}):`, errorText)
+
+                // Retry on 5xx errors (up to 2 retries)
+                if (res.status >= 500 && retryCount < 2) {
+                    console.log(`[Preview] Retrying... (${retryCount + 1}/2)`)
+                    await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1)))
+                    return loadPreviewData(retryCount + 1)
+                }
+
+                let errorData
+                try {
+                    errorData = JSON.parse(errorText)
+                } catch {
+                    errorData = { error: `Server error: ${res.status}` }
+                }
                 toast.error(errorData.error || "Failed to load preview data")
                 // Set empty preview data so review step can still render
                 setPreviewData({
@@ -171,9 +187,20 @@ export default function BulkImportPage() {
                     new_owners_preview: [],
                 })
             }
-        } catch (error) {
-            console.error("Failed to load preview:", error)
-            toast.error("Failed to load preview data. Please try again.")
+        } catch (error: any) {
+            console.error("[Preview] Failed to load preview:", error)
+
+            // Retry on network errors (up to 2 retries)
+            if (error.name === 'AbortError') {
+                toast.error("Request timed out. Please try again.")
+            } else if (retryCount < 2) {
+                console.log(`[Preview] Retrying after error... (${retryCount + 1}/2)`)
+                await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1)))
+                return loadPreviewData(retryCount + 1)
+            } else {
+                toast.error("Failed to load preview data. Please try again.")
+            }
+
             // Set empty preview data so review step can still render
             setPreviewData({
                 job_id: jobId,
@@ -194,7 +221,27 @@ export default function BulkImportPage() {
                 new_owners_preview: [],
             })
         }
-    }
+    }, [jobId])
+
+    // Handle Excel upload complete
+    const handleExcelComplete = useCallback((data: any) => {
+        setExcelData(data)
+        setCompletedSteps((prev) => new Set([...prev, "excel"]))
+        setCurrentStep("images")
+    }, [])
+
+    // Handle image upload complete
+    const handleImagesComplete = useCallback(async (data: any) => {
+        console.log("[Flow] Images upload complete, transitioning to review...", {
+            matched_psns: data?.matched_psns,
+            total_images: data?.total_images,
+        })
+        setImageData(data)
+        setCompletedSteps((prev) => new Set([...prev, "images"]))
+        // Load preview data first, then transition to review step
+        await loadPreviewData()
+        setCurrentStep("review")
+    }, [loadPreviewData])
 
     // Handle import complete
     const handleImportComplete = useCallback((data: any) => {
@@ -364,11 +411,11 @@ export default function BulkImportPage() {
                                                         setCompletedSteps(new Set())
                                                     }
                                                 }}
-                                                onSkip={() => {
+                                                onSkip={async () => {
                                                     // Skip image upload and go directly to review
                                                     setCompletedSteps((prev) => new Set([...prev, "images"]))
+                                                    await loadPreviewData()
                                                     setCurrentStep("review")
-                                                    loadPreviewData()
                                                 }}
                                             />
                                         )}
@@ -392,7 +439,14 @@ export default function BulkImportPage() {
                                             ) : (
                                                 <div className="flex flex-col items-center justify-center py-12">
                                                     <Loader2 className="h-8 w-8 animate-spin text-muted-foreground mb-4" />
-                                                    <p className="text-muted-foreground">Loading preview data...</p>
+                                                    <p className="text-muted-foreground mb-4">Loading preview data...</p>
+                                                    <Button
+                                                        variant="outline"
+                                                        size="sm"
+                                                        onClick={() => loadPreviewData()}
+                                                    >
+                                                        Retry Loading
+                                                    </Button>
                                                 </div>
                                             )
                                         )}

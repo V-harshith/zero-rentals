@@ -12,12 +12,14 @@ export async function GET(
 ) {
     try {
         const { id: jobId } = await params
+        console.log(`[Preview API] Getting preview for job ${jobId}`)
 
         // Auth check
         const supabase = await createClient()
         const { data: { user: authUser }, error: authError } = await supabase.auth.getUser()
 
         if (authError || !authUser) {
+            console.log(`[Preview API] Unauthorized request`)
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
         }
 
@@ -30,14 +32,24 @@ export async function GET(
             .single()
 
         if (jobError || !job) {
+            console.log(`[Preview API] Job not found: ${jobId}`)
             return NextResponse.json({ error: "Job not found" }, { status: 404 })
         }
 
+        console.log(`[Preview API] Job found: ${job.id}, status: ${job.status}`)
+
         // Parse data
-        const properties = job.parsed_properties as any[] || []
-        const imagesByPSN = job.images_by_psn as Record<string, any[]> || {}
-        const orphanedImages = job.orphaned_images as any[] || []
-        const newOwners = job.new_owners as any[] || []
+        const properties = (job.parsed_properties as any[]) || []
+        const imagesByPSN = (job.images_by_psn as Record<string, any[]>) || {}
+        const orphanedImages = (job.orphaned_images as any[]) || []
+        const newOwners = (job.new_owners as any[]) || []
+
+        console.log(`[Preview API] Data parsed:`, {
+            properties_count: properties.length,
+            images_by_psn_keys: Object.keys(imagesByPSN),
+            orphaned_count: orphanedImages.length,
+            new_owners_count: newOwners.length,
+        })
 
         // Build property preview
         const propertyPreviews = properties.map(prop => {
@@ -68,7 +80,7 @@ export async function GET(
             .filter(p => !p.has_images)
             .map(p => p.psn)
 
-        return NextResponse.json({
+        const response = {
             job_id: job.id,
             status: job.status,
             step: job.step,
@@ -95,9 +107,12 @@ export async function GET(
                 phone: o.phone,
                 properties: o.properties || [],
             })),
-        })
+        }
+
+        console.log(`[Preview API] Response prepared successfully`)
+        return NextResponse.json(response)
     } catch (error: any) {
-        console.error("Preview error:", error)
+        console.error("[Preview API] Error:", error)
         return NextResponse.json(
             { error: error.message || "Failed to get preview" },
             { status: 500 }
