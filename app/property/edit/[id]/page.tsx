@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import Link from "next/link"
 import { useRouter, useParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
@@ -609,7 +609,7 @@ function EditPropertyPage() {
 
                         {/* Step 1: Basic Details — Shared Component */}
                         {currentStep === 1 && (
-                            <BasicDetailsStep formData={formData} setFormData={updateFormData} />
+                            <BasicDetailsStep formData={formData} setFormData={(newData) => updateFormData(() => newData)} />
                         )}
 
                         {/* Step 2: Room Selection — Shared Component */}

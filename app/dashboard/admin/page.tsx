@@ -128,6 +128,7 @@ function MobileNav({ userName, onLogout }: { userName: string; onLogout: () => v
 
 function AdminDashboard() {
   const { user, logout } = useAuth()
+  const searchParams = useSearchParams()
 
   // Data states
   const [pendingProperties, setPendingProperties] = useState<Property[]>([])

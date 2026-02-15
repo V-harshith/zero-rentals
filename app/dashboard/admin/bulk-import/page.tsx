@@ -408,7 +408,7 @@ export default function BulkImportPage() {
                                                             </span>
                                                             <span className="text-muted-foreground"> / </span>
                                                             <span>{job.total_properties || 0}</span>
-                                                            {job.failed_properties > 0 && (
+                                                            {(job.failed_properties || 0) > 0 && (
                                                                 <span className="text-red-600 ml-1">
                                                                     ({job.failed_properties} failed)
                                                                 </span>
