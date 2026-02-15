@@ -23,6 +23,7 @@ interface GooglePlacesInputProps {
   required?: boolean
   types?: string[]
   countryRestriction?: string
+  onFocus?: () => void
 }
 
 export function GooglePlacesInput({
@@ -33,7 +34,8 @@ export function GooglePlacesInput({
   placeholder = "Start typing to search...",
   required = false,
   types = ['(cities)'],
-  countryRestriction = 'in'
+  countryRestriction = 'in',
+  onFocus: onFocusProp
 }: GooglePlacesInputProps) {
   const [suggestions, setSuggestions] = useState<PlaceSuggestion[]>([])
   const [showSuggestions, setShowSuggestions] = useState(false)
@@ -41,6 +43,8 @@ export function GooglePlacesInput({
   const [isGoogleLoaded, setIsGoogleLoaded] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const suggestionsRef = useRef<HTMLDivElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const blurTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const autocompleteServiceRef = useRef<google.maps.places.AutocompleteService | null>(null)
   const sessionTokenRef = useRef<google.maps.places.AutocompleteSessionToken | null>(null)
 
@@ -122,50 +126,74 @@ export function GooglePlacesInput({
     return () => clearTimeout(timer)
   }, [value, fetchSuggestions])
 
-  // Handle selection
-  const handleSelect = (suggestion: PlaceSuggestion) => {
+  // Handle selection - close suggestions immediately
+  const handleSelect = useCallback((suggestion: PlaceSuggestion) => {
     onChange(suggestion.mainText)
     setShowSuggestions(false)
     setSuggestions([])
+    // Clear any pending blur timeout
+    if (blurTimeoutRef.current) {
+      clearTimeout(blurTimeoutRef.current)
+      blurTimeoutRef.current = null
+    }
     // Generate new session token after selection
     if (window.google?.maps?.places) {
       sessionTokenRef.current = new window.google.maps.places.AutocompleteSessionToken()
     }
-  }
+  }, [onChange])
 
-  // Handle input focus - only show suggestions on explicit user interaction
-  const handleFocus = () => {
-    // Only show suggestions if user has typed something and we have results
-    // Don't auto-show on focus if the value hasn't changed
+  // Handle input focus - show suggestions if we have them, and notify parent
+  const handleFocus = useCallback(() => {
+    // Notify parent that this input is focused (for closing other dropdowns)
+    onFocusProp?.()
+    // Show suggestions if user has typed something and we have results
     if (value && value.length >= 2 && suggestions.length > 0) {
       setShowSuggestions(true)
     }
-  }
+  }, [onFocusProp, value, suggestions.length])
 
   // Handle input blur - hide suggestions after a short delay to allow click selection
-  const handleBlur = () => {
+  const handleBlur = useCallback(() => {
     // Small delay to allow click events on suggestions to fire first
-    setTimeout(() => {
+    blurTimeoutRef.current = setTimeout(() => {
       setShowSuggestions(false)
-    }, 200)
-  }
+    }, 150)
+  }, [])
 
   // Clear input
-  const handleClear = () => {
+  const handleClear = useCallback(() => {
     onChange('')
     setSuggestions([])
     setShowSuggestions(false)
     inputRef.current?.focus()
-  }
+  }, [onChange])
+
+  // Close suggestions programmatically (used by parent)
+  const closeSuggestions = useCallback(() => {
+    setShowSuggestions(false)
+  }, [])
+
+  // Expose closeSuggestions via a ref or window event
+  useEffect(() => {
+    const handleCloseAllSuggestions = (event: CustomEvent) => {
+      // Close if the event is not from this component
+      if (event.detail?.componentId !== id) {
+        closeSuggestions()
+      }
+    }
+
+    window.addEventListener('closeGooglePlacesSuggestions' as any, handleCloseAllSuggestions)
+    return () => {
+      window.removeEventListener('closeGooglePlacesSuggestions' as any, handleCloseAllSuggestions)
+    }
+  }, [id, closeSuggestions])
 
   // Click outside to close
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (
-        suggestionsRef.current &&
-        !suggestionsRef.current.contains(event.target as Node) &&
-        inputRef.current &&
-        !inputRef.current.contains(event.target as Node)
+        containerRef.current &&
+        !containerRef.current.contains(event.target as Node)
       ) {
         setShowSuggestions(false)
       }
@@ -174,8 +202,17 @@ export function GooglePlacesInput({
     return () => document.removeEventListener("mousedown", handleClickOutside)
   }, [])
 
+  // Cleanup blur timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (blurTimeoutRef.current) {
+        clearTimeout(blurTimeoutRef.current)
+      }
+    }
+  }, [])
+
   return (
-    <div className="space-y-2">
+    <div ref={containerRef} className="space-y-2">
       <Label htmlFor={id}>
         {label}
         {required && <span className="text-red-500 ml-1">*</span>}
@@ -223,7 +260,11 @@ export function GooglePlacesInput({
                 <button
                   key={suggestion.placeId}
                   type="button"
-                  onClick={() => handleSelect(suggestion)}
+                  onMouseDown={(e) => {
+                    // Prevent default to keep focus on input until click completes
+                    e.preventDefault()
+                    handleSelect(suggestion)
+                  }}
                   className="w-full px-4 py-3 text-left border-b last:border-0 hover:bg-gray-50 transition-colors"
                 >
                   <div className="flex items-start gap-2">

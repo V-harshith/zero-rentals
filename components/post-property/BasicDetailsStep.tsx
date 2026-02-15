@@ -21,6 +21,8 @@ interface BasicDetailsStepProps {
     setSelectedExistingOwner?: (owner: { id: string; name: string; email: string; phone: string } | null) => void
 }
 
+type ActiveField = 'city' | 'area' | null
+
 const BasicDetailsStepComponent = ({
     formData, setFormData, isAdmin,
     ownerMode = 'new', setOwnerMode,
@@ -31,10 +33,16 @@ const BasicDetailsStepComponent = ({
     const [searchResults, setSearchResults] = useState<Array<{ id: string; name: string; email: string; phone: string }>>([])
     const [isSearching, setIsSearching] = useState(false)
     const [showDropdown, setShowDropdown] = useState(false)
+    const [activeGooglePlacesField, setActiveGooglePlacesField] = useState<ActiveField>(null)
 
     const updateField = useCallback((field: keyof FormData, value: string) => {
         setFormData({ ...formData, [field]: value })
     }, [formData, setFormData])
+
+    // Handle Google Places field focus - close other dropdowns
+    const handleGooglePlacesFocus = useCallback((field: ActiveField) => {
+        setActiveGooglePlacesField(field)
+    }, [])
 
     const updateOwnerField = useCallback((field: string, value: string) => {
         if (setOwnerDetails && ownerDetails) {
@@ -317,6 +325,7 @@ const BasicDetailsStepComponent = ({
                         placeholder="Start typing city name..."
                         required={true}
                         types={['(cities)']}
+                        onFocus={() => handleGooglePlacesFocus('city')}
                     />
                     <GooglePlacesInput
                         id="area"
@@ -326,6 +335,7 @@ const BasicDetailsStepComponent = ({
                         placeholder="e.g. Koramangala block 4"
                         required={true}
                         types={['geocode']}
+                        onFocus={() => handleGooglePlacesFocus('area')}
                     />
                 </div>
 
