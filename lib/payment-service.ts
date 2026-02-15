@@ -32,6 +32,14 @@ export async function createRazorpayOrder(
     currency: string = 'INR',
     notes: Record<string, string> = {}
 ) {
+    // Validate amount
+    if (!amount || amount <= 0) {
+        return {
+            order: null,
+            error: new Error('Invalid amount. Amount must be greater than 0.')
+        }
+    }
+
     const razorpay = getRazorpayInstance()
 
     if (!razorpay) {
@@ -45,15 +53,26 @@ export async function createRazorpayOrder(
         amount: amount * 100, // Amount in paise
         currency,
         receipt: `receipt_${Date.now()}`,
-        notes
+        notes: {
+            ...notes,
+            // Ensure all note values are strings (Razorpay requirement)
+            userId: String(notes.userId || ''),
+            planName: String(notes.planName || ''),
+            duration: String(notes.duration || '')
+        }
     }
 
     try {
         const order = await razorpay.orders.create(options)
         return { order, error: null }
-    } catch (error) {
+    } catch (error: any) {
         console.error('Razorpay Order Creation Error:', error)
-        return { order: null, error }
+        // Log detailed error for debugging
+        if (error.statusCode) {
+            console.error('Razorpay Error Status:', error.statusCode)
+            console.error('Razorpay Error Message:', error.error?.description || error.message)
+        }
+        return { order: null, error: new Error(error.error?.description || error.message || 'Failed to create payment order') }
     }
 }
 
