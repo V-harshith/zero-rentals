@@ -7,35 +7,52 @@ import { supabaseAdmin } from "@/lib/supabase-admin"
 // Expected format: "Harshth Prop Pics/1053/image.jpg" where 1053 is PSN
 // ============================================================================
 function extractPSNFromPath(filepath: string): string | null {
+    console.log(`[PSN Extraction] Processing path: "${filepath}"`)
+
     // Remove leading/trailing slashes and normalize
     const normalizedPath = filepath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
     const parts = normalizedPath.split('/')
+
+    console.log(`[PSN Extraction] Normalized path: "${normalizedPath}", Parts:`, parts)
 
     // Try folder name first (should be the first folder after root)
     // Format: "Harshth Prop Pics/1053/image.jpg" or "1053/image.jpg"
     if (parts.length >= 2) {
         const potentialPsn = parts[parts.length - 2] // Second to last is folder name
-        if (/^[a-zA-Z0-9-_]+$/.test(potentialPsn)) {
+        console.log(`[PSN Extraction] Checking folder name: "${potentialPsn}"`)
+
+        // PSN should be numeric (digits only) - matches test expectations
+        if (/^\d+$/.test(potentialPsn)) {
+            console.log(`[PSN Extraction] SUCCESS - Extracted PSN "${potentialPsn}" from folder name`)
             return potentialPsn
         }
+        console.log(`[PSN Extraction] Folder name "${potentialPsn}" does not match numeric pattern`)
+    } else {
+        console.log(`[PSN Extraction] Path has less than 2 parts, cannot extract folder name`)
     }
 
     // Try filename patterns as fallback
     const filename = parts[parts.length - 1] || ''
     const nameWithoutExt = filename.replace(/\.[^/.]+$/, '')
 
-    // Patterns: "155", "PSN-155", "155-1", "155_1", "ABC123", "PSN-ABC123"
+    console.log(`[PSN Extraction] Trying filename fallback: "${nameWithoutExt}"`)
+
+    // Patterns: "155", "PSN-155", "155-1", "155_1"
     const patterns = [
-        /^([a-zA-Z0-9]+)$/,           // 155, ABC123
-        /^PSN-?([a-zA-Z0-9]+)$/i,     // PSN-155, PSN155, PSN-ABC123
-        /^([a-zA-Z0-9]+)[-_]\d+$/,    // 155-1, 155_1, ABC123-1
+        /^(\d+)$/,           // 155 (numeric only)
+        /^PSN-?(\d+)$/i,     // PSN-155, PSN155
+        /^(\d+)[-_]\d+$/,    // 155-1, 155_1
     ]
 
     for (const pattern of patterns) {
         const match = nameWithoutExt.match(pattern)
-        if (match) return match[1]
+        if (match) {
+            console.log(`[PSN Extraction] SUCCESS - Extracted PSN "${match[1]}" from filename`)
+            return match[1]
+        }
     }
 
+    console.log(`[PSN Extraction] FAILED - Could not extract PSN from path: "${filepath}"`)
     return null
 }
 
@@ -122,11 +139,20 @@ export async function POST(
                 const files: File[] = []
 
                 // Get all files from form data
+                console.log(`[Image Upload] Parsing form data entries...`)
                 for (const [key, value] of formData.entries()) {
-                    if (value instanceof File && value.type.startsWith('image/')) {
-                        files.push(value)
+                    console.log(`[Image Upload] Form entry: key="${key}", type="${value instanceof File ? 'File' : typeof value}"`)
+                    if (value instanceof File) {
+                        console.log(`[Image Upload] File details: name="${value.name}", type="${value.type}", size=${value.size}, webkitRelativePath="${(value as any).webkitRelativePath || 'N/A'}"`)
+                        if (value.type.startsWith('image/')) {
+                            files.push(value)
+                        } else {
+                            console.log(`[Image Upload] SKIPPED - Not an image file`)
+                        }
                     }
                 }
+
+                console.log(`[Image Upload] Total image files found: ${files.length}`)
 
                 if (files.length === 0) {
                     send({ error: "No image files found" })
@@ -145,6 +171,8 @@ export async function POST(
                 const parsedProperties = job.parsed_properties as any[] || []
                 const expectedPSNs = parsedProperties.map((p: any) => p.psn)
 
+                console.log(`[Image Upload] Expected PSNs from Excel:`, expectedPSNs)
+
                 send({
                     status: `Processing ${files.length} images...`,
                     total: files.length,
@@ -156,12 +184,16 @@ export async function POST(
                 const orphanedImages: any[] = []
                 const invalidFiles: string[] = []
 
+                console.log(`[Image Upload] Starting PSN extraction for ${files.length} files...`)
+
                 for (const file of files) {
                     // Get relative path from webkitRelativePath
-                    const relativePath = file.webkitRelativePath || file.name
+                    const relativePath = (file as any).webkitRelativePath || file.name
+                    console.log(`[Image Upload] Processing file: "${file.name}", relativePath: "${relativePath}"`)
                     const psn = extractPSNFromPath(relativePath)
 
                     if (!psn) {
+                        console.log(`[Image Upload] No PSN extracted for file "${file.name}" - marking as invalid`)
                         invalidFiles.push(file.name)
                         continue
                     }
@@ -174,6 +206,8 @@ export async function POST(
                         mime_type: file.type,
                     }
 
+                    console.log(`[Image Upload] File "${file.name}" -> PSN "${psn}", expected: ${expectedPSNs.includes(psn)}`)
+
                     if (expectedPSNs.includes(psn)) {
                         if (!imagesByPSN[psn]) imagesByPSN[psn] = []
                         imagesByPSN[psn].push({ ...imageInfo, file })
@@ -181,6 +215,14 @@ export async function POST(
                         orphanedImages.push(imageInfo)
                     }
                 }
+
+                console.log(`[Image Upload] Categorization complete:`, {
+                    matchedPSNs: Object.keys(imagesByPSN),
+                    matchedCount: Object.values(imagesByPSN).flat().length,
+                    orphanedCount: orphanedImages.length,
+                    invalidCount: invalidFiles.length,
+                    invalidFiles: invalidFiles.slice(0, 10) // First 10 invalid files
+                })
 
                 // Check for PSNs with too many images (generate warnings)
                 const warnings: string[] = []

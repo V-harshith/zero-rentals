@@ -47,6 +47,7 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
     const MAX_TOTAL_IMAGES = 500
 
     // Compress images before upload (max 2MB)
+    // PRESERVES webkitRelativePath which is critical for PSN extraction
     const compressImages = async (imageFiles: File[]): Promise<File[]> => {
         const options = {
             maxSizeMB: 2,
@@ -64,20 +65,44 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
             setStatus(`Compressing ${i + 1} of ${imageFiles.length}: ${file.name}...`)
 
             try {
+                // Store the original webkitRelativePath before compression
+                const originalPath = file.webkitRelativePath
+                console.log(`[Compression] Processing file ${i + 1}/${imageFiles.length}: "${file.name}", path: "${originalPath || 'N/A'}"`)
+
+                let processedFile: File
+
                 // Only compress if file is larger than 2MB
                 if (file.size > 2 * 1024 * 1024) {
-                    const compressedFile = await imageCompression(file, options)
-                    compressed.push(compressedFile)
+                    const compressedBlob = await imageCompression(file, options)
+                    // Create new File from blob, preserving the original name and path
+                    processedFile = new File([compressedBlob], file.name, {
+                        type: 'image/jpeg',
+                        lastModified: file.lastModified,
+                    })
                     originalSize += file.size
-                    compressedSize += compressedFile.size
+                    compressedSize += compressedBlob.size
+                    console.log(`[Compression] Compressed "${file.name}": ${(file.size / 1024 / 1024).toFixed(2)}MB -> ${(compressedBlob.size / 1024 / 1024).toFixed(2)}MB`)
                 } else {
-                    compressed.push(file)
+                    processedFile = file
                     originalSize += file.size
                     compressedSize += file.size
+                    console.log(`[Compression] Skipped "${file.name}" (already under 2MB)`)
                 }
+
+                // CRITICAL: Preserve webkitRelativePath for PSN extraction on server
+                if (originalPath) {
+                    Object.defineProperty(processedFile, 'webkitRelativePath', {
+                        value: originalPath,
+                        writable: false,
+                        configurable: true,
+                    })
+                    console.log(`[Compression] Preserved path for "${file.name}": "${originalPath}"`)
+                }
+
+                compressed.push(processedFile)
             } catch (err) {
-                console.error('Compression failed for', file.name, err)
-                // Use original file if compression fails
+                console.error('[Compression] Failed for', file.name, err)
+                // Use original file if compression fails, but ensure path is preserved
                 compressed.push(file)
                 originalSize += file.size
                 compressedSize += file.size
@@ -89,6 +114,7 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
             compressed: compressedSize / 1024 / 1024,
         })
 
+        console.log(`[Compression] Complete. Total files: ${compressed.length}, Original: ${(originalSize / 1024 / 1024).toFixed(2)}MB, Compressed: ${(compressedSize / 1024 / 1024).toFixed(2)}MB`)
         return compressed
     }
 
@@ -124,8 +150,8 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
             // Use second-to-last part (folder name containing images) - matches server
             const psn = parts.length >= 2 ? parts[parts.length - 2] : null
 
-            // Accept alphanumeric PSNs (not just digits) to match server regex /^[a-zA-Z0-9-_]+$/
-            if (psn && /^[a-zA-Z0-9-_]+$/i.test(psn)) {
+            // PSN should be numeric (digits only) - matches server regex /^\d+$/
+            if (psn && /^\d+$/.test(psn)) {
                 acc[psn] = (acc[psn] || 0) + 1
             }
             return acc
@@ -175,19 +201,16 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
 
         try {
             const formData = new FormData()
+            console.log(`[Upload] Preparing ${filesToUpload.length} files for upload...`)
+
             filesToUpload.forEach((file, index) => {
-                // Use original file's webkitRelativePath for PSN extraction
-                const originalFile = files[index]
-                const blobWithPath = new File([file], file.name, {
-                    type: file.type,
-                    lastModified: file.lastModified,
-                })
-                // @ts-ignore - webkitRelativePath is read-only but we need it
-                Object.defineProperty(blobWithPath, 'webkitRelativePath', {
-                    value: originalFile?.webkitRelativePath || file.name,
-                    writable: false,
-                })
-                formData.append("images", blobWithPath)
+                // The compressed file should already have webkitRelativePath preserved
+                // But we double-check and log for debugging
+                const path = (file as any).webkitRelativePath || file.name
+                console.log(`[Upload] Appending file ${index + 1}: "${file.name}", path: "${path}"`)
+
+                // Append directly - webkitRelativePath was preserved during compression
+                formData.append("images", file)
             })
 
             const res = await fetch(`/api/admin/bulk-import/jobs/${jobId}/images`, {
@@ -220,6 +243,7 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
 
                         try {
                             const data = JSON.parse(line)
+                            console.log('[Upload] Received:', data)
 
                             if (data.error) {
                                 throw new Error(data.error)
@@ -236,6 +260,11 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
                             // Handle warnings from API response
                             if (data.warnings && data.warnings.length > 0) {
                                 setWarnings(data.warnings)
+                            }
+
+                            // Log detailed progress info
+                            if (data.matched_psns !== undefined) {
+                                console.log(`[Upload] Progress: ${data.progress}%, Matched PSNs: ${data.matched_psns}, Orphaned: ${data.orphaned_count}`)
                             }
 
                             if (data.completed || data.progress === 100) {
@@ -315,8 +344,8 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
         // Use second-to-last part (folder name containing images) - matches server
         const psn = parts.length >= 2 ? parts[parts.length - 2] : null
 
-        // Accept alphanumeric PSNs (not just digits) to match server regex /^[a-zA-Z0-9-_]+$/
-        if (psn && /^[a-zA-Z0-9-_]+$/i.test(psn)) {
+        // PSN should be numeric (digits only) - matches server regex /^\d+$/
+        if (psn && /^\d+$/.test(psn)) {
             acc[psn] = (acc[psn] || 0) + 1
         }
         return acc

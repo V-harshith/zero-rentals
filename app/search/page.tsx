@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
+
 import { useRouter, useSearchParams } from "next/navigation"
 import { searchProperties } from "@/lib/data-service"
 import { SearchFilters } from "@/lib/types"
@@ -22,7 +23,6 @@ import { toast } from "sonner"
 
 export default function SearchPage() {
     const searchParams = useSearchParams()
-    const isUpdatingFromUrl = useRef(false)
     const parseFilters = (params: URLSearchParams): SearchFilters => {
         const lat = params.get("lat")
         const lng = params.get("lng")
@@ -50,6 +50,11 @@ export default function SearchPage() {
 
     const [filters, setFilters] = useState<SearchFilters>(() => parseFilters(searchParams))
 
+    // Re-initialize filters when searchParams change (e.g., back/forward navigation)
+    useEffect(() => {
+        setFilters(parseFilters(searchParams))
+    }, [searchParams])
+
     const [filteredProperties, setFilteredProperties] = useState<Property[]>([])
     const [loading, setLoading] = useState(true)
     const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false)
@@ -76,12 +81,17 @@ export default function SearchPage() {
 
     // Sync URL with filters
     const router = useRouter()
+    const prevFiltersRef = useRef<SearchFilters>(filters)
+
     useEffect(() => {
-        // Prevent circular updates when reading from URL
-        if (isUpdatingFromUrl.current) {
-            isUpdatingFromUrl.current = false
-            return
-        }
+        // Only update URL if filters have actually changed from user interaction
+        // not from URL initialization
+        const prev = prevFiltersRef.current
+        const filtersChanged = JSON.stringify(prev) !== JSON.stringify(filters)
+
+        if (!filtersChanged) return
+
+        prevFiltersRef.current = filters
 
         const params = new URLSearchParams()
         if (filters.location) params.set("location", filters.location)
@@ -99,19 +109,12 @@ export default function SearchPage() {
             params.set("lng", filters.coordinates.lng.toString())
         }
 
-        // Use replace to avoid history stack spam
-        router.replace(`/search?${params.toString()}`, { scroll: false })
-    }, [filters, router])
-
-    // Listen for URL changes (back/forward navigation)
-    useEffect(() => {
-        const handlePopState = () => {
-            isUpdatingFromUrl.current = true
-            setFilters(parseFilters(searchParams))
+        const newUrl = `/search?${params.toString()}`
+        // Use replace to avoid history stack spam, but only if URL actually changed
+        if (window.location.pathname + window.location.search !== newUrl) {
+            router.replace(newUrl, { scroll: false })
         }
-        window.addEventListener('popstate', handlePopState)
-        return () => window.removeEventListener('popstate', handlePopState)
-    }, [searchParams])
+    }, [filters, router])
 
     const updateFilter = (key: keyof SearchFilters, value: any) => {
         setFilters(prev => {
@@ -143,7 +146,7 @@ export default function SearchPage() {
     }
 
     const clearFilters = () => {
-        setFilters({
+        const clearedFilters: SearchFilters = {
             location: "",
             propertyType: undefined,
             roomType: [],
@@ -151,7 +154,10 @@ export default function SearchPage() {
             maxPrice: 50000,
             amenities: [],
             sortBy: "date-desc"
-        })
+        }
+        setFilters(clearedFilters)
+        // Clear URL params by navigating to /search
+        router.replace('/search', { scroll: false })
     }
 
     const getRoomTypes = () => {
