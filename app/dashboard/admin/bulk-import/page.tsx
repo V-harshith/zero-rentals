@@ -235,13 +235,21 @@ export default function BulkImportPage() {
         console.log("[Flow] Images upload complete, transitioning to review...", {
             matched_psns: data?.matched_psns,
             total_images: data?.total_images,
+            jobId: jobId,
         })
         setImageData(data)
         setCompletedSteps((prev) => new Set([...prev, "images"]))
         // Load preview data first, then transition to review step
-        await loadPreviewData()
-        setCurrentStep("review")
-    }, [loadPreviewData])
+        try {
+            console.log("[Flow] Loading preview data...")
+            await loadPreviewData()
+            console.log("[Flow] Preview data loaded, transitioning to review step")
+            setCurrentStep("review")
+        } catch (error) {
+            console.error("[Flow] Failed to load preview data:", error)
+            toast.error("Failed to load preview. Please try clicking 'Back' and then 'Next' again.")
+        }
+    }, [loadPreviewData, jobId])
 
     // Handle import complete
     const handleImportComplete = useCallback((data: any) => {
