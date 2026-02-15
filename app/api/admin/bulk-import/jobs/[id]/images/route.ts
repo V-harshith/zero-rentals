@@ -242,6 +242,17 @@ export async function POST(
                     warnings: warnings.length > 0 ? warnings : undefined,
                 })
 
+                // Verify supabaseAdmin is configured
+                console.log('[Upload] Checking Supabase admin configuration...')
+                const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+                if (!serviceKey) {
+                    console.error('[Upload] CRITICAL: SUPABASE_SERVICE_ROLE_KEY not configured')
+                    send({ error: "Server storage not configured. Please contact support." })
+                    controller.close()
+                    return
+                }
+                console.log('[Upload] Supabase admin configured, service key present')
+
                 // Upload images to storage
                 const uploadedImages: Record<string, any[]> = {}
                 const totalImages = files.length - invalidFiles.length - orphanedImages.length
@@ -250,6 +261,7 @@ export async function POST(
                 const failedUploads: string[] = []
 
                 const psnList = Object.keys(imagesByPSN)
+                console.log(`[Upload] Starting upload for ${psnList.length} PSNs, ${totalImages} total images`)
 
                 for (let i = 0; i < psnList.length; i++) {
                     const psn = psnList[i]
@@ -265,6 +277,8 @@ export async function POST(
                             const uniqueFilename = `${timestamp}-${j}.jpg`
                             const storagePath = `staging/${jobId}/${psn}/${uniqueFilename}`
 
+                            console.log(`[Upload] Uploading to path: ${storagePath}, bucket: property-images, fileSize: ${img.file_size}`)
+
                             // Upload to Supabase Storage
                             // Note: Images are already compressed client-side (max 2MB)
                             const { data: uploadData, error: uploadError } = await supabaseAdmin
@@ -276,8 +290,11 @@ export async function POST(
                                 })
 
                             if (uploadError) {
+                                console.error(`[Upload] Upload error for ${img.filename}:`, uploadError)
                                 throw uploadError
                             }
+
+                            console.log(`[Upload] Successfully uploaded ${img.filename} to ${storagePath}`)
 
                             // Get public URL
                             const { data: publicUrl } = supabaseAdmin
