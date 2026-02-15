@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
-import { ScrollArea } from "@/components/ui/scroll-area"
+// ScrollArea component not available - using native scrollable div
 import {
     Eye,
     AlertTriangle,
@@ -16,7 +16,6 @@ import {
     Building2,
     Users,
     Images,
-    Warning,
 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -180,7 +179,7 @@ export function ReviewStep({ jobId, previewData, onComplete, onBack }: ReviewSte
             {/* Warnings */}
             {summary.properties_without_images > 0 && (
                 <Alert className="bg-orange-50 border-orange-200">
-                    <Warning className="h-4 w-4 text-orange-600" />
+                    <AlertTriangle className="h-4 w-4 text-orange-600" />
                     <AlertDescription className="text-orange-800">
                         <strong>{summary.properties_without_images}</strong> properties will be imported without images.
                         You can add images later via the bulk image upload feature.
