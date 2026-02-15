@@ -21,10 +21,10 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 // ============================================================================
 export async function POST(
     request: NextRequest,
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
     const encoder = new TextEncoder()
-    const jobId = params.id
+    const { id: jobId } = await params
 
     const stream = new ReadableStream({
         async start(controller) {
