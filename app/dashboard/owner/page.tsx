@@ -330,7 +330,8 @@ function OwnerDashboard() {
 
         {/* Properties Section */}
         <div className="space-y-6">
-          <PropertiesTab properties={properties} loading={loading} onRefresh={fetchOwnerData} hasAnalytics={hasAnalytics} />
+          <PropertiesTab properties={properties} loading={loading} onRefresh={fetchOwnerData} hasAnalytics={hasAnalytics}
+            isPremium={hasAnalytics} />
         </div>
       </div>
     </div>

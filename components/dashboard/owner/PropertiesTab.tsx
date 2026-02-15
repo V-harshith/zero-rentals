@@ -17,9 +17,10 @@ export interface PropertiesTabProps {
     loading: boolean
     onRefresh: () => void
     hasAnalytics?: boolean
+    isPremium?: boolean
 }
 
-export function PropertiesTab({ properties, loading, onRefresh, hasAnalytics = false }: PropertiesTabProps) {
+export function PropertiesTab({ properties, loading, onRefresh, hasAnalytics = false, isPremium = false }: PropertiesTabProps) {
     const [deletingId, setDeletingId] = useState<string | null>(null)
 
     const handleDelete = async (id: string) => {
@@ -142,11 +143,28 @@ export function PropertiesTab({ properties, loading, onRefresh, hasAnalytics = f
                                     </Badge>
 
                                     {/* Analytics Button */}
-                                    <Link href={ROUTES.PROPERTY_ANALYTICS(property.id)}>
-                                        <Button variant="ghost" size="icon" title="View Analytics">
-                                            <BarChart3 className="h-4 w-4" />
+                                    {isPremium ? (
+                                        <Link href={ROUTES.PROPERTY_ANALYTICS(property.id)}>
+                                            <Button variant="ghost" size="icon" title="View Analytics">
+                                                <BarChart3 className="h-4 w-4" />
+                                            </Button>
+                                        </Link>
+                                    ) : (
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            title="Analytics - Upgrade to view"
+                                            onClick={() => toast.info("Analytics is a premium feature", {
+                                                description: "Upgrade to a paid plan to view detailed analytics for your properties.",
+                                                action: {
+                                                    label: "View Plans",
+                                                    onClick: () => window.location.href = "/pricing"
+                                                }
+                                            })}
+                                        >
+                                            <BarChart3 className="h-4 w-4 text-muted-foreground" />
                                         </Button>
-                                    </Link>
+                                    )}
 
                                     {/* Edit Button */}
                                     <Link href={ROUTES.PROPERTY_EDIT(property.id)}>
