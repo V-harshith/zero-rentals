@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
     // Build base query
     let query = supabase
       .from('users')
-      .select('id, name, email, phone, role, created_at, email_verified_at, subscription_plan', { count: 'exact' })
+      .select('id, name, email, phone, role, status, verified, created_at, email_verified_at, subscription_plan', { count: 'exact' })
       .order('created_at', { ascending: false })
 
     if (role && role !== 'all') {
