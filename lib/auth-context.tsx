@@ -74,8 +74,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     lastLoadTimeRef.current = now
 
     const loadPromise = (async () => {
+      // Timeout protection for session recovery (10 seconds)
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('Session recovery timeout')), 10000)
+      })
+
       try {
-        const currentUser = await getCurrentUser()
+        const currentUser = await Promise.race([getCurrentUser(), timeoutPromise])
         if (currentUser) {
           const userWithRole = {
             ...currentUser,
@@ -95,6 +100,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch (error) {
         setUser(null)
         currentUserRef.current = null
+        throw error // Re-throw to allow caller to handle
       } finally {
         isLoadingUserRef.current = false
         pendingLoadPromiseRef.current = null
@@ -135,11 +141,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (event === "INITIAL_SESSION") {
         // Session restored from cookies - always load user on initial session
         // The loadUser function has deduplication to prevent duplicate calls
-        if (session) {
-          await loadUser("INITIAL_SESSION")
+        try {
+          if (session) {
+            await loadUser("INITIAL_SESSION")
+          }
+        } catch {
+          // Error handled in loadUser - ensure user is null on failure
+          setUser(null)
+          currentUserRef.current = null
+        } finally {
+          // ALWAYS mark loading as complete, even on errors
+          setIsLoading(false)
         }
-        // Mark loading as complete once initial session check is done
-        setIsLoading(false)
       } else if (event === "SIGNED_IN" && session) {
         // Skip if we're already processing a login via the login() function
         // This prevents race condition where both login() and this listener try to set user

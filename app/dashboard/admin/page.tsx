@@ -171,6 +171,11 @@ function AdminDashboard() {
   // Ref to track if a tab data load is in progress (prevents race conditions)
   const loadingTabsRef = useRef<Set<string>>(new Set())
 
+  // Refs to track in-flight requests for deduplication (synchronous check)
+  const loadingUsersRef = useRef(false)
+  const loadingPaymentsRef = useRef(false)
+  const loadingPendingRef = useRef(false)
+
   // Real-time subscriptions ref for cleanup
   const subscriptionsRef = useRef<RealtimeChannel[]>([])
 
@@ -200,25 +205,8 @@ function AdminDashboard() {
     const initDashboard = async () => {
       // CRITICAL: Only fetch data when user is confirmed loaded
       if (!user) {
-
         return
       }
-
-
-
-      if (isMounted.current) setLoadingPending(true)
-
-      // Safety timeout
-      const timeoutId = setTimeout(() => {
-        if (!isMounted.current) return
-        setLoadingPending((current) => {
-          if (current) {
-            toast.error("Loading timed out. Please refresh.")
-            return false
-          }
-          return current
-        })
-      }, 15000)
 
       try {
         // Run critical fetches in parallel
@@ -228,9 +216,6 @@ function AdminDashboard() {
         ])
       } catch {
         // Error handled silently - toast shown by individual loaders
-      } finally {
-        clearTimeout(timeoutId)
-        if (isMounted.current) setLoadingPending(false)
       }
     }
 
@@ -296,15 +281,23 @@ function AdminDashboard() {
   }, [user, activeTab])
 
   const loadPendingProperties = async (force = false) => {
-    try {
-      // Skip if data is fresh (within 10 seconds) unless forced
-      if (!force && lastUpdated.pending) {
-        const age = Date.now() - lastUpdated.pending.getTime()
-        if (age < 10000) {
-          return
-        }
-      }
+    // Prevent duplicate concurrent requests using ref (synchronous check)
+    if (loadingPendingRef.current) {
+      return
+    }
 
+    // Skip if data is fresh (within 10 seconds) unless forced
+    if (!force && lastUpdated.pending) {
+      const age = Date.now() - lastUpdated.pending.getTime()
+      if (age < 10000) {
+        return
+      }
+    }
+
+    loadingPendingRef.current = true
+    if (isMounted.current) setLoadingPending(true)
+
+    try {
       const properties = await getPendingProperties()
       if (isMounted.current) {
         setPendingProperties(properties)
@@ -312,6 +305,9 @@ function AdminDashboard() {
       }
     } catch (error) {
       if (isMounted.current) toast.error("Failed to load pending properties")
+    } finally {
+      loadingPendingRef.current = false
+      if (isMounted.current) setLoadingPending(false)
     }
   }
 
@@ -331,6 +327,11 @@ function AdminDashboard() {
   }
 
   const loadUsers = async (force = false) => {
+    // Prevent duplicate concurrent requests using ref (synchronous check)
+    if (loadingUsersRef.current) {
+      return
+    }
+
     // Skip if data is fresh (within 10 seconds) unless forced
     if (!force && lastUpdated.users) {
       const age = Date.now() - lastUpdated.users.getTime()
@@ -339,6 +340,7 @@ function AdminDashboard() {
       }
     }
 
+    loadingUsersRef.current = true
     setLoadingUsers(true)
     const timeoutId = setTimeout(() => {
       if (!isMounted.current) return
@@ -361,11 +363,17 @@ function AdminDashboard() {
       if (isMounted.current) toast.error("Failed to load users")
     } finally {
       clearTimeout(timeoutId)
+      loadingUsersRef.current = false
       if (isMounted.current) setLoadingUsers(false)
     }
   }
 
   const loadPayments = async (force = false) => {
+    // Prevent duplicate concurrent requests using ref (synchronous check)
+    if (loadingPaymentsRef.current) {
+      return
+    }
+
     // Skip if data is fresh (within 10 seconds) unless forced
     if (!force && lastUpdated.payments) {
       const age = Date.now() - lastUpdated.payments.getTime()
@@ -374,11 +382,7 @@ function AdminDashboard() {
       }
     }
 
-    // Prevent duplicate concurrent requests
-    if (loadingPayments) {
-      return
-    }
-
+    loadingPaymentsRef.current = true
     setLoadingPayments(true)
     const timeoutId = setTimeout(() => {
       if (!isMounted.current) return
@@ -401,6 +405,7 @@ function AdminDashboard() {
       if (isMounted.current) toast.error("Failed to load payments")
     } finally {
       clearTimeout(timeoutId)
+      loadingPaymentsRef.current = false
       if (isMounted.current) setLoadingPayments(false)
       loadingTabsRef.current.delete('payments')
     }

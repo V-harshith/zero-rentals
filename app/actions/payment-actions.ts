@@ -41,7 +41,6 @@ export async function fulfillSubscriptionAction(data: {
             .maybeSingle()
 
         if (existingPayment?.status === 'success') {
-            console.log('Payment already processed (idempotency):', data.razorpayPaymentId)
             return { success: true, message: 'Payment already processed' }
         }
 

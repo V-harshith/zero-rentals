@@ -130,7 +130,6 @@ export function RazorpayCheckout({
             paymentObject.open()
 
         } catch (error: any) {
-            console.error(error)
             toast.error(error.message || "An error occurred during payment")
         } finally {
             setLoading(false)
