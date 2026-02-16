@@ -185,6 +185,16 @@ function AdminDashboard() {
     payments: null,
   })
 
+  // Mounted ref to prevent state updates on unmounted component
+  const isMounted = useRef(true)
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      isMounted.current = false
+    }
+  }, [])
+
   useEffect(() => {
     // Initial load
     const initDashboard = async () => {
@@ -196,10 +206,11 @@ function AdminDashboard() {
 
 
 
-      setLoadingPending(true)
+      if (isMounted.current) setLoadingPending(true)
 
       // Safety timeout
       const timeoutId = setTimeout(() => {
+        if (!isMounted.current) return
         setLoadingPending((current) => {
           if (current) {
             toast.error("Loading timed out. Please refresh.")
@@ -219,7 +230,7 @@ function AdminDashboard() {
         // Error handled silently - toast shown by individual loaders
       } finally {
         clearTimeout(timeoutId)
-        setLoadingPending(false)
+        if (isMounted.current) setLoadingPending(false)
       }
     }
 
@@ -227,7 +238,6 @@ function AdminDashboard() {
 
     // Setup real-time subscriptions for data sync
     if (user) {
-      console.log('[ADMIN] Setting up real-time subscriptions')
 
       // Subscribe to properties table changes
       const propertiesChannel = supabase
@@ -236,7 +246,6 @@ function AdminDashboard() {
           'postgres_changes',
           { event: '*', schema: 'public', table: 'properties' },
           (payload) => {
-            console.log('[ADMIN] Properties change received:', payload.eventType)
             // Refresh pending properties if a property was inserted/updated/deleted
             if (activeTab === 'pending') {
               loadPendingProperties(true)
@@ -252,7 +261,6 @@ function AdminDashboard() {
           'postgres_changes',
           { event: '*', schema: 'public', table: 'users' },
           (payload) => {
-            console.log('[ADMIN] Users change received:', payload.eventType)
             if (activeTab === 'users' || activeTab === 'overview') {
               loadUsers(true)
             }
@@ -267,7 +275,6 @@ function AdminDashboard() {
           'postgres_changes',
           { event: '*', schema: 'public', table: 'payments' },
           (payload) => {
-            console.log('[ADMIN] Payments change received:', payload.eventType)
             if (activeTab === 'payments' || activeTab === 'overview') {
               loadPayments(true)
             }
@@ -285,6 +292,7 @@ function AdminDashboard() {
       })
       subscriptionsRef.current = []
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, activeTab])
 
   const loadPendingProperties = async (force = false) => {
@@ -293,23 +301,24 @@ function AdminDashboard() {
       if (!force && lastUpdated.pending) {
         const age = Date.now() - lastUpdated.pending.getTime()
         if (age < 10000) {
-          console.log('[ADMIN] Skipping pending properties load - data is fresh')
           return
         }
       }
 
       const properties = await getPendingProperties()
-      setPendingProperties(properties)
-      setLastUpdated(prev => ({ ...prev, pending: new Date() }))
+      if (isMounted.current) {
+        setPendingProperties(properties)
+        setLastUpdated(prev => ({ ...prev, pending: new Date() }))
+      }
     } catch (error) {
-      toast.error("Failed to load pending properties")
+      if (isMounted.current) toast.error("Failed to load pending properties")
     }
   }
 
   const loadTotalStats = async () => {
     try {
       const count = await getTotalPropertyCount()
-      setTotalPropertiesCount(count)
+      if (isMounted.current) setTotalPropertiesCount(count)
     } catch {
       // Error loading stats - silently fail
     }
@@ -326,13 +335,13 @@ function AdminDashboard() {
     if (!force && lastUpdated.users) {
       const age = Date.now() - lastUpdated.users.getTime()
       if (age < 10000) {
-        console.log('[ADMIN] Skipping users load - data is fresh')
         return
       }
     }
 
     setLoadingUsers(true)
     const timeoutId = setTimeout(() => {
+      if (!isMounted.current) return
       setLoadingUsers((current) => {
         if (current) {
           toast.error("Loading users timed out. Please refresh.")
@@ -344,13 +353,15 @@ function AdminDashboard() {
 
     try {
       const data = await getAllUsers()
-      setUsers(data)
-      setLastUpdated(prev => ({ ...prev, users: new Date() }))
+      if (isMounted.current) {
+        setUsers(data)
+        setLastUpdated(prev => ({ ...prev, users: new Date() }))
+      }
     } catch (error) {
-      toast.error("Failed to load users")
+      if (isMounted.current) toast.error("Failed to load users")
     } finally {
       clearTimeout(timeoutId)
-      setLoadingUsers(false)
+      if (isMounted.current) setLoadingUsers(false)
     }
   }
 
@@ -359,13 +370,18 @@ function AdminDashboard() {
     if (!force && lastUpdated.payments) {
       const age = Date.now() - lastUpdated.payments.getTime()
       if (age < 10000) {
-        console.log('[ADMIN] Skipping payments load - data is fresh')
         return
       }
     }
 
+    // Prevent duplicate concurrent requests
+    if (loadingPayments) {
+      return
+    }
+
     setLoadingPayments(true)
     const timeoutId = setTimeout(() => {
+      if (!isMounted.current) return
       setLoadingPayments((current) => {
         if (current) {
           toast.error("Loading payments timed out. Please refresh.")
@@ -377,13 +393,16 @@ function AdminDashboard() {
 
     try {
       const data = await getAllPayments()
-      setPayments(data)
-      setLastUpdated(prev => ({ ...prev, payments: new Date() }))
+      if (isMounted.current) {
+        setPayments(data)
+        setLastUpdated(prev => ({ ...prev, payments: new Date() }))
+      }
     } catch (error) {
-      toast.error("Failed to load payments")
+      if (isMounted.current) toast.error("Failed to load payments")
     } finally {
       clearTimeout(timeoutId)
-      setLoadingPayments(false)
+      if (isMounted.current) setLoadingPayments(false)
+      loadingTabsRef.current.delete('payments')
     }
   }
 

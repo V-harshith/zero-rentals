@@ -112,14 +112,38 @@ export async function POST(
                     return
                 }
 
+                // Idempotency check: if already processing or completed, return success
+                if (job.status === "processing") {
+                    send({ status: "Import already in progress...", progress: 50 })
+                    controller.close()
+                    return
+                }
+
+                if (job.status === "completed" || job.status === "completed_with_errors") {
+                    send({
+                        status: "Import already completed",
+                        progress: 100,
+                        completed: true,
+                        success: true,
+                        results: {
+                            total_properties: job.processed_properties || 0,
+                            created_properties: job.processed_properties || 0,
+                            failed_properties: job.failed_properties || 0,
+                        },
+                    })
+                    controller.close()
+                    return
+                }
+
                 if (job.status !== "images_uploaded" && job.status !== "ready") {
                     send({ error: "Job is not ready for import" })
                     controller.close()
                     return
                 }
 
-                // Update job status
-                await supabaseAdmin
+                // Atomic status update using transaction-like pattern
+                // Only update if status is still "images_uploaded" or "ready"
+                const { data: updatedJob, error: updateError } = await supabaseAdmin
                     .from("bulk_import_jobs")
                     .update({
                         status: "processing",
@@ -127,6 +151,38 @@ export async function POST(
                         processing_started_at: new Date().toISOString(),
                     })
                     .eq("id", jobId)
+                    .eq("status", "images_uploaded") // Optimistic lock - only update if still in expected state
+                    .select()
+                    .maybeSingle()
+
+                if (updateError || !updatedJob) {
+                    // Another process may have started processing
+                    const { data: currentJob } = await supabaseAdmin
+                        .from("bulk_import_jobs")
+                        .select("status, processed_properties, failed_properties")
+                        .eq("id", jobId)
+                        .single()
+
+                    if (currentJob?.status === "processing") {
+                        send({ status: "Import already in progress...", progress: 50 })
+                    } else if (currentJob?.status === "completed" || currentJob?.status === "completed_with_errors") {
+                        send({
+                            status: "Import already completed",
+                            progress: 100,
+                            completed: true,
+                            success: true,
+                            results: {
+                                total_properties: currentJob.processed_properties || 0,
+                                created_properties: currentJob.processed_properties || 0,
+                                failed_properties: currentJob.failed_properties || 0,
+                            },
+                        })
+                    } else {
+                        send({ error: "Could not start import - job state changed" })
+                    }
+                    controller.close()
+                    return
+                }
 
                 send({ status: "Starting import...", progress: 0 })
 

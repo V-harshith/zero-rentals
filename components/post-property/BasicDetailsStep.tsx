@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { supabase } from "@/lib/supabase"
 import { Loader2, UserPlus, Users, Search, Check } from "lucide-react"
-import { GooglePlacesInput } from "./GooglePlacesInput"
+import { GooglePlacesInput, type PlaceDetails } from "./GooglePlacesInput"
 import type { FormData } from "./types"
 
 interface BasicDetailsStepProps {
@@ -43,6 +43,25 @@ const BasicDetailsStepComponent = ({
     const handleGooglePlacesFocus = useCallback((field: ActiveField) => {
         setActiveGooglePlacesField(field)
     }, [])
+
+    // Handle place selection with auto-detected pincode
+    const handleCitySelect = useCallback((details: PlaceDetails) => {
+        // Auto-fill pincode if available
+        if (details.pincode && !formData.pincode) {
+            updateField('pincode', details.pincode)
+        }
+    }, [formData.pincode, updateField])
+
+    const handleAreaSelect = useCallback((details: PlaceDetails) => {
+        // Auto-fill pincode if available and not already filled
+        if (details.pincode && !formData.pincode) {
+            updateField('pincode', details.pincode)
+        }
+        // Auto-fill city if area selection includes city info
+        if (details.city && !formData.city) {
+            updateField('city', details.city)
+        }
+    }, [formData.pincode, formData.city, updateField])
 
     const updateOwnerField = useCallback((field: string, value: string) => {
         if (setOwnerDetails && ownerDetails) {
@@ -322,20 +341,24 @@ const BasicDetailsStepComponent = ({
                         label="City"
                         value={formData.city}
                         onChange={(value) => updateField('city', value)}
+                        onPlaceSelect={handleCitySelect}
                         placeholder="Start typing city name..."
                         required={true}
                         types={['(cities)']}
-                        onFocus={() => handleGooglePlacesFocus('city')}
+                        isActive={activeGooglePlacesField === 'city'}
+                        onActivate={() => handleGooglePlacesFocus('city')}
                     />
                     <GooglePlacesInput
                         id="area"
                         label="Area / Locality"
                         value={formData.area}
                         onChange={(value) => updateField('area', value)}
+                        onPlaceSelect={handleAreaSelect}
                         placeholder="e.g. Koramangala block 4"
                         required={true}
                         types={['geocode']}
-                        onFocus={() => handleGooglePlacesFocus('area')}
+                        isActive={activeGooglePlacesField === 'area'}
+                        onActivate={() => handleGooglePlacesFocus('area')}
                     />
                 </div>
 

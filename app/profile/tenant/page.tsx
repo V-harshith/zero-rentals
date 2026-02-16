@@ -29,6 +29,8 @@ function TenantProfilePage() {
         email: "",
         phone: "",
         city: "",
+        preferredCity: "",
+        preferredArea: "",
         preferredLocations: "",
         budgetMin: "",
         budgetMax: "",
@@ -65,6 +67,8 @@ function TenantProfilePage() {
                 email: data.email || "",
                 phone: data.phone || "",
                 city: data.city || "",
+                preferredCity: data.preferred_city || "",
+                preferredArea: data.preferred_area || "",
                 preferredLocations: data.preferences?.preferredLocations || "",
                 budgetMin: data.preferences?.budgetMin || "",
                 budgetMax: data.preferences?.budgetMax || "",
@@ -163,6 +167,22 @@ function TenantProfilePage() {
     const handleSavePreferences = async () => {
         setSavingPreferences(true)
         setErrors({})
+
+        // Validate required preferred city and area
+        const newErrors: Record<string, string> = {}
+        if (!profileData.preferredCity?.trim()) {
+            newErrors.preferredCity = "Preferred city is required"
+        }
+        if (!profileData.preferredArea?.trim()) {
+            newErrors.preferredArea = "Preferred area is required"
+        }
+        if (Object.keys(newErrors).length > 0) {
+            setErrors(newErrors)
+            toast.error("Please enter your preferred city and area")
+            setSavingPreferences(false)
+            return
+        }
+
         try {
             const preferencesResult = tenantPreferencesSchema.safeParse({
                 preferredLocations: profileData.preferredLocations,
@@ -183,6 +203,8 @@ function TenantProfilePage() {
 
             const { updateUserProfile } = await import('@/lib/user-service')
             const { error } = await updateUserProfile(user!.id, {
+                preferred_city: profileData.preferredCity,
+                preferred_area: profileData.preferredArea,
                 preferences: {
                     preferredLocations: profileData.preferredLocations,
                     budgetMin: profileData.budgetMin,
@@ -355,11 +377,46 @@ function TenantProfilePage() {
                             </CardTitle>
                         </CardHeader>
                         <CardContent className="space-y-4">
+                            {/* Preferred City and Area */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-blue-50/50 rounded-lg border border-blue-100">
+                                <div className="space-y-2">
+                                    <Label htmlFor="preferredCity" className="flex items-center gap-1">
+                                        Preferred City
+                                        <span className="text-red-500">*</span>
+                                    </Label>
+                                    <Input
+                                        id="preferredCity"
+                                        placeholder="e.g., Bangalore"
+                                        value={profileData.preferredCity}
+                                        onChange={(e) => setProfileData({ ...profileData, preferredCity: e.target.value })}
+                                        className={errors.preferredCity ? "border-destructive" : ""}
+                                        required
+                                    />
+                                    {errors.preferredCity && <p className="text-xs text-destructive">{errors.preferredCity}</p>}
+                                </div>
+
+                                <div className="space-y-2">
+                                    <Label htmlFor="preferredArea" className="flex items-center gap-1">
+                                        Preferred Area
+                                        <span className="text-red-500">*</span>
+                                    </Label>
+                                    <Input
+                                        id="preferredArea"
+                                        placeholder="e.g., Koramangala"
+                                        value={profileData.preferredArea}
+                                        onChange={(e) => setProfileData({ ...profileData, preferredArea: e.target.value })}
+                                        className={errors.preferredArea ? "border-destructive" : ""}
+                                        required
+                                    />
+                                    {errors.preferredArea && <p className="text-xs text-destructive">{errors.preferredArea}</p>}
+                                </div>
+                            </div>
+
                             <div className="space-y-2">
-                                <Label htmlFor="locations">Preferred Locations</Label>
+                                <Label htmlFor="locations">Additional Preferred Locations</Label>
                                 <Textarea
                                     id="locations"
-                                    placeholder="e.g., Koramangala, Indiranagar, Whitefield"
+                                    placeholder="Other areas you're interested in (e.g., Indiranagar, Whitefield, Marathahalli)"
                                     value={profileData.preferredLocations}
                                     onChange={(e) => setProfileData({ ...profileData, preferredLocations: e.target.value })}
                                     rows={2}

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import Link from "next/link"
 import Image from "next/image"
 import { useRouter, useSearchParams } from "next/navigation"
@@ -20,6 +20,7 @@ export default function PricingPage() {
   const [creatingFree, setCreatingFree] = useState(false)
   const [hasActivePlan, setHasActivePlan] = useState(false)
   const [checkingPlan, setCheckingPlan] = useState(true)
+  const isActivatingRef = useRef(false)
 
   // Determine redirect path after plan selection
   const postPlanRedirect = redirectTo === "post-property" ? "/post-property" : undefined
@@ -62,11 +63,18 @@ export default function PricingPage() {
       return
     }
 
-    // Prevent duplicate activation attempts
-    if (creatingFree || hasActivePlan) {
+    // Prevent duplicate activation attempts using ref to avoid closure issues
+    if (isActivatingRef.current || creatingFree || hasActivePlan) {
       return
     }
 
+    // Check if user already has an active plan
+    if (hasActivePlan) {
+      toast.info("You already have an active plan")
+      return
+    }
+
+    isActivatingRef.current = true
     setCreatingFree(true)
     try {
       const res = await fetch("/api/subscriptions/create-free", { method: "POST" })
@@ -86,6 +94,7 @@ export default function PricingPage() {
       toast.error(message)
     } finally {
       setCreatingFree(false)
+      isActivatingRef.current = false
     }
   }
 

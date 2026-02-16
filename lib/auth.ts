@@ -62,7 +62,7 @@ function handleAuthError(error: any): never {
 async function createUserProfile(userId: string, email: string, userData: any, verificationToken: string) {
   const tokenExpiresAt = getTokenExpiry()
 
-  const profileData = {
+  const profileData: any = {
     id: userId,
     email,
     name: userData.name,
@@ -73,6 +73,16 @@ async function createUserProfile(userId: string, email: string, userData: any, v
     verification_token: verificationToken,
     token_expires_at: tokenExpiresAt.toISOString(),
     email_verified_at: null,
+  }
+
+  // Add tenant-specific fields
+  if (userData.role === 'tenant') {
+    if (userData.preferred_city) {
+      profileData.preferred_city = userData.preferred_city
+    }
+    if (userData.preferred_area) {
+      profileData.preferred_area = userData.preferred_area
+    }
   }
 
 
@@ -214,7 +224,13 @@ function validateUserStatus(userData: any) {
 export async function signUp(
   email: string,
   password: string,
-  userData: { name: string; phone?: string; role: 'owner' | 'tenant' }
+  userData: {
+    name: string;
+    phone?: string;
+    role: 'owner' | 'tenant';
+    preferred_city?: string | null;
+    preferred_area?: string | null;
+  }
 ) {
   validateEmail(email)
   validatePasswordStrength(password)

@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useMemo, useCallback } from "react"
+import { useEffect, useState, useMemo, useCallback, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import Image from "next/image"
@@ -46,6 +46,14 @@ function OwnerDashboard() {
   const [activeSubscription, setActiveSubscription] = useState<Subscription | null>(null)
   const [tierFeatures, setTierFeatures] = useState<TierFeatures | null>(null)
   const [loading, setLoading] = useState(true)
+  const isMounted = useRef(true)
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      isMounted.current = false
+    }
+  }, [])
 
   // Fetch data on mount
   useEffect(() => {
@@ -74,13 +82,19 @@ function OwnerDashboard() {
       if (error) throw error
 
       const mappedProperties = (propertiesData || []).map(p => mapPropertyFromDB(p as PropertyRow))
-      setProperties(mappedProperties)
+      if (isMounted.current) {
+        setProperties(mappedProperties)
+      }
 
       // Stats are now calculated via useMemo
     } catch (error) {
-      handleError(error, "Failed to load dashboard data")
+      if (isMounted.current) {
+        handleError(error, "Failed to load dashboard data")
+      }
     } finally {
-      setLoading(false)
+      if (isMounted.current) {
+        setLoading(false)
+      }
     }
   }
 
@@ -102,11 +116,15 @@ function OwnerDashboard() {
           .maybeSingle() // Use maybeSingle() instead of single() to handle no results
       ])
 
-      setTierFeatures(features)
-      if (sub) setActiveSubscription(sub)
+      if (isMounted.current) {
+        setTierFeatures(features)
+        if (sub) setActiveSubscription(sub)
+      }
     } catch (error) {
-      console.error('Failed to check subscription:', error)
-      toast.error('Unable to load subscription status. Please refresh.')
+      if (isMounted.current) {
+        console.error('Failed to check subscription:', error)
+        toast.error('Unable to load subscription status. Please refresh.')
+      }
     }
   }
 

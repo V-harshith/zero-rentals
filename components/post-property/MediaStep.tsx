@@ -3,7 +3,7 @@
 import { Label } from "@/components/ui/label"
 import { ImagePlus, X } from "lucide-react"
 import type { FormData } from "./types"
-import { memo } from "react"
+import { memo, useEffect, useRef } from "react"
 
 interface MediaStepProps {
     formData: FormData
@@ -33,6 +33,49 @@ const MediaStepComponent = ({
 
     const totalImages = existingImages.length + formData.images.length
 
+    // Track object URLs to prevent memory leaks
+    const objectUrlsRef = useRef<Map<string, string>>(new Map())
+
+    // Create object URLs for new images and track them
+    useEffect(() => {
+        formData.images.forEach((file, index) => {
+            const key = `new-${index}-${file.name}`
+            if (!objectUrlsRef.current.has(key)) {
+                const url = URL.createObjectURL(file)
+                objectUrlsRef.current.set(key, url)
+            }
+        })
+
+        // Cleanup: revoke URLs that are no longer needed
+        return () => {
+            objectUrlsRef.current.forEach((url, key) => {
+                const stillNeeded = formData.images.some((file, index) =>
+                    key === `new-${index}-${file.name}`
+                )
+                if (!stillNeeded) {
+                    URL.revokeObjectURL(url)
+                    objectUrlsRef.current.delete(key)
+                }
+            })
+        }
+    }, [formData.images])
+
+    // Cleanup all object URLs on unmount
+    useEffect(() => {
+        return () => {
+            objectUrlsRef.current.forEach((url) => {
+                URL.revokeObjectURL(url)
+            })
+            objectUrlsRef.current.clear()
+        }
+    }, [])
+
+    // Get object URL for a file (memoized)
+    const getObjectUrl = (file: File, index: number): string => {
+        const key = `new-${index}-${file.name}`
+        return objectUrlsRef.current.get(key) || ''
+    }
+
     return (
         <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
             <div className="border-b pb-4">
@@ -57,7 +100,8 @@ const MediaStepComponent = ({
                                     {removeExistingImage && (
                                         <button
                                             onClick={() => removeExistingImage(i)}
-                                            className="absolute top-2 right-2 bg-black/60 text-white rounded-full p-1 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity"
+                                            className="absolute top-2 right-2 bg-black/60 text-white rounded-full p-1 opacity-100 transition-opacity hover:bg-black/80 touch-manipulation"
+                                            aria-label={`Remove existing image ${i + 1}`}
                                         >
                                             <X size={14} />
                                         </button>
@@ -96,10 +140,11 @@ const MediaStepComponent = ({
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
                         {formData.images.map((file, i) => (
                             <div key={`new-${i}`} className={`relative aspect-square rounded-lg overflow-hidden border group ${isEditMode ? 'bg-blue-50/50' : ''}`}>
-                                <img src={URL.createObjectURL(file)} className="w-full h-full object-cover" alt="New upload" />
+                                <img src={getObjectUrl(file, i)} className="w-full h-full object-cover" alt="New upload" />
                                 <button
                                     onClick={() => removeImage(i)}
-                                    className="absolute top-2 right-2 bg-black/60 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                                    className="absolute top-2 right-2 bg-black/60 text-white rounded-full p-1 opacity-100 transition-opacity hover:bg-black/80 touch-manipulation"
+                                    aria-label={`Remove new image ${i + 1}`}
                                 >
                                     <X size={14} />
                                 </button>

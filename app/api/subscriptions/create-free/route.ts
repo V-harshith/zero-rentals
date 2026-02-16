@@ -61,14 +61,15 @@ export async function POST() {
             })
         }
 
-        // 4. Create free subscription (30 days)
+        // 4. Create free subscription (30 days) using upsert for idempotency
+        // This handles race conditions where multiple requests arrive simultaneously
         const startDate = new Date()
         const endDate = new Date()
         endDate.setDate(endDate.getDate() + 30)
 
-        const { data: subscription, error: insertError } = await supabaseAdmin
+        const { data: subscription, error: upsertError } = await supabaseAdmin
             .from('subscriptions')
-            .insert({
+            .upsert({
                 user_id: user.id,
                 plan_name: 'Free',
                 plan_duration: '30 days',
@@ -77,12 +78,33 @@ export async function POST() {
                 properties_limit: 1,
                 start_date: startDate.toISOString(),
                 end_date: endDate.toISOString(),
+            }, {
+                onConflict: 'user_id', // Assumes unique constraint on user_id for active subscriptions
+                ignoreDuplicates: false // Update if conflict
             })
             .select('id, plan_name')
             .single()
 
-        if (insertError) {
-            console.error('Free subscription creation error:', insertError)
+        if (upsertError) {
+            // Check if subscription was created by another concurrent request
+            const { data: raceConditionSub } = await supabaseAdmin
+                .from('subscriptions')
+                .select('id, plan_name, status')
+                .eq('user_id', user.id)
+                .eq('status', 'active')
+                .gt('end_date', new Date().toISOString())
+                .limit(1)
+                .maybeSingle()
+
+            if (raceConditionSub) {
+                return NextResponse.json({
+                    success: true,
+                    message: 'Subscription already exists',
+                    plan: raceConditionSub.plan_name
+                })
+            }
+
+            console.error('Free subscription creation error:', upsertError)
             return NextResponse.json({ error: 'Failed to create subscription' }, { status: 500 })
         }
 

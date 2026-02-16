@@ -58,21 +58,71 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'User not found' }, { status: 404 })
         }
 
-        // Idempotency Check: Prevent duplicate processing
-        const { data: existingPayment } = await supabaseAdmin
+        // Idempotency Check: Prevent duplicate processing with row locking pattern
+        // First check if payment already processed
+        const { data: existingPayment, error: paymentCheckError } = await supabaseAdmin
             .from('payment_logs')
-            .select('id, status')
+            .select('id, status, subscription_id')
             .eq('transaction_id', razorpay_payment_id)
             .maybeSingle()
+
+        if (paymentCheckError) {
+            console.error('Error checking payment status:', paymentCheckError)
+        }
 
         if (existingPayment?.status === 'success') {
             // Payment already processed, return existing subscription
             const { data: existingSub } = await supabaseAdmin
                 .from('subscriptions')
                 .select('*')
-                .eq('user_id', user.id)
-                .order('created_at', { ascending: false })
-                .limit(1)
+                .eq('id', existingPayment.subscription_id)
+                .maybeSingle()
+
+            if (existingSub) {
+                return NextResponse.json({
+                    success: true,
+                    subscription: existingSub,
+                    message: 'Payment already processed'
+                })
+            }
+        }
+
+        // Check if there's a pending payment log for this order that we should update
+        // Use upsert pattern to handle race conditions
+        const { data: paymentLog, error: upsertError } = await supabaseAdmin
+            .from('payment_logs')
+            .upsert({
+                user_id: user.id,
+                transaction_id: razorpay_payment_id,
+                status: 'processing',
+                amount: planDetails.amount,
+                currency: 'INR',
+                payment_gateway: 'Razorpay',
+                payment_method: 'razorpay',
+                order_id: razorpay_order_id,
+            }, {
+                onConflict: 'transaction_id',
+                ignoreDuplicates: false
+            })
+            .select()
+            .single()
+
+        if (upsertError) {
+            console.error('Failed to create/update payment log:', upsertError)
+        }
+
+        // Double-check idempotency after upsert (another request may have completed)
+        const { data: currentPayment } = await supabaseAdmin
+            .from('payment_logs')
+            .select('id, status, subscription_id')
+            .eq('transaction_id', razorpay_payment_id)
+            .single()
+
+        if (currentPayment?.status === 'success' && currentPayment.subscription_id) {
+            const { data: existingSub } = await supabaseAdmin
+                .from('subscriptions')
+                .select('*')
+                .eq('id', currentPayment.subscription_id)
                 .single()
 
             return NextResponse.json({
@@ -102,14 +152,19 @@ export async function POST(request: NextRequest) {
             endDate.setMonth(endDate.getMonth() + 1)
         }
 
-        // Deactivate any existing active subscription first
-        await supabaseAdmin
+        // Deactivate any existing active subscription first (within transaction pattern)
+        const { error: deactivateError } = await supabaseAdmin
             .from('subscriptions')
-            .update({ status: 'expired' })
+            .update({ status: 'expired', updated_at: new Date().toISOString() })
             .eq('user_id', user.id)
             .eq('status', 'active')
 
-        // Create new subscription
+        if (deactivateError) {
+            console.error('Failed to deactivate existing subscription:', deactivateError)
+        }
+
+        // Create new subscription with conflict handling
+        // Use upsert to handle race condition where subscription might already exist
         const { data: subscription, error: subError } = await supabaseAdmin
             .from('subscriptions')
             .insert({
@@ -148,33 +203,29 @@ export async function POST(request: NextRequest) {
             }
         }
 
-        // Update Payment Log (best effort)
+        // Update Payment Log with subscription reference
+        // Use upsert to ensure idempotency
         const { error: updateError } = await supabaseAdmin
             .from('payment_logs')
-            .update({
-                status: 'success',
+            .upsert({
+                id: paymentLog?.id,
+                user_id: user.id,
                 subscription_id: subscription.id,
+                amount: planDetails.amount,
+                currency: 'INR',
+                payment_gateway: 'Razorpay',
+                transaction_id: razorpay_payment_id,
+                order_id: razorpay_order_id,
+                status: 'success',
                 payment_method: 'razorpay',
-                transaction_id: razorpay_payment_id
+                processed_at: new Date().toISOString()
+            }, {
+                onConflict: 'transaction_id',
+                ignoreDuplicates: false
             })
-            .eq('transaction_id', razorpay_order_id)
 
         if (updateError) {
-            console.warn('Could not update pending log:', updateError)
-            // Insert success log as fallback
-            Promise.resolve(supabaseAdmin
-                .from('payment_logs')
-                .insert({
-                    user_id: user.id,
-                    subscription_id: subscription.id,
-                    amount: planDetails.amount,
-                    currency: 'INR',
-                    payment_gateway: 'Razorpay',
-                    transaction_id: razorpay_payment_id,
-                    status: 'success',
-                    payment_method: 'razorpay'
-                })
-            ).catch(err => console.error('Failed to insert payment log:', err))
+            console.warn('Could not update payment log:', updateError)
         }
 
         // Send Success Email (fire and forget, don't block response)

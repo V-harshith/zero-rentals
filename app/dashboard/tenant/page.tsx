@@ -29,6 +29,14 @@ function TenantDashboard() {
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'overview')
   const hasLoaded = useRef(false)
+  const isMounted = useRef(true)
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      isMounted.current = false
+    }
+  }, [])
 
   // Sync tab state to URL
   useEffect(() => {
@@ -43,24 +51,24 @@ function TenantDashboard() {
   useEffect(() => {
     // Skip if still loading auth or already loaded
     if (authLoading || hasLoaded.current) return
-    
+
     // Mark as loaded immediately to prevent re-runs
     hasLoaded.current = true
-    
+
     async function fetchData() {
       if (!user) {
-        setLoading(false)
+        if (isMounted.current) setLoading(false)
         return
       }
 
       try {
-        setLoading(true)
+        if (isMounted.current) setLoading(true)
         const propertiesData = await getProperties()
-        setRecentProperties(propertiesData.slice(0, 6))
+        if (isMounted.current) setRecentProperties(propertiesData.slice(0, 6))
       } catch {
-        toast.error("Failed to load dashboard data")
+        if (isMounted.current) toast.error("Failed to load dashboard data")
       } finally {
-        setLoading(false)
+        if (isMounted.current) setLoading(false)
       }
     }
 

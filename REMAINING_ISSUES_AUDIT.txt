@@ -1,0 +1,298 @@
+================================================================================
+                    ZERO RENTALS - REMAINING ISSUES AUDIT
+                    Session Date: 2026-02-16
+                    Status: 4 P0 Completed, 112 Remaining
+================================================================================
+
+COMPLETED P0 CRITICAL FIXES:
+============================
+✅ Task #85: Auth Race Conditions (lib/session-manager.ts, lib/auth-context.tsx)
+✅ Task #86: Duplicate Submission Guards (app/pricing/page.tsx, components/property-card.tsx)
+✅ Task #87: Memory Leaks Fixed (6 files including MediaStep, all dashboards)
+✅ Task #88: API Route Race Conditions (5 API routes with idempotency)
+
+REMAINING: 112 ISSUES TO FIX
+============================
+
+================================================================================
+PRIORITY 1 (P1) - HIGH RISK - Fix These First
+================================================================================
+
+--- AUTHENTICATION (22 total, 0 P0 done, ~5 P1 remaining) ---
+[AUTH-P1-1] Auth state race conditions during rapid login/logout
+    File: lib/auth-context.tsx
+    Issue: Multiple simultaneous auth state changes can cause inconsistent UI
+
+[AUTH-P1-2] Loading state management during session recovery
+    File: lib/auth-context.tsx
+    Issue: isLoading can get stuck true if session refresh fails silently
+
+[AUTH-P1-3] Concurrent request handling in session manager
+    File: lib/session-manager.ts
+    Issue: Multiple tabs refreshing simultaneously can cause token race
+
+--- DASHBOARD COMPONENTS (15 total, 0 P0 done, ~4 P1 remaining) ---
+[DASH-P1-1] Concurrent data fetching on dashboard mount
+    Files: app/dashboard/*/page.tsx
+    Issue: Multiple useEffect hooks firing simultaneously cause request waterfall
+
+[DASH-P1-2] Chart data race conditions
+    File: app/dashboard/admin/page.tsx
+    Issue: Stats calculation before data fully loaded shows incorrect numbers
+
+[DASH-P1-3] Realtime subscription conflicts
+    File: lib/supabase.ts
+    Issue: Multiple subscriptions to same table cause duplicate updates
+
+[DASH-P1-4] Stats calculation race conditions
+    File: app/dashboard/admin/page.tsx
+    Issue: pendingProperties and totalStats calculated from different timestamps
+
+--- PROPERTY MANAGEMENT (14 total, 0 P0 done, ~3 P1 remaining) ---
+[PROP-P1-1] Image upload race conditions
+    File: app/post-property/page.tsx
+    Issue: Rapid image selection before compression completes causes errors
+
+[PROP-P1-2] Property status transitions
+    File: lib/data-service.ts
+    Issue: Status change from pending->active->featured not atomic
+
+[PROP-P1-3] Bulk operations race conditions
+    File: app/api/admin/bulk-import/route.ts
+    Issue: Multiple concurrent bulk imports can exceed rate limits
+
+--- FAVORITES & SEARCH (15 total, 0 P0 done, ~3 P1 remaining) ---
+[FAV-P1-1] Optimistic update rollback on error
+    File: lib/favorites-context.tsx
+    Issue: Failed favorite toggle doesn't properly rollback UI state
+
+[FAV-P1-2] Search filter persistence edge cases
+    File: app/search/page.tsx
+    Issue: Filters not restored when navigating back from property detail in some cases
+
+[FAV-P1-3] Pagination race conditions
+    File: app/search/page.tsx
+    Issue: Rapid page changes can load pages out of order
+
+--- PAYMENT FLOWS (17 total, 0 P0 done, ~4 P1 remaining) ---
+[PAY-P1-1] Webhook event ordering
+    File: app/api/webhooks/razorpay/route.ts
+    Issue: Events arriving out of order can cause incorrect subscription state
+
+[PAY-P1-2] Subscription state machine
+    File: lib/subscription-service.ts
+    Issue: Cancelled -> Renewed transition not handled correctly
+
+[PAY-P1-3] Payment retry logic
+    File: components/razorpay-checkout.tsx
+    Issue: Failed payment then success creates duplicate records
+
+[PAY-P1-4] Refund race conditions
+    File: app/api/admin/refunds/route.ts
+    Issue: Double refund request can process twice
+
+--- API ROUTES (33 total, 5 P0 done, ~10 P1 remaining) ---
+[API-P1-1] Remaining idempotency gaps in property updates
+    File: app/api/properties/[id]/route.ts
+    Issue: PUT request not idempotent - duplicate calls update timestamps
+
+[API-P1-2] Transaction boundaries in user creation
+    File: app/api/auth/register/route.ts
+    Issue: User created but profile fails - leaves orphaned auth record
+
+[API-P1-3] Transaction boundaries in bulk operations
+    File: app/api/admin/bulk-import/jobs/[id]/confirm/route.ts
+    Issue: Partial failure leaves some properties created, others not
+
+[API-P1-4] Concurrent property approval
+    File: app/api/admin/properties/[id]/approve/route.ts
+    Issue: Two admins approving same property simultaneously
+
+[API-P1-5] Image upload transaction safety
+    File: app/api/upload/route.ts
+    Issue: File uploaded to storage but DB record fails
+
+================================================================================
+PRIORITY 2 (P2) - MEDIUM RISK
+================================================================================
+
+--- AUTHENTICATION ---
+[AUTH-P2-1] Session recovery edge cases
+    File: lib/auth-context.tsx
+    Issue: Tab becomes active after long inactivity - session check timing
+
+[AUTH-P2-2] Toast notification race conditions
+    File: lib/auth-context.tsx
+    Issue: Multiple rapid errors show toasts out of order
+
+--- DASHBOARD COMPONENTS ---
+[DASH-P2-1] Dashboard refresh timing
+    File: app/dashboard/admin/page.tsx
+    Issue: Manual refresh while auto-refresh pending causes double load
+
+[DASH-P2-2] Subscription status sync
+    File: app/dashboard/owner/page.tsx
+    Issue: Subscription check and realtime update can conflict
+
+--- PROPERTY MANAGEMENT ---
+[PROP-P2-1] Edit form state sync
+    File: app/post-property/page.tsx (edit mode)
+    Issue: Property data updates while user editing - stale data on save
+
+[PROP-P2-2] Cache invalidation timing
+    File: lib/data-service.ts
+    Issue: Property updated but search cache not cleared yet
+
+--- FAVORITES & SEARCH ---
+[FAV-P2-1] Favorite count sync
+    File: components/property-card.tsx
+    Issue: Heart toggle updates but displayed count doesn't refresh
+
+[FAV-P2-2] Debounce timing issues
+    File: app/search/page.tsx
+    Issue: Search input debounce too aggressive or too loose
+
+--- PAYMENT FLOWS ---
+[PAY-P2-1] Receipt generation timing
+    File: app/api/payments/verify/route.ts
+    Issue: Receipt generated before subscription fully activated
+
+--- API ROUTES ---
+[API-P2-1] Error response consistency
+    Multiple files
+    Issue: Some routes return {error}, others return {message}, others return string
+
+[API-P2-2] Rate limiting enforcement gaps
+    Multiple files
+    Issue: No rate limiting on search endpoints
+
+[API-P2-3] Validation edge cases - missing fields
+    Multiple files
+    Issue: Some routes don't validate all input fields
+
+================================================================================
+PRIORITY 3 (P3) - LOW RISK
+================================================================================
+
+--- AUTHENTICATION ---
+[AUTH-P3-1] Error boundary gaps
+    File: app/layout.tsx
+    Issue: Auth errors not caught by error boundary
+
+--- DASHBOARD COMPONENTS ---
+[DASH-P3-1] Chart animation race conditions
+    File: app/dashboard/admin/page.tsx
+    Issue: Chart re-renders while animation playing
+
+--- PROPERTY MANAGEMENT ---
+[PROP-P3-1] Image preview cleanup edge cases
+    File: components/post-property/MediaStep.tsx
+    Issue: Rapid add/remove images may not cleanup all object URLs
+
+--- FAVORITES & SEARCH ---
+[FAV-P3-1] Search history race conditions
+    File: app/search/page.tsx
+    Issue: Search history update conflicts with clear history
+
+--- PAYMENT FLOWS ---
+[PAY-P3-1] Analytics tracking race conditions
+    File: components/razorpay-checkout.tsx
+    Issue: Payment analytics fired before confirmation
+
+--- API ROUTES ---
+[API-P3-1] Logging consistency
+    Multiple files
+    Issue: Inconsistent log formats across API routes
+
+[API-P3-2] Database connection pool exhaustion
+    File: lib/supabase.ts
+    Issue: Too many concurrent requests exhaust connection pool
+
+================================================================================
+NEXT SESSION CHECKLIST
+================================================================================
+
+IMMEDIATE (Do First):
+[ ] Run TypeScript check: npx tsc --noEmit
+[ ] Run build: npm run build
+[ ] Verify P0 fixes work correctly
+
+P1 FIXES (High Priority):
+[ ] Fix auth state race conditions [AUTH-P1-1]
+[ ] Fix concurrent data fetching [DASH-P1-1]
+[ ] Fix image upload race conditions [PROP-P1-1]
+[ ] Fix optimistic update rollback [FAV-P1-1]
+[ ] Fix webhook event ordering [PAY-P1-1]
+[ ] Fix transaction boundaries [API-P1-2, API-P1-3]
+
+P2 FIXES (Medium Priority):
+[ ] Fix session recovery edge cases
+[ ] Fix dashboard refresh timing
+[ ] Fix edit form state sync
+[ ] Fix error response consistency
+
+P3 FIXES (Low Priority):
+[ ] Fix logging consistency
+[ ] Fix error boundary gaps
+
+FINAL STEPS:
+[ ] Run full test suite
+[ ] Run security review
+[ ] Run code review
+[ ] Deploy to production
+
+================================================================================
+DATABASE SCHEMA REQUIREMENTS
+================================================================================
+
+Required for idempotency (already created or verify exists):
+
+1. webhook_events table:
+   - event_id (string, primary key)
+   - event_type (string)
+   - payload (jsonb)
+   - status (enum: 'processing', 'completed', 'failed')
+   - created_at (timestamp)
+   - processed_at (timestamp)
+   - error (text, nullable)
+
+2. payment_logs table:
+   - transaction_id (string, unique)
+   - ... other fields
+
+3. subscriptions table:
+   - user_id (uuid, unique or handle conflicts)
+   - metadata (jsonb)
+   - ... other fields
+
+================================================================================
+FILES MODIFIED IN P0 FIXES (Reference)
+================================================================================
+
+Core:
+- lib/session-manager.ts
+- lib/auth-context.tsx
+- lib/favorites-context.tsx
+
+Components:
+- components/razorpay-checkout.tsx
+- components/property-card.tsx
+- components/post-property/MediaStep.tsx
+
+Pages:
+- app/post-property/page.tsx
+- app/pricing/page.tsx
+- app/dashboard/owner/page.tsx
+- app/dashboard/tenant/page.tsx
+- app/dashboard/admin/page.tsx
+
+API Routes:
+- app/api/admin/bulk-import/jobs/[id]/confirm/route.ts
+- app/api/payments/verify/route.ts
+- app/api/subscriptions/create-free/route.ts
+- app/api/admin/properties/[id]/approve/route.ts
+- app/api/webhooks/razorpay/route.ts
+
+================================================================================
+END OF AUDIT FILE
+================================================================================

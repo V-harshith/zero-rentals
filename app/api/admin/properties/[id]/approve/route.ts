@@ -45,10 +45,10 @@ export async function PUT(
       return NextResponse.json({ error: 'Forbidden: Admin access required' }, { status: 403 })
     }
 
-    // 2. Fetch Property to check "owner_id" (Use Admin client to be safe against RLS on Select too)
+    // 2. Fetch Property to check "owner_id" and current status (Use Admin client to be safe against RLS on Select too)
     const { data: property, error: fetchError } = await supabaseAdmin
       .from('properties')
-      .select('title, owner_id')
+      .select('title, owner_id, status')
       .eq('id', params.id)
       .maybeSingle()
 
@@ -60,17 +60,65 @@ export async function PUT(
       return NextResponse.json({ error: 'Property not found' }, { status: 404 })
     }
 
-    // 3. Update Property (Use Admin Client to BYPASS RLS)
+    // Idempotency check: If already approved/active, return success
+    if (property.status === 'active') {
+      const { data: existingProperty } = await supabaseAdmin
+        .from('properties')
+        .select('*')
+        .eq('id', params.id)
+        .single()
+
+      return NextResponse.json({
+        success: true,
+        message: 'Property already approved',
+        data: existingProperty
+      })
+    }
+
+    // Only allow approval from pending status
+    if (property.status !== 'pending') {
+      return NextResponse.json(
+        { error: `Cannot approve property with status: ${property.status}` },
+        { status: 400 }
+      )
+    }
+
+    // 3. Update Property with optimistic locking (Use Admin Client to BYPASS RLS)
+    // Only update if status is still 'pending' to prevent race conditions
     const { data, error } = await supabaseAdmin
       .from('properties')
       .update({
         status: 'active',
         availability: 'Available', // CRITICAL: Required for properties to show in getProperties()
         published_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
       })
       .eq('id', params.id)
+      .eq('status', 'pending') // Optimistic lock - only update if still pending
       .select()
       .maybeSingle()
+
+    // If no rows updated, another request may have already processed it
+    if (!data && !error) {
+      const { data: currentProperty } = await supabaseAdmin
+        .from('properties')
+        .select('*')
+        .eq('id', params.id)
+        .single()
+
+      if (currentProperty?.status === 'active') {
+        return NextResponse.json({
+          success: true,
+          message: 'Property already approved',
+          data: currentProperty
+        })
+      }
+
+      return NextResponse.json(
+        { error: 'Property status changed during approval. Please refresh and try again.' },
+        { status: 409 }
+      )
+    }
 
     if (error) {
       throw error

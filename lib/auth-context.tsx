@@ -53,6 +53,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const lastLoadTimeRef = useRef<number>(0)
   const loginInProgressRef = useRef(false)
   const currentUserRef = useRef<User | null>(null) // Track current user without closure issues
+  const sessionManagerCleanupRef = useRef<(() => void) | null>(null) // Store cleanup function
   const COOLDOWN_MS = 5000 // 5-second cooldown between requests
 
   // Memoized function to load user - prevents duplicate calls with deduplication
@@ -83,12 +84,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           } as UserWithLegacyType
           setUser(userWithRole)
           currentUserRef.current = userWithRole // Update ref for closure-free access
-          initializeSessionManagement()
+          // Store cleanup function to prevent memory leaks - only initialize once
+          if (!sessionManagerCleanupRef.current) {
+            sessionManagerCleanupRef.current = initializeSessionManagement()
+          }
         } else {
           setUser(null)
           currentUserRef.current = null
         }
-      } catch {
+      } catch (error) {
         setUser(null)
         currentUserRef.current = null
       } finally {
@@ -160,6 +164,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Cross-tab session synchronization
     const handleStorageChange = (e: StorageEvent) => {
       if (e.key === 'supabase.auth.token') {
+        // Skip if login is in progress to prevent race conditions
+        if (loginInProgressRef.current) return
+
         if (!e.newValue) {
           setUser(null)
           currentUserRef.current = null
@@ -286,14 +293,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null)
     currentUserRef.current = null // Clear ref to prevent stale user detection
 
+    // 2. Clean up session manager to prevent memory leaks
+    if (sessionManagerCleanupRef.current) {
+      sessionManagerCleanupRef.current()
+      sessionManagerCleanupRef.current = null
+    }
+
     try {
-      // 2. Sign out from Supabase in background
+      // 3. Sign out from Supabase in background
       await supabase.auth.signOut()
     } catch {
       // Error handled silently
     }
 
-    // 3. Force immediate redirect (use href instead of replace for reliability)
+    // 4. Force immediate redirect (use href instead of replace for reliability)
     window.location.href = '/'
   }
 

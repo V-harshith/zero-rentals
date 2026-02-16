@@ -6,6 +6,9 @@ export async function POST(req: NextRequest) {
     const body = await req.text()
     const signature = req.headers.get('x-razorpay-signature')
 
+    // 🔥 CRITICAL: Idempotency key from Razorpay for duplicate detection
+    const idempotencyKey = req.headers.get('x-razorpay-event-id')
+
     if (!signature) {
         return NextResponse.json({ error: 'Missing signature' }, { status: 400 })
     }
@@ -26,20 +29,102 @@ export async function POST(req: NextRequest) {
 
     const event = JSON.parse(body)
 
-    // Handle order.paid event
-    if (event.event === 'order.paid') {
-        const order = event.payload.order.entity
-        const notes = order.notes
-        const userId = notes.userId
-        const planName = notes.planName
-        const duration = notes.duration
-        const amount = order.amount / 100 // Convert from paise
-        const orderId = order.id
+    // 🔥 CRITICAL: Idempotency check using Razorpay's event ID
+    // Store processed event IDs to prevent duplicate processing
+    if (idempotencyKey) {
+        const { data: existingEvent, error: checkError } = await supabaseAdmin
+            .from('webhook_events')
+            .select('id, processed_at')
+            .eq('event_id', idempotencyKey)
+            .maybeSingle()
 
-        await fulfillSubscription(userId, planName, duration, amount, orderId)
+        if (checkError) {
+            console.error('Error checking webhook event idempotency:', checkError)
+        }
+
+        if (existingEvent) {
+            console.log('Webhook event already processed (idempotency):', idempotencyKey)
+            return NextResponse.json({
+                received: true,
+                idempotent: true,
+                processed_at: existingEvent.processed_at
+            })
+        }
+
+        // Store event ID before processing (mark as processing)
+        const { error: insertError } = await supabaseAdmin
+            .from('webhook_events')
+            .insert({
+                event_id: idempotencyKey,
+                event_type: event.event,
+                payload: event,
+                status: 'processing',
+                created_at: new Date().toISOString()
+            })
+
+        if (insertError) {
+            // Check if another process inserted this event concurrently
+            const { data: concurrentEvent } = await supabaseAdmin
+                .from('webhook_events')
+                .select('id, status')
+                .eq('event_id', idempotencyKey)
+                .maybeSingle()
+
+            if (concurrentEvent) {
+                console.log('Webhook event being processed by another handler:', idempotencyKey)
+                return NextResponse.json({
+                    received: true,
+                    idempotent: true,
+                    status: 'processing'
+                })
+            }
+
+            console.error('Failed to record webhook event:', insertError)
+        }
     }
 
-    return NextResponse.json({ received: true })
+    try {
+        // Handle order.paid event
+        if (event.event === 'order.paid') {
+            const order = event.payload.order.entity
+            const notes = order.notes
+            const userId = notes.userId
+            const planName = notes.planName
+            const duration = notes.duration
+            const amount = order.amount / 100 // Convert from paise
+            const orderId = order.id
+
+            await fulfillSubscription(userId, planName, duration, amount, orderId)
+        }
+
+        // Mark event as completed
+        if (idempotencyKey) {
+            await supabaseAdmin
+                .from('webhook_events')
+                .update({
+                    status: 'completed',
+                    processed_at: new Date().toISOString()
+                })
+                .eq('event_id', idempotencyKey)
+        }
+
+        return NextResponse.json({ received: true, processed: true })
+    } catch (error) {
+        // Mark event as failed for retry
+        if (idempotencyKey) {
+            await supabaseAdmin
+                .from('webhook_events')
+                .update({
+                    status: 'failed',
+                    error: (error as Error).message,
+                    processed_at: new Date().toISOString()
+                })
+                .eq('event_id', idempotencyKey)
+        }
+
+        // Re-throw to let Razorpay retry
+        throw error
+    }
 }
 
 async function fulfillSubscription(
@@ -51,9 +136,10 @@ async function fulfillSubscription(
 ) {
     try {
         // 🔥 CRITICAL FIX: Check idempotency FIRST with proper error handling
-        const { data: existing, error: checkError } = await supabaseAdmin
+        // Check both payment_logs and subscriptions to handle race conditions
+        const { data: existingPayment, error: checkError } = await supabaseAdmin
             .from('payment_logs')
-            .select('id')
+            .select('id, status, subscription_id')
             .eq('transaction_id', orderId)
             .maybeSingle()
 
@@ -62,8 +148,24 @@ async function fulfillSubscription(
             throw checkError
         }
 
-        if (existing) {
+        if (existingPayment?.status === 'success') {
             console.log('Payment already processed (idempotency check):', orderId)
+            return
+        }
+
+        // Double-check: see if there's an active subscription for this order
+        // This handles the case where payment_log update failed but subscription was created
+        const { data: existingSub } = await supabaseAdmin
+            .from('subscriptions')
+            .select('id')
+            .eq('user_id', userId)
+            .eq('status', 'active')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle()
+
+        if (existingSub && existingPayment?.subscription_id === existingSub.id) {
+            console.log('Subscription already exists for this order:', orderId)
             return
         }
 
@@ -97,16 +199,21 @@ async function fulfillSubscription(
         }
         const propertiesLimit = limitMap[planName] || 1
 
-        // 🔥 CRITICAL FIX: Use transaction-like approach
+        // 🔥 CRITICAL FIX: Use transaction-like approach with idempotency
         // Cancel existing active subscriptions
-        await supabaseAdmin
+        const { error: cancelError } = await supabaseAdmin
             .from('subscriptions')
-            .update({ status: 'cancelled' })
+            .update({ status: 'cancelled', updated_at: new Date().toISOString() })
             .eq('user_id', userId)
             .eq('status', 'active')
 
-        // Create new subscription
-        const { data: subscription, error: subError } = await supabaseAdmin
+        if (cancelError) {
+            console.error('Error cancelling existing subscriptions:', cancelError)
+        }
+
+        // Create new subscription with upsert for idempotency
+        // Use orderId as a unique reference to prevent duplicates
+        let subscriptionResult = await supabaseAdmin
             .from('subscriptions')
             .insert([{
                 user_id: userId,
@@ -116,12 +223,40 @@ async function fulfillSubscription(
                 status: 'active',
                 properties_limit: propertiesLimit,
                 start_date: startDate.toISOString(),
-                end_date: endDate.toISOString()
+                end_date: endDate.toISOString(),
+                metadata: { order_id: orderId } // Store order reference for idempotency
             }])
             .select()
             .single()
 
-        if (subError) throw subError
+        let subscription: { id: string } | null = null
+
+        if (subscriptionResult.error) {
+            // Check if subscription was created by another concurrent request
+            const { data: raceSub } = await supabaseAdmin
+                .from('subscriptions')
+                .select('id, metadata')
+                .eq('user_id', userId)
+                .eq('status', 'active')
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle()
+
+            if (raceSub?.metadata?.order_id === orderId) {
+                console.log('Subscription created by concurrent request:', orderId)
+                // Use the existing subscription
+                subscription = raceSub as { id: string }
+            } else {
+                throw subscriptionResult.error
+            }
+        } else {
+            subscription = subscriptionResult.data
+        }
+
+        // This should not happen, but TypeScript requires the check
+        if (!subscription) {
+            throw new Error('Failed to create or retrieve subscription')
+        }
 
         // 🔥 NEW: Auto-feature existing properties if plan allows
         const { getTierFeatures } = await import('@/lib/subscription-service')
@@ -143,17 +278,26 @@ async function fulfillSubscription(
                 .in('status', ['active', 'pending'])
         }
 
-        // Create payment log (with unique constraint to prevent duplicates)
-        await supabaseAdmin
+        // Create payment log with upsert for idempotency
+        const { error: logError } = await supabaseAdmin
             .from('payment_logs')
-            .insert([{
+            .upsert({
                 user_id: userId,
                 subscription_id: subscription.id,
                 amount: amount,
                 transaction_id: orderId,
                 status: 'success',
-                payment_gateway: 'razorpay'
-            }])
+                payment_gateway: 'razorpay',
+                processed_at: new Date().toISOString()
+            }, {
+                onConflict: 'transaction_id',
+                ignoreDuplicates: true // Don't error if already exists
+            })
+
+        if (logError) {
+            console.error('Error creating payment log:', logError)
+            // Non-fatal: subscription was created successfully
+        }
 
         // Send email notification
         const { data: user } = await supabaseAdmin

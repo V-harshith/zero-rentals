@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { signUp } from "@/lib/auth"
 import { toast } from "sonner"
-import { UserCircle, Mail, Lock, User, Phone, ArrowLeft, Eye, EyeOff } from "lucide-react"
+import { UserCircle, Mail, Lock, User, Phone, ArrowLeft, Eye, EyeOff, MapPin } from "lucide-react"
 import { PasswordStrength } from "@/components/password-strength"
 import { useAuth } from "@/lib/auth-context"
 
@@ -25,6 +25,8 @@ export default function TenantRegisterPage() {
     phone: "",
     password: "",
     confirmPassword: "",
+    preferredCity: "",
+    preferredArea: "",
   })
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
@@ -97,11 +99,19 @@ export default function TenantRegisterPage() {
       return
     }
 
+    if (!formData.preferredCity || !formData.preferredArea) {
+      toast.error("Please enter your preferred city and area")
+      setIsLoading(false)
+      return
+    }
+
     try {
       const result = await signUp(formData.email, formData.password, {
         name: formData.name,
         phone: formData.phone,
         role: "tenant",
+        preferred_city: formData.preferredCity || null,
+        preferred_area: formData.preferredArea || null,
       })
 
       // Show success message with verification requirement
@@ -265,6 +275,44 @@ export default function TenantRegisterPage() {
                     className="pl-10"
                     required
                   />
+                </div>
+              </div>
+
+              {/* Preferred Location Section */}
+              <div className="border-t pt-4 mt-4">
+                <p className="text-sm font-medium text-muted-foreground mb-3">
+                  Preferred Location <span className="text-red-500">*</span>
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="preferredCity">Preferred City <span className="text-red-500">*</span></Label>
+                    <div className="relative">
+                      <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        id="preferredCity"
+                        placeholder="e.g., Bangalore"
+                        value={formData.preferredCity}
+                        onChange={(e) => setFormData({ ...formData, preferredCity: e.target.value })}
+                        className="pl-10"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="preferredArea">Preferred Area <span className="text-red-500">*</span></Label>
+                    <div className="relative">
+                      <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        id="preferredArea"
+                        placeholder="e.g., Koramangala"
+                        value={formData.preferredArea}
+                        onChange={(e) => setFormData({ ...formData, preferredArea: e.target.value })}
+                        className="pl-10"
+                        required
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
 

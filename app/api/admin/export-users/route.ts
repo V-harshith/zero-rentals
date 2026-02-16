@@ -58,7 +58,7 @@ export async function POST(request: NextRequest) {
 
     let query = supabase
       .from('users')
-      .select('*')
+      .select('id, name, email, phone, role, status, verified, preferred_city, preferred_area, created_at, email_verified_at')
       .order('created_at', { ascending: false })
       .limit(MAX_EXPORT_LIMIT)
 

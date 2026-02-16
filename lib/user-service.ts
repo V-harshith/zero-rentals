@@ -10,6 +10,8 @@ export interface User {
     verified: boolean;
     status: 'active' | 'inactive' | 'suspended';
     city?: string;
+    preferred_city?: string;
+    preferred_area?: string;
     address?: string;
     business_name?: string;
     gst_number?: string;

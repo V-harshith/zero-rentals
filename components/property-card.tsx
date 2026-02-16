@@ -11,7 +11,7 @@ import { useAuth } from "@/lib/auth-context"
 import { useFavorites } from "@/lib/favorites-context"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { useState } from "react"
+import { useState, useRef } from "react"
 
 interface PropertyCardProps {
     property: Property
@@ -24,6 +24,7 @@ export function PropertyCard({ property, showFavorite = true, priority = false }
     const router = useRouter()
     const { favoriteIds, isFavorite, addFavorite, removeFavorite, isLoading: isFavoritesLoading } = useFavorites()
     const [localLoading, setLocalLoading] = useState(false)
+    const isTogglingRef = useRef(false)
 
     // Use favoriteIds directly to ensure immediate UI updates
     const favorite = favoriteIds.has(property.id)
@@ -39,11 +40,12 @@ export function PropertyCard({ property, showFavorite = true, priority = false }
             return
         }
 
-        // Don't allow toggling while already processing
-        if (localLoading) {
+        // Don't allow toggling while already processing (using ref to prevent closure issues)
+        if (isTogglingRef.current || localLoading) {
             return
         }
 
+        isTogglingRef.current = true
         setLocalLoading(true)
 
         try {
@@ -54,6 +56,7 @@ export function PropertyCard({ property, showFavorite = true, priority = false }
             }
         } finally {
             setLocalLoading(false)
+            isTogglingRef.current = false
         }
     }
 
@@ -82,7 +85,8 @@ export function PropertyCard({ property, showFavorite = true, priority = false }
             }
             sessionStorage.setItem('savedSearchFilters', JSON.stringify({
                 filters,
-                timestamp: Date.now()
+                timestamp: Date.now(),
+                urlParams: window.location.search
             }))
         }
     }

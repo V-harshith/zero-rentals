@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { useAuth } from "@/lib/auth-context"
 import { initiatePlanPurchaseAction, fulfillSubscriptionAction } from "@/app/actions/payment-actions"
@@ -27,9 +27,14 @@ export function RazorpayCheckout({
 }: RazorpayCheckoutProps) {
     const { user } = useAuth()
     const [loading, setLoading] = useState(false)
+    const paymentInitiatedRef = useRef(false)
+    const processedPayments = useRef(new Set<string>())
     const router = useRouter()
 
     const handlePayment = async () => {
+        // Prevent duplicate payment initiation
+        if (loading || paymentInitiatedRef.current) return
+
         if (!user) {
             router.push("/login/owner")
             return
@@ -41,6 +46,7 @@ export function RazorpayCheckout({
             return
         }
 
+        paymentInitiatedRef.current = true
         setLoading(true)
 
         try {
@@ -82,6 +88,12 @@ export function RazorpayCheckout({
                     razorpay_order_id: string;
                     razorpay_signature: string;
                 }) {
+                    // Prevent duplicate processing of same payment
+                    if (processedPayments.current.has(response.razorpay_payment_id)) {
+                        return
+                    }
+                    processedPayments.current.add(response.razorpay_payment_id)
+
                     try {
                         const fulfillResult = await fulfillSubscriptionAction({
                             userId: user.id,
@@ -122,6 +134,7 @@ export function RazorpayCheckout({
             toast.error(error.message || "An error occurred during payment")
         } finally {
             setLoading(false)
+            paymentInitiatedRef.current = false
         }
     }
 

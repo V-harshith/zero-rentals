@@ -55,9 +55,16 @@ export default function SearchPage() {
         const savedFiltersRaw = sessionStorage.getItem('savedSearchFilters')
         if (savedFiltersRaw) {
             try {
-                const { filters: savedFilters, timestamp } = JSON.parse(savedFiltersRaw)
-                // Check if saved within last 30 minutes
-                if (Date.now() - timestamp < 30 * 60 * 1000) {
+                const { filters: savedFilters, timestamp, urlParams } = JSON.parse(savedFiltersRaw)
+                const currentParams = window.location.search
+
+                // Only restore if:
+                // 1. Saved within last 30 minutes
+                // 2. URL params match what was saved (user navigated back) OR URL has no params
+                const isRecent = Date.now() - timestamp < 30 * 60 * 1000
+                const paramsMatch = !urlParams || currentParams === urlParams || currentParams === ''
+
+                if (isRecent && paramsMatch && savedFilters) {
                     setFilters(savedFilters)
                 }
                 // Clear sessionStorage after restoring

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
@@ -52,6 +52,9 @@ const INITIAL_DATA: FormData = {
   images: []
 }
 
+// Track loaded scripts for cleanup
+const loadedScripts = new Set<string>();
+
 // Load Razorpay script
 const loadScript = (src: string) => {
   return new Promise((resolve) => {
@@ -62,10 +65,24 @@ const loadScript = (src: string) => {
     }
     const script = document.createElement("script");
     script.src = src;
-    script.onload = () => resolve(true);
+    script.onload = () => {
+      loadedScripts.add(src);
+      resolve(true);
+    };
     script.onerror = () => resolve(false);
     document.body.appendChild(script);
   });
+};
+
+// Cleanup function to remove loaded scripts
+const cleanupScripts = () => {
+  loadedScripts.forEach((src) => {
+    const script = document.querySelector(`script[src="${src}"]`);
+    if (script && script.parentNode) {
+      script.parentNode.removeChild(script);
+    }
+  });
+  loadedScripts.clear();
 };
 
 function PostPropertyPage() {
@@ -73,7 +90,7 @@ function PostPropertyPage() {
   const searchParams = useSearchParams()
   const editPropertyId = searchParams.get('edit')
   const isEditMode = !!editPropertyId
-  
+
   const { user } = useAuth()
   const [currentStep, setCurrentStep] = useState(1)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -81,7 +98,8 @@ function PostPropertyPage() {
   const [formData, setFormData] = useState<FormData>(INITIAL_DATA)
   const [maxPhotos, setMaxPhotos] = useState(10) // Maximum 10 images for all users
   const [isLoadingProperty, setIsLoadingProperty] = useState(false)
-  
+  const [existingImages, setExistingImages] = useState<string[]>([]) // Track existing images in edit mode
+
   // Admin-specific state for owner creation
   const [isAdmin, setIsAdmin] = useState(false)
   const [ownerMode, setOwnerMode] = useState<'new' | 'existing'>('new')
@@ -97,7 +115,7 @@ function PostPropertyPage() {
     email: string
     phone: string
   } | null>(null)
-  
+
   // Property limit state
   const [showUpgradeModal, setShowUpgradeModal] = useState(false)
   const [showPaymentModal, setShowPaymentModal] = useState(false)
@@ -111,6 +129,113 @@ function PostPropertyPage() {
     expiresAt: string
   } | null>(null)
   const [isCheckingAccess, setIsCheckingAccess] = useState(true)
+
+  // Submit lock to prevent duplicate submissions
+  const submitLockRef = useRef(false)
+
+  // Track created property for rollback on failure
+  const createdPropertyRef = useRef<{ id: string } | null>(null)
+
+  // Form draft persistence key
+  const DRAFT_KEY = isEditMode ? `property-draft-edit-${editPropertyId}` : 'property-draft-new'
+
+  // Load saved draft on mount (only if not in edit mode with specific property)
+  useEffect(() => {
+    if (!isEditMode) {
+      const saved = localStorage.getItem(DRAFT_KEY)
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved)
+          // Only restore if user confirms and it's less than 24 hours old
+          const age = Date.now() - (parsed.timestamp || 0)
+          const isRecent = age < 24 * 60 * 60 * 1000
+
+          if (isRecent && parsed.formData) {
+            // Check if form is not empty before asking
+            const hasData = parsed.formData.title || parsed.formData.city || parsed.formData.images?.length > 0
+            if (hasData) {
+              toast.info('You have unsaved progress from earlier. Form restored.', {
+                duration: 5000,
+                action: {
+                  label: 'Clear Draft',
+                  onClick: () => {
+                    localStorage.removeItem(DRAFT_KEY)
+                    setFormData(INITIAL_DATA)
+                  }
+                }
+              })
+              setFormData({ ...INITIAL_DATA, ...parsed.formData })
+              setCurrentStep(parsed.currentStep || 1)
+            }
+          }
+        } catch (e) {
+          // Invalid saved data, ignore
+          localStorage.removeItem(DRAFT_KEY)
+        }
+      }
+    }
+  }, [isEditMode, editPropertyId, DRAFT_KEY])
+
+  // Auto-save draft every 30 seconds
+  useEffect(() => {
+    if (isEditMode || isSubmitting) return // Don't auto-save in edit mode or during submission
+
+    const interval = setInterval(() => {
+      const hasData = formData.title || formData.city || formData.images.length > 0
+      if (hasData) {
+        const draft = {
+          formData,
+          currentStep,
+          timestamp: Date.now()
+        }
+        localStorage.setItem(DRAFT_KEY, JSON.stringify(draft))
+      }
+    }, 30000) // 30 seconds
+
+    return () => clearInterval(interval)
+  }, [formData, currentStep, isEditMode, isSubmitting, DRAFT_KEY])
+
+  // beforeunload protection
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      // Check if there's unsaved data
+      const hasUnsavedChanges = formData.title?.trim() ||
+        formData.city?.trim() ||
+        formData.images.length > 0 ||
+        existingImages.length > 0
+
+      if (hasUnsavedChanges && !isSubmitting) {
+        // Save draft before leaving
+        if (!isEditMode) {
+          const draft = {
+            formData,
+            currentStep,
+            timestamp: Date.now()
+          }
+          localStorage.setItem(DRAFT_KEY, JSON.stringify(draft))
+        }
+
+        e.preventDefault()
+        e.returnValue = 'You have unsaved changes. Are you sure you want to leave?'
+        return e.returnValue
+      }
+    }
+
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [formData, currentStep, existingImages, isSubmitting, isEditMode, DRAFT_KEY])
+
+  // Clear draft on successful submit
+  const clearDraft = () => {
+    localStorage.removeItem(DRAFT_KEY)
+  }
+
+  // Cleanup scripts on unmount
+  useEffect(() => {
+    return () => {
+      cleanupScripts();
+    };
+  }, []);
 
   // --- Fetch Subscription Limit ---
   useEffect(() => {
@@ -140,11 +265,19 @@ function PostPropertyPage() {
   useEffect(() => {
     if (isEditMode && editPropertyId) {
       loadPropertyData(editPropertyId)
+    } else if (!isEditMode) {
+      // Reset form when leaving edit mode
+      setFormData(INITIAL_DATA)
+      setExistingImages([])
+      setCurrentStep(1)
     }
   }, [isEditMode, editPropertyId])
 
   const loadPropertyData = async (propertyId: string) => {
     setIsLoadingProperty(true)
+    // Reset form first to prevent stale data from previous property
+    setFormData(INITIAL_DATA)
+    setExistingImages([])
     try {
       const { data, error } = await supabase
         .from('properties')
@@ -206,8 +339,12 @@ function PostPropertyPage() {
           otherRules: data.rules?.find((r: string) => !['No Smoking', 'No Non-Veg', 'No Drinking', 'No Loud Music', 'No Opposite Gender'].includes(r) && !r.startsWith('Preferred Tenant:')) || '',
           directionsTip: data.description?.split('\n\nDirections: ')[1] || '',
           furnishing: data.furnishing || '',
-          images: [] // Images will be handled separately
+          images: [] // New images to be uploaded
         })
+        // Set existing images for edit mode
+        if (data.images && Array.isArray(data.images)) {
+          setExistingImages(data.images)
+        }
         toast.success('Property data loaded')
       }
     } catch (error) {
@@ -479,13 +616,56 @@ function PostPropertyPage() {
     }
   }
 
+  // Validate session before critical operations
+  const validateSession = async (): Promise<boolean> => {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) {
+      toast.error("Session expired. Please log in again.", {
+        description: "Your session has expired. Please log in again to continue."
+      })
+      router.push('/login/owner')
+      return false
+    }
+    return true
+  }
+
+  // Rollback function for partial failures
+  const rollbackProperty = async (propertyId: string) => {
+    try {
+      await supabase.from('properties').delete().eq('id', propertyId)
+      console.log(`Rolled back property ${propertyId}`)
+    } catch (e) {
+      console.error('Failed to rollback property:', e)
+    }
+  }
+
   const handleSubmit = async () => {
-    if (!validateStep(5)) return // Validate final step
+    // Strong submit lock using ref (prevents race conditions)
+    if (submitLockRef.current || isSubmitting) {
+      console.log('Submit already in progress, ignoring duplicate')
+      return
+    }
+    submitLockRef.current = true
+
+    // Reset rollback tracking
+    createdPropertyRef.current = null
+
+    if (!validateStep(5)) {
+      submitLockRef.current = false
+      return // Validate final step
+    }
 
     // Add user null safety check
     if (!user) {
       toast.error("User session expired. Please log in again.")
       router.push('/login/owner')
+      submitLockRef.current = false
+      return
+    }
+
+    // Validate session before starting
+    if (!(await validateSession())) {
+      submitLockRef.current = false
       return
     }
 
@@ -494,20 +674,24 @@ function PostPropertyPage() {
       if (ownerMode === 'new') {
         if (!ownerDetails.name || !ownerDetails.email || !ownerDetails.password || !ownerDetails.phone) {
           toast.error("Please provide all owner details (name, email, password, phone)")
+          submitLockRef.current = false
           return
         }
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
         if (!emailRegex.test(ownerDetails.email)) {
           toast.error("Please provide a valid email address")
+          submitLockRef.current = false
           return
         }
         if (ownerDetails.password.length < 6) {
           toast.error("Password must be at least 6 characters long")
+          submitLockRef.current = false
           return
         }
       } else if (ownerMode === 'existing') {
         if (!selectedExistingOwner) {
           toast.error("Please select an existing owner")
+          submitLockRef.current = false
           return
         }
       }
@@ -670,14 +854,16 @@ function PostPropertyPage() {
             toast.warning(`${errors.length} images failed to upload`)
           }
 
-          // Update property with new image URLs
+          // Update property with merged image URLs (existing + new)
           if (urls.length > 0) {
-            await updateProperty(editPropertyId, { images: urls })
+            const allImages = [...existingImages, ...urls]
+            await updateProperty(editPropertyId, { images: allImages })
           }
         }
 
         setUploadStatus("Success!")
         toast.success("Property updated successfully!")
+        clearDraft() // Clear any saved draft
 
         // Redirect to correct dashboard based on role
         setTimeout(() => {
@@ -694,7 +880,17 @@ function PostPropertyPage() {
           throw new Error(error?.message || "Failed to create property record")
         }
 
-        // 4. Upload Images
+        // Track for potential rollback
+        createdPropertyRef.current = newProperty
+
+        // Validate session before image upload
+        if (!(await validateSession())) {
+          // Session expired - rollback the created property
+          await rollbackProperty(newProperty.id)
+          throw new Error("Session expired during submission. Please log in and try again.")
+        }
+
+        // 4. Upload Images with retry logic
         if (formData.images.length > 0) {
           setUploadStatus(`Uploading ${formData.images.length} images...`)
           const { urls, errors } = await uploadPropertyImages(formData.images, newProperty.id)
@@ -708,6 +904,20 @@ function PostPropertyPage() {
           if (urls.length > 0) {
             const { updateProperty } = await import('@/lib/data-service')
             await updateProperty(newProperty.id, { images: urls })
+          } else if (formData.images.length > 0 && errors.length === formData.images.length) {
+            // ALL images failed - offer rollback or continue
+            toast.error("All images failed to upload", {
+              description: "Property was created but without images. You can edit the property to add images later.",
+              duration: 10000,
+              action: {
+                label: 'Delete Property',
+                onClick: async () => {
+                  await rollbackProperty(newProperty.id)
+                  toast.success('Property deleted')
+                  router.push(isAdmin ? '/dashboard/admin' : '/dashboard/owner')
+                }
+              }
+            })
           }
         }
 
@@ -717,6 +927,7 @@ function PostPropertyPage() {
             ? "Property posted and auto-approved!"
             : "Property posted successfully! Waiting for admin approval."
         )
+        clearDraft() // Clear saved draft
 
         // Send email notification (only for owner posts, not admin)
         if (!isAdmin) {
@@ -764,6 +975,7 @@ function PostPropertyPage() {
       setUploadStatus("")
     } finally {
       setIsSubmitting(false)
+      submitLockRef.current = false // Release the lock
     }
   }
 
@@ -1068,6 +1280,11 @@ function PostPropertyPage() {
                 handleImageSelect={handleImageSelect}
                 removeImage={removeImage}
                 maxPhotos={maxPhotos}
+                isEditMode={isEditMode}
+                existingImages={existingImages}
+                removeExistingImage={(index) => {
+                  setExistingImages(prev => prev.filter((_, i) => i !== index))
+                }}
               />
             )}
 

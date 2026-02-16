@@ -92,7 +92,6 @@ export class SessionManager {
             }
 
             if (data.session) {
-                console.log('Session refreshed successfully');
                 return true;
             }
 
@@ -152,52 +151,56 @@ export function getSessionManager(): SessionManager {
 
 /**
  * Initialize session management (call this in your app initialization)
+ * Returns cleanup function to prevent memory leaks
  */
-export function initializeSessionManagement() {
+export function initializeSessionManagement(): () => void {
     const manager = getSessionManager();
     manager.start();
 
     // Clean up on page unload
     if (typeof window !== 'undefined') {
-        window.addEventListener('beforeunload', () => {
-            manager.stop();
-        });
+        const beforeUnloadHandler = () => manager.stop();
+        window.addEventListener('beforeunload', beforeUnloadHandler);
 
         // CRITICAL: Recover session when user returns to tab
         // This handles cases where user was away and session might have expired
-        document.addEventListener('visibilitychange', async () => {
+        const visibilityHandler = async () => {
             if (document.visibilityState === 'visible') {
-                console.log('[SESSION] Page became visible, checking session...');
-                
                 // Check if session is still valid
                 const isValid = await manager.isSessionValid();
-                
+
                 if (!isValid) {
-                    console.warn('[SESSION] Session invalid on visibility change, attempting refresh...');
                     await manager.refreshSession();
-                } else {
-                    console.log('[SESSION] Session still valid');
                 }
             }
-        });
+        };
+        document.addEventListener('visibilitychange', visibilityHandler);
 
         // CRITICAL: Handle online/offline events
-        window.addEventListener('online', async () => {
-            console.log('[SESSION] Network back online, checking session...');
-            // Make checkAndRefreshIfNeeded public
+        const onlineHandler = async () => {
             const session = await manager.getSession();
             if (session) {
                 const expiresAt = session.expires_at ? session.expires_at * 1000 : 0;
                 const now = Date.now();
                 const timeUntilExpiry = expiresAt - now;
-                
+
                 if (timeUntilExpiry < SESSION_EXPIRY_BUFFER) {
                     await manager.refreshSession();
                 }
             }
-        });
+        };
+        window.addEventListener('online', onlineHandler);
+
+        // Return cleanup function
+        return () => {
+            window.removeEventListener('beforeunload', beforeUnloadHandler);
+            document.removeEventListener('visibilitychange', visibilityHandler);
+            window.removeEventListener('online', onlineHandler);
+            manager.stop();
+        };
     }
 
-    return manager;
+    // Return no-op cleanup for SSR
+    return () => {};
 }
 
