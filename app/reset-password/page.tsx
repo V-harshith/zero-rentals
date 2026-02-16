@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -11,7 +11,6 @@ import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
 import { Lock, Eye, EyeOff, Loader2, CheckCircle2, AlertCircle } from "lucide-react"
 import Link from "next/link"
-import Image from "next/image"
 import { motion } from "framer-motion"
 
 export default function ResetPasswordPage() {
@@ -36,92 +35,98 @@ export default function ResetPasswordPage() {
     hasSpecial: false,
   })
 
-  // Industry-standard: Use onAuthStateChange to detect RECOVERY event from email link
-  // This is more reliable than getSession() and doesn't timeout
+  // Use refs to prevent race conditions and stale closures
+  const isMountedRef = useRef(true)
+  const sessionEstablishedRef = useRef(false)
+  const authListenerRef = useRef<{ subscription: { unsubscribe: () => void } } | null>(null)
+
+  // CRITICAL FIX: Session validation with proper race condition handling
+  // The recovery flow has two paths:
+  // 1. Supabase detectSessionInUrl processes the hash and fires PASSWORD_RECOVERY event
+  // 2. The hash contains tokens that create a temporary session for password reset
+  const validateSession = useCallback(async () => {
+    // Wait for Supabase to process URL hash (detectSessionInUrl)
+    await new Promise(resolve => setTimeout(resolve, 500))
+
+    if (!isMountedRef.current || sessionEstablishedRef.current) return
+
+    // Check if we have a valid session from the recovery link
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+
+    if (sessionError) {
+      setSessionError("Failed to validate session. Please try again.")
+      setIsCheckingSession(false)
+      return
+    }
+
+    if (session) {
+      sessionEstablishedRef.current = true
+      setHasValidSession(true)
+      setIsCheckingSession(false)
+
+      // Clear the URL hash to prevent re-processing on refresh
+      if (window.location.hash) {
+        window.history.replaceState(null, '', window.location.pathname + window.location.search)
+      }
+    }
+  }, [])
+
   useEffect(() => {
-    let timeoutId: ReturnType<typeof setTimeout> | null = null
-    let isMounted = true
-    let sessionEstablished = false
+    isMountedRef.current = true
 
-    // Listen for auth state changes (including RECOVERY from email link)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (!isMounted || sessionEstablished) return
-
-      console.log("[AUTH] Password Reset - Auth event:", event)
+    // Set up auth state listener FIRST to catch PASSWORD_RECOVERY event
+    // This must be done before checking session to avoid race conditions
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!isMountedRef.current) return
 
       if (event === 'PASSWORD_RECOVERY') {
-        // User clicked the reset link from email - session is being created
-        console.log("✅ PASSWORD_RECOVERY event detected")
-        sessionEstablished = true
+        // PASSWORD_RECOVERY means Supabase has processed the recovery token
+        // The session should now be available
+        sessionEstablishedRef.current = true
         setHasValidSession(true)
         setSessionError(null)
         setIsCheckingSession(false)
-        if (timeoutId) clearTimeout(timeoutId)
-      } else if (event === 'SIGNED_IN' && session) {
-        // Session established (could be from token in URL hash)
-        console.log("✅ User signed in for password reset")
-        sessionEstablished = true
+
+        // Clear the URL hash to prevent re-processing
+        if (window.location.hash) {
+          window.history.replaceState(null, '', window.location.pathname + window.location.search)
+        }
+      } else if (event === 'SIGNED_IN' && session && !sessionEstablishedRef.current) {
+        // Session established from recovery token
+        sessionEstablishedRef.current = true
         setHasValidSession(true)
         setSessionError(null)
         setIsCheckingSession(false)
-        if (timeoutId) clearTimeout(timeoutId)
-      } else if (event === 'TOKEN_REFRESHED' && session) {
-        // Token was refreshed, still valid
-        sessionEstablished = true
-        setHasValidSession(true)
-        setIsCheckingSession(false)
-        if (timeoutId) clearTimeout(timeoutId)
+
+        if (window.location.hash) {
+          window.history.replaceState(null, '', window.location.pathname + window.location.search)
+        }
       }
     })
 
-    // Also check for existing session (in case page was refreshed)
-    const checkExistingSession = async () => {
-      // CRITICAL FIX: Give Supabase more time to process URL hash token
-      // The detectSessionInUrl option needs time to parse and validate tokens
-      await new Promise(resolve => setTimeout(resolve, 1500))
+    authListenerRef.current = authListener
 
-      if (!isMounted || sessionEstablished) return
+    // Check for existing session after setting up listener
+    // Use a longer delay to allow Supabase to process the hash
+    const sessionCheckTimeout = setTimeout(() => {
+      validateSession()
+    }, 1000)
 
-      const { data: { session } } = await supabase.auth.getSession()
-
-      if (session) {
-        console.log("✅ Existing session found for password reset")
-        sessionEstablished = true
-        setHasValidSession(true)
-        setSessionError(null)
-        setIsCheckingSession(false)
-      } else {
-        // No session yet - might be waiting for RECOVERY event
-        // Try one more time after a delay (Supabase may still be processing)
-        await new Promise(resolve => setTimeout(resolve, 2000))
-
-        if (!isMounted || sessionEstablished) return
-
-        const { data: { session: retrySession } } = await supabase.auth.getSession()
-
-        if (retrySession) {
-          console.log("✅ Session found on retry for password reset")
-          sessionEstablished = true
-          setHasValidSession(true)
-          setSessionError(null)
-          setIsCheckingSession(false)
-          return
-        }
-
-        // Still no session - show error
+    // Safety timeout - show error if session isn't established after 10 seconds
+    const safetyTimeout = setTimeout(() => {
+      if (isMountedRef.current && !sessionEstablishedRef.current) {
         setIsCheckingSession(false)
         setSessionError("This password reset link is invalid or has expired. Please request a new one.")
       }
-    }
-
-    checkExistingSession()
+    }, 10000)
 
     return () => {
-      isMounted = false
-      if (timeoutId) clearTimeout(timeoutId)
-      subscription.unsubscribe()
+      isMountedRef.current = false
+      clearTimeout(sessionCheckTimeout)
+      clearTimeout(safetyTimeout)
+      authListener.subscription.unsubscribe()
     }
-  }, [])
+  }, [validateSession])
 
   const validatePasswordStrength = (password: string) => {
     setPasswordStrength({
@@ -135,7 +140,7 @@ export default function ResetPasswordPage() {
 
   const handlePasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const password = e.target.value
-    setFormData({ ...formData, password })
+    setFormData(prev => ({ ...prev, password }))
     validatePasswordStrength(password)
   }
 
@@ -143,8 +148,13 @@ export default function ResetPasswordPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+
+    // Prevent double submission
+    if (isLoading) return
+
     setIsLoading(true)
 
+    // Validation
     if (!formData.password || !formData.confirmPassword) {
       toast.error("All fields are required")
       setIsLoading(false)
@@ -165,15 +175,36 @@ export default function ResetPasswordPage() {
 
     try {
       await updatePassword(formData.password)
-      toast.success("Password updated successfully!")
 
-      // Add delay before redirecting
+      // Clear sensitive form data
+      setFormData({ password: "", confirmPassword: "" })
+
+      toast.success("Password updated successfully! Redirecting to login...")
+
+      // Sign out the user after password reset to force re-login with new password
+      await supabase.auth.signOut()
+
+      // Redirect to login after a short delay
       setTimeout(() => {
         router.push("/login")
       }, 2000)
-    } catch (error) {
-      console.error("Password update error:", error)
-      toast.error("Failed to update password. Please try again.")
+    } catch (error: any) {
+      // Handle specific error types
+      if (error.message?.includes('session') || error.message?.includes('expired')) {
+        toast.error("Session expired", {
+          description: "Your password reset link has expired. Please request a new one.",
+        })
+        setSessionError("This password reset link has expired. Please request a new one.")
+        setHasValidSession(false)
+      } else if (error.message?.includes('weak')) {
+        toast.error("Weak password", {
+          description: "Please choose a stronger password.",
+        })
+      } else {
+        toast.error("Failed to update password", {
+          description: error.message || "Please try again.",
+        })
+      }
     } finally {
       setIsLoading(false)
     }
@@ -271,8 +302,9 @@ export default function ResetPasswordPage() {
                     />
                     <button
                       type="button"
-                      onClick={() => setShowPassword(!showPassword)}
+                      onClick={() => setShowPassword(prev => !prev)}
                       className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                      aria-label={showPassword ? "Hide password" : "Show password"}
                     >
                       {showPassword ? (
                         <EyeOff className="h-4 w-4" />
@@ -339,15 +371,16 @@ export default function ResetPasswordPage() {
                       id="confirmPassword"
                       type={showConfirmPassword ? "text" : "password"}
                       value={formData.confirmPassword}
-                      onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
+                      onChange={(e) => setFormData(prev => ({ ...prev, confirmPassword: e.target.value }))}
                       placeholder="Confirm new password"
                       required
                       className="pr-10"
                     />
                     <button
                       type="button"
-                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      onClick={() => setShowConfirmPassword(prev => !prev)}
                       className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                      aria-label={showConfirmPassword ? "Hide confirm password" : "Show confirm password"}
                     >
                       {showConfirmPassword ? (
                         <EyeOff className="h-4 w-4" />

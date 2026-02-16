@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState, useCallback } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
+import { useSearchParams } from "next/navigation"
 import Link from "next/link"
 import Image from "next/image"
 import { CheckCircle2, ArrowRight, Loader2, AlertCircle } from "lucide-react"
@@ -10,7 +10,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { supabase } from "@/lib/supabase"
 
 export default function EmailVerifiedPage() {
-    const router = useRouter()
     const searchParams = useSearchParams()
     const [countdown, setCountdown] = useState(5)
     const [isRedirecting, setIsRedirecting] = useState(false)
@@ -26,14 +25,11 @@ export default function EmailVerifiedPage() {
         try {
             const { data: { session } } = await supabase.auth.getSession()
             if (session) {
-                console.log('[VERIFIED] Session established, ready to redirect')
                 setSessionReady(true)
                 return true
             }
-            console.log('[VERIFIED] No session yet, waiting...')
             return false
         } catch (error) {
-            console.error('[VERIFIED] Error checking session:', error)
             return false
         }
     }, [])
@@ -80,41 +76,26 @@ export default function EmailVerifiedPage() {
         if (isRedirecting) return
 
         setIsRedirecting(true)
-        console.log('[VERIFIED] Attempting redirect to:', redirectUrl)
 
         try {
             // Ensure we have a session before redirecting
             const { data: { session } } = await supabase.auth.getSession()
 
             if (!session) {
-                console.warn('[VERIFIED] No session found, waiting...')
                 // Wait up to 3 more seconds for session
                 await new Promise(resolve => setTimeout(resolve, 3000))
 
                 const { data: { session: retrySession } } = await supabase.auth.getSession()
                 if (!retrySession) {
-                    throw new Error('Session not established. Please log in manually.')
+                    // No session - redirect to login page instead of showing error
+                    window.location.href = '/login'
+                    return
                 }
             }
 
-            // Try Next.js router first
-            try {
-                await router.push(redirectUrl)
-                // If router.push doesn't throw but also doesn't navigate,
-                // we need to check if we're still on this page after a short delay
-                setTimeout(() => {
-                    if (window.location.pathname.includes('/auth/verified')) {
-                        console.log('[VERIFIED] Router push may have failed, trying window.location')
-                        window.location.href = redirectUrl
-                    }
-                }, 1000)
-            } catch (routerError) {
-                console.error('[VERIFIED] Router push failed:', routerError)
-                // Fallback to window.location
-                window.location.href = redirectUrl
-            }
+            // Use window.location for reliable navigation
+            window.location.href = redirectUrl
         } catch (error: any) {
-            console.error('[VERIFIED] Redirect failed:', error)
             setRedirectError(error.message || 'Failed to redirect. Please click the button below.')
             setIsRedirecting(false)
         }
@@ -186,24 +167,23 @@ export default function EmailVerifiedPage() {
                             </p>
                         )}
 
-                        <Link href={redirectUrl} onClick={(e) => {
-                            e.preventDefault()
-                            handleRedirect()
-                        }}>
-                            <Button className="w-full h-12" disabled={isRedirecting}>
-                                {isRedirecting ? (
-                                    <>
-                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                        Redirecting...
-                                    </>
-                                ) : (
-                                    <>
-                                        Continue to Dashboard
-                                        <ArrowRight className="h-4 w-4 ml-2" />
-                                    </>
-                                )}
-                            </Button>
-                        </Link>
+                        <Button
+                            className="w-full h-12"
+                            disabled={isRedirecting}
+                            onClick={handleRedirect}
+                        >
+                            {isRedirecting ? (
+                                <>
+                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                    Redirecting...
+                                </>
+                            ) : (
+                                <>
+                                    Continue to Dashboard
+                                    <ArrowRight className="h-4 w-4 ml-2" />
+                                </>
+                            )}
+                        </Button>
 
                         {redirectError && (
                             <p className="text-xs text-muted-foreground">

@@ -675,8 +675,14 @@ export async function updatePassword(newPassword: string) {
 
       if (error) {
         // Check for specific error types that shouldn't be retried
-        if (error.message?.includes('session') || error.message?.includes('expired')) {
+        if (error.message?.includes('session') || error.message?.includes('expired') || error.status === 401) {
           throw new Error('Your session has expired. Please request a new password reset link.')
+        }
+        if (error.message?.includes('weak') || error.message?.includes('strength')) {
+          throw new Error('Password is too weak. Please choose a stronger password.')
+        }
+        if (error.message?.includes('same password') || error.message?.includes('different')) {
+          throw new Error('New password must be different from your current password.')
         }
         throw error
       }
@@ -684,7 +690,16 @@ export async function updatePassword(newPassword: string) {
       // Success! Return
       return
     } catch (error: any) {
-      console.error(`[AUTH] Password update attempt ${attempt} failed:`, error.message)
+      // Don't log on final attempt - let caller handle it
+      if (attempt < MAX_RETRIES) {
+        // Check for non-retryable errors
+        if (error.message?.includes('session') ||
+            error.message?.includes('expired') ||
+            error.message?.includes('weak') ||
+            error.message?.includes('same password')) {
+          throw error
+        }
+      }
 
       // If it's the last attempt, throw the error
       if (attempt === MAX_RETRIES) {

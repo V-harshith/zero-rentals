@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useRouter } from "next/navigation"
 import Link from "next/link"
 import Image from "next/image"
 import { CheckCircle2, ArrowRight } from "lucide-react"
@@ -9,7 +8,6 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 
 export default function EmailConfirmedPage() {
-    const router = useRouter()
     const [countdown, setCountdown] = useState(5)
 
     useEffect(() => {
@@ -17,7 +15,8 @@ export default function EmailConfirmedPage() {
             setCountdown((prev) => {
                 if (prev <= 1) {
                     clearInterval(interval)
-                    router.push("/login")
+                    // Use window.location for reliable navigation
+                    window.location.href = "/login"
                     return 0
                 }
                 return prev - 1
@@ -25,7 +24,7 @@ export default function EmailConfirmedPage() {
         }, 1000)
 
         return () => clearInterval(interval)
-    }, [router])
+    }, [])
 
     return (
         <div className="min-h-screen flex items-center justify-center bg-muted/30 p-4">

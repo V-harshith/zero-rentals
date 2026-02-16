@@ -57,7 +57,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const COOLDOWN_MS = 5000 // 5-second cooldown between requests
 
   // Memoized function to load user - prevents duplicate calls with deduplication
-  // DEPENDENCY: user - must include to prevent stale closure
+  // CRITICAL: No dependencies to prevent stale closure issues
+  // Uses refs for all state access to ensure latest values
   const loadUser = useCallback(async (source: string) => {
     // Check cooldown to prevent rapid successive calls
     const now = Date.now()
@@ -74,9 +75,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     lastLoadTimeRef.current = now
 
     const loadPromise = (async () => {
-      // Timeout protection for session recovery (10 seconds)
+      // Timeout protection for session recovery (15 seconds for slow networks)
       const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error('Session recovery timeout')), 10000)
+        setTimeout(() => reject(new Error('Session recovery timeout')), 15000)
       })
 
       try {
@@ -100,7 +101,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch (error) {
         setUser(null)
         currentUserRef.current = null
-        throw error // Re-throw to allow caller to handle
+        // Error handled silently - no need to throw
       } finally {
         isLoadingUserRef.current = false
         pendingLoadPromiseRef.current = null
@@ -109,7 +110,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     pendingLoadPromiseRef.current = loadPromise
     return loadPromise
-  }, [user])
+  }, []) // No dependencies - uses refs for state access
 
   // Load user on mount and listen for auth changes
   useEffect(() => {
@@ -130,7 +131,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Initial user load - don't set isLoading false here
     // Wait for INITIAL_SESSION event to ensure session is fully restored
     loadUser("mount").catch(() => {
-      // Error handled in loadUser
+      // Error handled in loadUser - ensure loading state is reset
+      setIsLoading(false)
     })
 
     // CRITICAL: Also listen for INITIAL_SESSION to handle session restore on refresh
@@ -138,6 +140,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
+      // CRITICAL: Skip all auth state handling during password recovery flow
+      // The reset-password page handles PASSWORD_RECOVERY events independently
+      // Processing these events here causes race conditions and state conflicts
+      if (event === "PASSWORD_RECOVERY") {
+        // Password recovery flow is handled by the reset-password page
+        // Don't interfere with that flow
+        return
+      }
+
       if (event === "INITIAL_SESSION") {
         // Session restored from cookies - always load user on initial session
         // The loadUser function has deduplication to prevent duplicate calls
