@@ -3,6 +3,11 @@ import { createClient } from "@/lib/supabase-server"
 import { supabaseAdmin } from "@/lib/supabase-admin"
 import crypto from "crypto"
 import { decrypt, decryptLegacy } from "@/lib/encryption"
+import {
+    acquireProcessingLock,
+    releaseProcessingLock,
+    updateJobProgress,
+} from "@/lib/bulk-import-queue"
 
 // ============================================================================
 // Helper: Generate secure password
@@ -141,6 +146,21 @@ export async function POST(
                     return
                 }
 
+                // ============================================================================
+                // ACQUIRE PROCESSING LOCK - Prevent concurrent execution
+                // ============================================================================
+                const lockResult = await acquireProcessingLock(jobId, authUser.id)
+                if (!lockResult.success) {
+                    send({ error: lockResult.error || "Could not acquire processing lock" })
+                    controller.close()
+                    return
+                }
+
+                // Ensure lock is released when done
+                const releaseLock = () => {
+                    releaseProcessingLock(jobId)
+                }
+
                 // Atomic status update using transaction-like pattern
                 // Only update if status is still "images_uploaded" or "ready"
                 const { data: updatedJob, error: updateError } = await supabaseAdmin
@@ -156,6 +176,7 @@ export async function POST(
                     .maybeSingle()
 
                 if (updateError || !updatedJob) {
+                    releaseLock()
                     // Another process may have started processing
                     const { data: currentJob } = await supabaseAdmin
                         .from("bulk_import_jobs")
@@ -193,6 +214,17 @@ export async function POST(
 
                 // Track results
                 const failedItems: any[] = []
+
+                // Update initial progress
+                await updateJobProgress(jobId, {
+                    status: "processing",
+                    progress: 0,
+                    step: "creating_owners",
+                    totalCount: properties.length,
+                    processedCount: 0,
+                    failedCount: 0,
+                    message: "Starting import...",
+                })
 
                 // ============================================================================
                 // STEP 1: Create new owner accounts
@@ -340,10 +372,24 @@ export async function POST(
                         await delay(500)
                     }
 
+                    const currentProgress = 5 + Math.round(((batchIndex + 1) / ownerBatches.length) * 20)
+                    const ownersFailed = failedItems.filter(i => i.type === 'owner').length
+
                     send({
-                        progress: 5 + Math.round(((batchIndex + 1) / ownerBatches.length) * 20),
+                        progress: currentProgress,
                         owners_created: createdOwners.length,
-                        owners_failed: failedItems.filter(i => i.type === 'owner').length,
+                        owners_failed: ownersFailed,
+                    })
+
+                    // Persist progress
+                    await updateJobProgress(jobId, {
+                        status: "processing",
+                        progress: currentProgress,
+                        step: "creating_owners",
+                        totalCount: properties.length,
+                        processedCount: createdOwners.length,
+                        failedCount: ownersFailed,
+                        message: `Creating owners... (${createdOwners.length} created, ${ownersFailed} failed)`,
                     })
                 }
 
@@ -398,10 +444,22 @@ export async function POST(
                     }
                 }
 
+                const propertiesProgress = 25
                 send({
                     status: `Created ${createdOwners.length} owners, now creating properties...`,
-                    progress: 25,
+                    progress: propertiesProgress,
                     step: "creating_properties",
+                })
+
+                // Update progress for property creation phase
+                await updateJobProgress(jobId, {
+                    status: "processing",
+                    progress: propertiesProgress,
+                    step: "creating_properties",
+                    totalCount: properties.length,
+                    processedCount: 0,
+                    failedCount: failedItems.filter(i => i.type === 'property').length,
+                    message: `Creating ${properties.length} properties...`,
                 })
 
                 // ============================================================================
@@ -487,12 +545,25 @@ export async function POST(
                     }
 
                     processedProperties += batch.length
+                    const currentProgress = 25 + Math.round((processedProperties / properties.length) * 50)
+                    const propertiesFailed = failedItems.filter(i => i.type === 'property').length
 
                     send({
-                        progress: 25 + Math.round((processedProperties / properties.length) * 50),
+                        progress: currentProgress,
                         properties_created: createdPropertyIds.length,
-                        properties_failed: failedItems.filter(i => i.type === 'property').length,
+                        properties_failed: propertiesFailed,
                         status: `Created ${createdPropertyIds.length} of ${properties.length} properties...`,
+                    })
+
+                    // Persist progress
+                    await updateJobProgress(jobId, {
+                        status: "processing",
+                        progress: currentProgress,
+                        step: "creating_properties",
+                        totalCount: properties.length,
+                        processedCount: createdPropertyIds.length,
+                        failedCount: propertiesFailed,
+                        message: `Created ${createdPropertyIds.length} of ${properties.length} properties...`,
                     })
 
                     // Small delay between batches
@@ -586,9 +657,15 @@ export async function POST(
                     credentials_count: credentialsForDownload.length,
                 })
 
+                // Release processing lock on successful completion
+                releaseProcessingLock(jobId)
+
                 controller.close()
 
             } catch (error: any) {
+                // Release processing lock on error
+                releaseProcessingLock(jobId)
+
                 console.error("Import confirmation error:", error)
 
                 // Rollback any created data on critical failure

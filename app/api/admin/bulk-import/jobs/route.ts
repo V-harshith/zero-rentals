@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase-server"
 import { supabaseAdmin } from "@/lib/supabase-admin"
+import {
+    checkRateLimit,
+    recordJobCreation,
+    hasConcurrentProcessingJob,
+} from "@/lib/bulk-import-queue"
 
 // ============================================================================
 // GET /api/admin/bulk-import/jobs
@@ -73,6 +78,32 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: "Admin access required" }, { status: 403 })
         }
 
+        // Check rate limiting (max 3 new jobs per minute per admin)
+        const rateLimitCheck = await checkRateLimit(authUser.id)
+        if (!rateLimitCheck.canProceed) {
+            return NextResponse.json(
+                {
+                    error: rateLimitCheck.reason,
+                    retryAfterSeconds: rateLimitCheck.estimatedWaitSeconds,
+                },
+                {
+                    status: 429,
+                    headers: {
+                        "Retry-After": String(rateLimitCheck.estimatedWaitSeconds || 60),
+                    },
+                }
+            )
+        }
+
+        // Check for concurrent processing job
+        const hasConcurrent = await hasConcurrentProcessingJob(authUser.id)
+        if (hasConcurrent) {
+            return NextResponse.json(
+                { error: "You have an import job currently being processed. Please wait for it to complete before starting a new one." },
+                { status: 429 }
+            )
+        }
+
         // Check for active job limit (max 5 concurrent jobs per admin)
         const { count: activeJobs } = await supabaseAdmin
             .from("bulk_import_jobs")
@@ -102,6 +133,9 @@ export async function POST(request: NextRequest) {
             console.error("Error creating job:", error)
             return NextResponse.json({ error: "Failed to create import job" }, { status: 500 })
         }
+
+        // Record job creation for rate limiting
+        recordJobCreation(authUser.id)
 
         // Log audit
         await supabaseAdmin.from("bulk_import_audit_log").insert({

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 
 import { useRouter, useSearchParams } from "next/navigation"
 import { searchProperties } from "@/lib/data-service"
@@ -21,69 +21,180 @@ import { Footer } from "@/components/footer"
 import { LocationPermissionModal } from "@/components/location-permission-modal"
 import { toast } from "sonner"
 
+// Constants for sessionStorage keys
+const STORAGE_KEY = 'savedSearchFilters'
+const NEW_SEARCH_FLAG = 'newSearchInitiated'
+const SESSION_TIMESTAMP_KEY = 'searchSessionTimestamp'
+const SESSION_DURATION_MS = 30 * 60 * 1000 // 30 minutes
+
 export default function SearchPage() {
     const searchParams = useSearchParams()
-    const parseFilters = (params: URLSearchParams): SearchFilters => {
+    const router = useRouter()
+    const hasRestoredFiltersRef = useRef(false)
+    const isNavigatingBackRef = useRef(false)
+    const lastSyncedUrlRef = useRef<string>('')
+
+    /**
+     * Robust URL param parsing with validation
+     */
+    const parseFilters = useCallback((params: URLSearchParams): SearchFilters => {
         const lat = params.get("lat")
         const lng = params.get("lng")
         const minPrice = params.get("minPrice")
         const maxPrice = params.get("maxPrice")
 
+        // Parse roomType - handle both single value and comma-separated
+        let roomType: string[] = []
+        const roomTypeParam = params.get("roomType")
+        if (roomTypeParam) {
+            roomType = roomTypeParam.split(",").filter(Boolean)
+        }
+
+        // Parse amenities - handle both single value and comma-separated
+        let amenities: string[] = []
+        const amenitiesParam = params.get("amenities")
+        if (amenitiesParam) {
+            amenities = amenitiesParam.split(",").filter(Boolean)
+        }
+
+        // Parse sortBy with validation
+        const sortByParam = params.get("sortBy")
+        const validSortOptions: Array<"date-desc" | "price-asc" | "price-desc" | "popular"> = ["date-desc", "price-asc", "price-desc", "popular"]
+        const sortBy: "date-desc" | "price-asc" | "price-desc" | "popular" =
+            validSortOptions.includes(sortByParam as "date-desc" | "price-asc" | "price-desc" | "popular")
+                ? (sortByParam as "date-desc" | "price-asc" | "price-desc" | "popular")
+                : "date-desc"
+
         return {
             location: params.get("location") || "",
             propertyType: (params.get("type") as SearchFilters['propertyType']) || undefined,
-            roomType: params.getAll("roomType").length > 0 ? params.getAll("roomType")[0].split(",") : [],
+            roomType,
             minPrice: minPrice && !isNaN(parseInt(minPrice)) ? parseInt(minPrice) : 0,
             maxPrice: maxPrice && !isNaN(parseInt(maxPrice)) ? parseInt(maxPrice) : 50000,
-            amenities: params.getAll("amenities").length > 0 ? params.getAll("amenities")[0].split(",") : [],
-            sortBy: "date-desc",
+            amenities,
+            sortBy,
             gender: (params.get("gender") as SearchFilters['gender']) || undefined,
             preferredTenant: params.get("preferredTenant") || undefined,
             lookingFor: (params.get("lookingFor") as SearchFilters['lookingFor']) || undefined,
             useUserLocation: params.get("useUserLocation") === "true",
-            coordinates: lat && lng ? {
+            coordinates: lat && lng && !isNaN(parseFloat(lat)) && !isNaN(parseFloat(lng)) ? {
                 lat: parseFloat(lat),
                 lng: parseFloat(lng)
             } : undefined
         }
-    }
+    }, [])
 
     const [filters, setFilters] = useState<SearchFilters>(() => parseFilters(searchParams))
 
-    // Check for saved filters from sessionStorage on mount (handles back button navigation)
-    useEffect(() => {
-        const savedFiltersRaw = sessionStorage.getItem('savedSearchFilters')
-        if (savedFiltersRaw) {
-            try {
-                const { filters: savedFilters, timestamp, urlParams } = JSON.parse(savedFiltersRaw)
-                const currentParams = window.location.search
+    /**
+     * Check if this is a new search session vs. back navigation
+     * Uses sessionStorage to track navigation patterns
+     */
+    const detectNavigationType = useCallback((): { isNewSearch: boolean; isBackNavigation: boolean; savedData: { filters: SearchFilters; timestamp: number; urlParams: string } | null } => {
+        // Check for explicit new search flag
+        const newSearchFlag = sessionStorage.getItem(NEW_SEARCH_FLAG)
+        if (newSearchFlag) {
+            sessionStorage.removeItem(NEW_SEARCH_FLAG)
+            return { isNewSearch: true, isBackNavigation: false, savedData: null }
+        }
 
-                // Only restore if:
-                // 1. Saved within last 30 minutes
-                // 2. URL params match what was saved (user navigated back) OR URL has no params
-                const isRecent = Date.now() - timestamp < 30 * 60 * 1000
-                const paramsMatch = !urlParams || currentParams === urlParams || currentParams === ''
+        // Check for saved filters
+        const savedFiltersRaw = sessionStorage.getItem(STORAGE_KEY)
+        if (!savedFiltersRaw) {
+            return { isNewSearch: false, isBackNavigation: false, savedData: null }
+        }
 
-                if (isRecent && paramsMatch && savedFilters) {
-                    setFilters(savedFilters)
-                }
-                // Clear sessionStorage after restoring
-                sessionStorage.removeItem('savedSearchFilters')
-            } catch {
-                // Invalid JSON, clear it
-                sessionStorage.removeItem('savedSearchFilters')
+        try {
+            const savedData = JSON.parse(savedFiltersRaw)
+            const currentParams = window.location.search
+            const currentTimestamp = Date.now()
+
+            // Validate saved data structure
+            if (!savedData.filters || !savedData.timestamp) {
+                sessionStorage.removeItem(STORAGE_KEY)
+                return { isNewSearch: false, isBackNavigation: false, savedData: null }
             }
+
+            // Check if saved within session duration
+            const isRecent = currentTimestamp - savedData.timestamp < SESSION_DURATION_MS
+
+            if (!isRecent) {
+                // Expired session, clear it
+                sessionStorage.removeItem(STORAGE_KEY)
+                return { isNewSearch: false, isBackNavigation: false, savedData: null }
+            }
+
+            // Detect back navigation: URL params match what was saved
+            // (user navigated back to the same search URL)
+            const isBackNavigation = currentParams === savedData.urlParams
+
+            return { isNewSearch: false, isBackNavigation, savedData }
+        } catch {
+            // Invalid JSON, clear it
+            sessionStorage.removeItem(STORAGE_KEY)
+            return { isNewSearch: false, isBackNavigation: false, savedData: null }
         }
     }, [])
 
-    // Re-initialize filters when searchParams change (e.g., back/forward navigation)
+    /**
+     * Initialize filters on mount with proper priority:
+     * 1. New search from home -> clear filters, use URL params only
+     * 2. Back navigation -> restore from sessionStorage
+     * 3. Direct URL access -> use URL params
+     */
     useEffect(() => {
-        setFilters(parseFilters(searchParams))
-    }, [searchParams])
+        if (hasRestoredFiltersRef.current) return
+
+        const { isNewSearch, isBackNavigation, savedData } = detectNavigationType()
+
+        if (isNewSearch) {
+            // Clear any stale session data for new searches
+            sessionStorage.removeItem(STORAGE_KEY)
+            sessionStorage.removeItem(SESSION_TIMESTAMP_KEY)
+            // Use URL params as-is (fresh search)
+            const freshFilters = parseFilters(searchParams)
+            setFilters(freshFilters)
+            lastSyncedUrlRef.current = window.location.search
+        } else if (isBackNavigation && savedData) {
+            // Restore saved filters for back navigation
+            isNavigatingBackRef.current = true
+            setFilters(savedData.filters)
+            lastSyncedUrlRef.current = savedData.urlParams
+            // Clear sessionStorage after restoring to prevent stale data
+            sessionStorage.removeItem(STORAGE_KEY)
+        } else {
+            // Direct URL access - use URL params
+            const urlFilters = parseFilters(searchParams)
+            setFilters(urlFilters)
+            lastSyncedUrlRef.current = window.location.search
+        }
+
+        hasRestoredFiltersRef.current = true
+    }, [searchParams, parseFilters, detectNavigationType])
+
+    /**
+     * Handle browser back/forward button (popstate)
+     * This catches navigation that doesn't trigger searchParams change
+     */
+    useEffect(() => {
+        const handlePopState = () => {
+            // User clicked back/forward button
+            const currentParams = new URLSearchParams(window.location.search)
+            const newFilters = parseFilters(currentParams)
+            setFilters(newFilters)
+            lastSyncedUrlRef.current = window.location.search
+        }
+
+        window.addEventListener('popstate', handlePopState)
+        return () => window.removeEventListener('popstate', handlePopState)
+    }, [parseFilters])
 
     const [filteredProperties, setFilteredProperties] = useState<Property[]>([])
     const [loading, setLoading] = useState(true)
     const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false)
+
+    // Track if we're currently syncing to prevent loops
+    const isSyncingRef = useRef(false)
 
     useEffect(() => {
         let isMounted = true
@@ -105,18 +216,27 @@ export default function SearchPage() {
         return () => { isMounted = false }
     }, [filters])
 
-    // Sync URL with filters
-    const router = useRouter()
+    // Sync URL with filters (only when filters change from user interaction, not from URL/restore)
     const prevFiltersRef = useRef<SearchFilters>(filters)
 
     useEffect(() => {
+        // Skip if we're still initializing or syncing
+        if (!hasRestoredFiltersRef.current || isSyncingRef.current) return
+
+        // Skip if this is from back navigation (filters restored from sessionStorage)
+        if (isNavigatingBackRef.current) {
+            isNavigatingBackRef.current = false
+            prevFiltersRef.current = filters
+            return
+        }
+
         // Only update URL if filters have actually changed from user interaction
-        // not from URL initialization
         const prev = prevFiltersRef.current
         const filtersChanged = JSON.stringify(prev) !== JSON.stringify(filters)
 
         if (!filtersChanged) return
 
+        isSyncingRef.current = true
         prevFiltersRef.current = filters
 
         const params = new URLSearchParams()
@@ -130,6 +250,7 @@ export default function SearchPage() {
         if (filters.gender) params.set("gender", filters.gender)
         if (filters.preferredTenant) params.set("preferredTenant", filters.preferredTenant)
         if (filters.lookingFor) params.set("lookingFor", filters.lookingFor)
+        if (filters.sortBy && filters.sortBy !== "date-desc") params.set("sortBy", filters.sortBy)
         if (filters.useUserLocation) params.set("useUserLocation", "true")
         if (filters.coordinates) {
             params.set("lat", filters.coordinates.lat.toString())
@@ -137,10 +258,18 @@ export default function SearchPage() {
         }
 
         const newUrl = `/search?${params.toString()}`
+        const currentFullUrl = window.location.pathname + window.location.search
+
         // Use replace to avoid history stack spam, but only if URL actually changed
-        if (window.location.pathname + window.location.search !== newUrl) {
+        if (currentFullUrl !== newUrl) {
             router.replace(newUrl, { scroll: false })
+            lastSyncedUrlRef.current = params.toString()
         }
+
+        // Reset syncing flag after a short delay
+        setTimeout(() => {
+            isSyncingRef.current = false
+        }, 0)
     }, [filters, router])
 
     const updateFilter = (key: keyof SearchFilters, value: any) => {
@@ -172,7 +301,14 @@ export default function SearchPage() {
         }))
     }
 
-    const clearFilters = () => {
+    /**
+     * Clear all filters and reset to defaults
+     * Also clears sessionStorage to prevent stale filter restoration
+     */
+    const clearFilters = useCallback(() => {
+        // Set flag to indicate explicit filter clear
+        sessionStorage.setItem(NEW_SEARCH_FLAG, 'true')
+
         const clearedFilters: SearchFilters = {
             location: "",
             propertyType: undefined,
@@ -183,9 +319,16 @@ export default function SearchPage() {
             sortBy: "date-desc"
         }
         setFilters(clearedFilters)
+        prevFiltersRef.current = clearedFilters
+
+        // Clear session storage
+        sessionStorage.removeItem(STORAGE_KEY)
+        sessionStorage.removeItem(SESSION_TIMESTAMP_KEY)
+
         // Clear URL params by navigating to /search
         router.replace('/search', { scroll: false })
-    }
+        lastSyncedUrlRef.current = ''
+    }, [router])
 
     const getRoomTypes = () => {
         if (filters.propertyType === "Rent") {

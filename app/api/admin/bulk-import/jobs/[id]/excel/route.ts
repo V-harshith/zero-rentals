@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase-server"
 import { supabaseAdmin } from "@/lib/supabase-admin"
 import crypto from "crypto"
 import { encrypt, isEncryptionConfigured } from "@/lib/encryption"
+import { hasConcurrentProcessingJob } from "@/lib/bulk-import-queue"
 
 // ============================================================================
 // AMENITY MAPPING
@@ -173,6 +174,15 @@ export async function POST(
 
         if (!job) {
             return NextResponse.json({ error: "Job not found" }, { status: 404 })
+        }
+
+        // Check for concurrent processing job
+        const hasConcurrent = await hasConcurrentProcessingJob(authUser.id)
+        if (hasConcurrent) {
+            return NextResponse.json(
+                { error: "You have an import job currently being processed. Please wait for it to complete." },
+                { status: 429 }
+            )
         }
 
         if (job.status !== "created" && job.status !== "excel_parsed") {

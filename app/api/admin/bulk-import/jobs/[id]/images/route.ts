@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase-server"
 import { supabaseAdmin } from "@/lib/supabase-admin"
+import { hasConcurrentProcessingJob } from "@/lib/bulk-import-queue"
 
 // ============================================================================
 // Extract PSN from file path
@@ -116,6 +117,14 @@ export async function POST(
 
                 if (job.admin_id !== authUser.id) {
                     send({ error: "Access denied" })
+                    controller.close()
+                    return
+                }
+
+                // Check for concurrent processing job
+                const hasConcurrent = await hasConcurrentProcessingJob(authUser.id)
+                if (hasConcurrent) {
+                    send({ error: "You have an import job currently being processed. Please wait for it to complete." })
                     controller.close()
                     return
                 }

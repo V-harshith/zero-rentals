@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
+import { expireSubscriptions } from '@/lib/subscription-service'
 
 /**
  * Subscription Expiry Cron Job
@@ -20,6 +19,8 @@ export async function GET(request: NextRequest) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
+        const { createServerClient } = await import('@supabase/ssr')
+        const { cookies } = await import('next/headers')
         const cookieStore = await cookies()
         const supabase = createServerClient(
             process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -35,11 +36,11 @@ export async function GET(request: NextRequest) {
 
         const now = new Date().toISOString()
 
-        // 1. Find all active subscriptions that have expired
+        // 1. Find all active and cancelled subscriptions that have expired
         const { data: expiredSubscriptions, error: fetchError } = await supabase
             .from('subscriptions')
-            .select('id, user_id, plan_name, end_date')
-            .eq('status', 'active')
+            .select('id, user_id, plan_name, end_date, status')
+            .in('status', ['active', 'cancelled'])
             .lt('end_date', now)
 
         if (fetchError) {
@@ -56,16 +57,13 @@ export async function GET(request: NextRequest) {
 
         console.log(`Found ${expiredSubscriptions.length} expired subscriptions`)
 
-        // 2. Mark subscriptions as expired
+        // 2. Use state machine to properly expire subscriptions
         const subscriptionIds = expiredSubscriptions.map(s => s.id)
-        const { error: updateError } = await supabase
-            .from('subscriptions')
-            .update({ status: 'expired' })
-            .in('id', subscriptionIds)
+        const expireResult = await expireSubscriptions(subscriptionIds)
 
-        if (updateError) {
-            console.error('Error updating expired subscriptions:', updateError)
-            return NextResponse.json({ error: 'Failed to update subscriptions' }, { status: 500 })
+        if (!expireResult.success) {
+            console.error('Error expiring subscriptions:', expireResult.errors)
+            // Continue processing - some may have succeeded
         }
 
         // 3. Mark properties from expired subscriptions as expired
@@ -121,12 +119,14 @@ export async function GET(request: NextRequest) {
             }
         }
 
-        console.log(`Processed ${subscriptionIds.length} expired subscriptions, sent ${emailsSent.length} emails`)
+        console.log(`Processed ${expireResult.expired} expired subscriptions, sent ${emailsSent.length} emails`)
 
         return NextResponse.json({
-            success: true,
-            message: `Processed ${subscriptionIds.length} expired subscriptions`,
-            processed: subscriptionIds.length,
+            success: expireResult.success,
+            message: `Processed ${expireResult.expired} expired subscriptions`,
+            processed: expireResult.expired,
+            failed: expireResult.failed,
+            errors: expireResult.errors,
             propertiesExpired: expiredProperties?.length || 0,
             emailsSent: emailsSent.length
         })

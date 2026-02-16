@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { validateWebhookSignature } from '@/lib/payment-service'
 import { supabaseAdmin } from '@/lib/supabase-admin'
+import {
+    handleCancelledToRenewed,
+    determineSubscriptionAction,
+    type SubscriptionStatus
+} from '@/lib/subscription-service'
 
 // Event sequence numbers for ordering (higher = more recent)
 const EVENT_SEQUENCE: Record<string, number> = {
@@ -371,42 +376,6 @@ async function fulfillSubscription(
             return
         }
 
-        // Double-check: see if there's an active subscription for this order
-        // This handles the case where payment_log update failed but subscription was created
-        const { data: existingSub } = await supabaseAdmin
-            .from('subscriptions')
-            .select('id')
-            .eq('user_id', userId)
-            .eq('status', 'active')
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .maybeSingle()
-
-        if (existingSub && existingPayment?.subscription_id === existingSub.id) {
-            console.log('Subscription already exists for this order:', orderId)
-            return
-        }
-
-        // 🔥 CRITICAL FIX: Proper date handling with UTC
-        const startDate = new Date()
-        const endDate = new Date()
-
-        // 🔥 CRITICAL FIX: Improved duration parsing
-        const durationLower = duration.toLowerCase()
-        if (durationLower.includes('month')) {
-            const months = parseInt(duration.match(/\d+/)?.[0] || '3')
-            endDate.setUTCMonth(endDate.getUTCMonth() + months)
-        } else if (durationLower.includes('year')) {
-            const years = parseInt(duration.match(/\d+/)?.[0] || '1')
-            endDate.setUTCFullYear(endDate.getUTCFullYear() + years)
-        } else {
-            // Fallback to plan name
-            if (planName === 'Silver') endDate.setUTCMonth(endDate.getUTCMonth() + 3)
-            else if (planName === 'Gold') endDate.setUTCMonth(endDate.getUTCMonth() + 6)
-            else if (planName === 'Platinum') endDate.setUTCFullYear(endDate.getUTCFullYear() + 1)
-            else endDate.setUTCMonth(endDate.getUTCMonth() + 1) // Default 1 month
-        }
-
         // Map properties limit (aligned with constants.ts)
         const limitMap: Record<string, number> = {
             'Free': 1,
@@ -417,67 +386,22 @@ async function fulfillSubscription(
         }
         const propertiesLimit = limitMap[planName] || 1
 
-        // 🔥 CRITICAL FIX: Use transaction-like approach with idempotency
-        // Cancel existing active subscriptions
-        const { error: cancelError } = await supabaseAdmin
-            .from('subscriptions')
-            .update({ status: 'cancelled', updated_at: new Date().toISOString() })
-            .eq('user_id', userId)
-            .eq('status', 'active')
+        // 🔥 STATE MACHINE FIX: Use proper state machine for cancelled -> renewed transition
+        // This handles the case where a cancelled subscription is renewed before expiry
+        const result = await handleCancelledToRenewed(userId, {
+            planName,
+            duration,
+            amount,
+            propertiesLimit
+        })
 
-        if (cancelError) {
-            console.error('Error cancelling existing subscriptions:', cancelError)
+        if (!result.success) {
+            throw new Error(result.error || 'Failed to process subscription')
         }
 
-        // Create new subscription with upsert for idempotency
-        // Use orderId as a unique reference to prevent duplicates
-        let subscriptionResult = await supabaseAdmin
-            .from('subscriptions')
-            .insert([{
-                user_id: userId,
-                plan_name: planName,
-                plan_duration: duration,
-                amount: amount,
-                status: 'active',
-                properties_limit: propertiesLimit,
-                start_date: startDate.toISOString(),
-                end_date: endDate.toISOString(),
-                metadata: { order_id: orderId } // Store order reference for idempotency
-            }])
-            .select()
-            .single()
-
-        let subscription: { id: string } | null = null
-
-        if (subscriptionResult.error) {
-            // Check if subscription was created by another concurrent request
-            const { data: raceSub } = await supabaseAdmin
-                .from('subscriptions')
-                .select('id, metadata')
-                .eq('user_id', userId)
-                .eq('status', 'active')
-                .order('created_at', { ascending: false })
-                .limit(1)
-                .maybeSingle()
-
-            if (raceSub?.metadata?.order_id === orderId) {
-                console.log('Subscription created by concurrent request:', orderId)
-                // Use the existing subscription
-                subscription = raceSub as { id: string }
-            } else {
-                throw subscriptionResult.error
-            }
-        } else {
-            subscription = subscriptionResult.data
-        }
-
-        // This should not happen, but TypeScript requires the check
-        if (!subscription) {
-            throw new Error('Failed to create or retrieve subscription')
-        }
+        const subscription = result.subscription!
 
         // 🔥 NEW: Auto-feature existing properties if plan allows
-        const { getTierFeatures } = await import('@/lib/subscription-service')
         const planFeatures = {
             'FREE': { featuredBadge: false },
             'SILVER': { featuredBadge: true },
@@ -516,6 +440,17 @@ async function fulfillSubscription(
             console.error('Error creating payment log:', logError)
             // Non-fatal: subscription was created successfully
         }
+
+        // Calculate end date for email
+        const { data: subData } = await supabaseAdmin
+            .from('subscriptions')
+            .select('end_date')
+            .eq('id', subscription.id)
+            .single()
+
+        const endDate = subData?.end_date
+            ? new Date(subData.end_date)
+            : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // Default 30 days
 
         // Send email notification
         const { data: user } = await supabaseAdmin

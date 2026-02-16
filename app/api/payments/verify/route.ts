@@ -3,6 +3,7 @@ import crypto from 'crypto'
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { PLAN_FEATURES } from '@/lib/constants'
+import { handleCancelledToRenewed } from '@/lib/subscription-service'
 
 export async function POST(request: NextRequest) {
     try {
@@ -132,58 +133,37 @@ export async function POST(request: NextRequest) {
             })
         }
 
-        // Activate Subscription
-        const startDate = new Date()
-        const endDate = new Date()
+        // 🔥 STATE MACHINE FIX: Use proper state machine for cancelled -> renewed transition
+        const propertiesLimit = planDetails.propertiesLimit === 'Unlimited properties'
+            ? 999
+            : parseInt(planDetails.propertiesLimit.replace(/\D/g, '')) || 1
 
-        // Parse duration more robustly
-        const durationStr = planDetails.duration || ''
-        const monthMatch = durationStr.match(/(\d+)\s*Month/i)
-        const yearMatch = durationStr.match(/(\d+)\s*Year/i)
+        const result = await handleCancelledToRenewed(user.id, {
+            planName: planDetails.planName,
+            duration: planDetails.duration,
+            amount: planDetails.amount,
+            propertiesLimit
+        })
 
-        if (monthMatch) {
-            const months = parseInt(monthMatch[1], 10)
-            endDate.setMonth(endDate.getMonth() + months)
-        } else if (yearMatch) {
-            const years = parseInt(yearMatch[1], 10)
-            endDate.setFullYear(endDate.getFullYear() + years)
-        } else {
-            // Default 1 month
-            endDate.setMonth(endDate.getMonth() + 1)
+        if (!result.success) {
+            console.error('Subscription creation failed:', result.error)
+            return NextResponse.json(
+                { error: 'Failed to activate subscription. Please contact support.' },
+                { status: 500 }
+            )
         }
 
-        // Deactivate any existing active subscription first (within transaction pattern)
-        const { error: deactivateError } = await supabaseAdmin
-            .from('subscriptions')
-            .update({ status: 'expired', updated_at: new Date().toISOString() })
-            .eq('user_id', user.id)
-            .eq('status', 'active')
-
-        if (deactivateError) {
-            console.error('Failed to deactivate existing subscription:', deactivateError)
-        }
-
-        // Create new subscription with conflict handling
-        // Use upsert to handle race condition where subscription might already exist
+        // Get the full subscription details
         const { data: subscription, error: subError } = await supabaseAdmin
             .from('subscriptions')
-            .insert({
-                user_id: user.id,
-                plan_name: planDetails.planName,
-                plan_duration: planDetails.duration,
-                amount: planDetails.amount,
-                status: 'active',
-                properties_limit: planDetails.propertiesLimit === 'Unlimited properties' ? 999 : parseInt(planDetails.propertiesLimit.replace(/\D/g, '')) || 1,
-                start_date: startDate.toISOString(),
-                end_date: endDate.toISOString()
-            })
-            .select()
+            .select('*')
+            .eq('id', result.subscription!.id)
             .single()
 
         if (subError) {
-            console.error('Subscription creation failed:', subError)
+            console.error('Failed to fetch subscription:', subError)
             return NextResponse.json(
-                { error: 'Failed to activate subscription. Please contact support.' },
+                { error: 'Failed to retrieve subscription details.' },
                 { status: 500 }
             )
         }

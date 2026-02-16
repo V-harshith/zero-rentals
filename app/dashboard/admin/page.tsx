@@ -197,11 +197,16 @@ function AdminDashboard() {
     pending: Date | null
     users: Date | null
     payments: Date | null
+    statsSnapshot: Date | null
   }>({
     pending: null,
     users: null,
     payments: null,
+    statsSnapshot: null,
   })
+
+  // Single timestamp for atomic stats fetching - ensures consistent data snapshot
+  const statsTimestampRef = useRef<number>(0)
 
   // Mounted ref to prevent state updates on unmounted component
   const isMounted = useRef(true)
@@ -240,11 +245,16 @@ function AdminDashboard() {
         return
       }
 
+      // Generate a single timestamp for atomic stats fetching
+      // This ensures all stats queries use the same reference point
+      const snapshotTimestamp = Date.now()
+      statsTimestampRef.current = snapshotTimestamp
+
       try {
-        // Load critical data first (pending properties)
-        await loadPendingProperties()
-        // Then load stats (less critical)
-        await loadTotalStats()
+        // Load critical data first (pending properties) with consistent timestamp
+        await loadPendingProperties(false, snapshotTimestamp)
+        // Then load stats (less critical) with the same timestamp
+        await loadTotalStats(snapshotTimestamp)
       } catch {
         // Error handled silently - toast shown by individual loaders
       }
@@ -305,14 +315,14 @@ function AdminDashboard() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, activeTab])
 
-  const loadPendingProperties = async (force = false) => {
+  const loadPendingProperties = async (force = false, snapshotTimestamp?: number) => {
     // Prevent duplicate concurrent requests using ref (synchronous check)
     if (loadingPendingRef.current) {
       return
     }
 
-    // Skip if data is fresh (within 10 seconds) unless forced
-    if (!force && lastUpdated.pending) {
+    // Skip if data is fresh (within 10 seconds) unless forced or using snapshot timestamp
+    if (!force && !snapshotTimestamp && lastUpdated.pending) {
       const age = Date.now() - lastUpdated.pending.getTime()
       if (age < 10000) {
         return
@@ -326,7 +336,9 @@ function AdminDashboard() {
       const properties = await getPendingProperties()
       if (isMounted.current) {
         setPendingProperties(properties)
-        setLastUpdated(prev => ({ ...prev, pending: new Date() }))
+        // Use provided snapshot timestamp for consistent stats, or current time for individual refresh
+        const timestamp = snapshotTimestamp ? new Date(snapshotTimestamp) : new Date()
+        setLastUpdated(prev => ({ ...prev, pending: timestamp }))
         dataLoadedRef.current.pending = true
       }
     } catch (error) {
@@ -337,11 +349,14 @@ function AdminDashboard() {
     }
   }
 
-  const loadTotalStats = async () => {
+  const loadTotalStats = async (snapshotTimestamp?: number) => {
     try {
       const count = await getTotalPropertyCount()
       if (isMounted.current) {
         setTotalPropertiesCount(count)
+        // Use provided snapshot timestamp for consistent stats
+        const timestamp = snapshotTimestamp ? new Date(snapshotTimestamp) : new Date()
+        setLastUpdated(prev => ({ ...prev, statsSnapshot: timestamp }))
         dataLoadedRef.current.totalStats = true
       }
     } catch {
@@ -356,14 +371,14 @@ function AdminDashboard() {
     setPendingProperties(prev => prev.filter(p => p.id !== propertyId))
   }
 
-  const loadUsers = async (force = false) => {
+  const loadUsers = async (force = false, snapshotTimestamp?: number) => {
     // Prevent duplicate concurrent requests using ref (synchronous check)
     if (loadingUsersRef.current) {
       return
     }
 
-    // Skip if data is fresh (within 10 seconds) unless forced
-    if (!force && lastUpdated.users) {
+    // Skip if data is fresh (within 10 seconds) unless forced or using snapshot timestamp
+    if (!force && !snapshotTimestamp && lastUpdated.users) {
       const age = Date.now() - lastUpdated.users.getTime()
       if (age < 10000) {
         return
@@ -387,7 +402,9 @@ function AdminDashboard() {
       const data = await getAllUsers()
       if (isMounted.current) {
         setUsers(data)
-        setLastUpdated(prev => ({ ...prev, users: new Date() }))
+        // Use provided snapshot timestamp for consistent stats, or current time for individual refresh
+        const timestamp = snapshotTimestamp ? new Date(snapshotTimestamp) : new Date()
+        setLastUpdated(prev => ({ ...prev, users: timestamp }))
         dataLoadedRef.current.users = true
       }
     } catch (error) {
@@ -401,14 +418,14 @@ function AdminDashboard() {
     }
   }
 
-  const loadPayments = async (force = false) => {
+  const loadPayments = async (force = false, snapshotTimestamp?: number) => {
     // Prevent duplicate concurrent requests using ref (synchronous check)
     if (loadingPaymentsRef.current) {
       return
     }
 
-    // Skip if data is fresh (within 10 seconds) unless forced
-    if (!force && lastUpdated.payments) {
+    // Skip if data is fresh (within 10 seconds) unless forced or using snapshot timestamp
+    if (!force && !snapshotTimestamp && lastUpdated.payments) {
       const age = Date.now() - lastUpdated.payments.getTime()
       if (age < 10000) {
         return
@@ -432,7 +449,9 @@ function AdminDashboard() {
       const data = await getAllPayments()
       if (isMounted.current) {
         setPayments(data)
-        setLastUpdated(prev => ({ ...prev, payments: new Date() }))
+        // Use provided snapshot timestamp for consistent stats, or current time for individual refresh
+        const timestamp = snapshotTimestamp ? new Date(snapshotTimestamp) : new Date()
+        setLastUpdated(prev => ({ ...prev, payments: timestamp }))
         dataLoadedRef.current.payments = true
       }
     } catch (error) {
@@ -465,17 +484,22 @@ function AdminDashboard() {
       loadPayments(forceRefresh).finally(() => loadingTabsRef.current.delete('payments'))
     }
     if (value === 'overview') {
+      // Generate a single timestamp for atomic stats fetching on overview tab
+      // This ensures all stats queries use the same reference point for consistent data
+      const snapshotTimestamp = Date.now()
+      statsTimestampRef.current = snapshotTimestamp
+
       // Load all data for stats if not already loaded
       // Use overviewLoadingRef to prevent duplicate requests during rapid tab switches
       if (!loadingTabsRef.current.has('users') && !overviewLoadingRef.current.users) {
         loadingTabsRef.current.add('users')
         overviewLoadingRef.current.users = true
-        loadUsers(forceRefresh).finally(() => loadingTabsRef.current.delete('users'))
+        loadUsers(forceRefresh, snapshotTimestamp).finally(() => loadingTabsRef.current.delete('users'))
       }
       if (!loadingTabsRef.current.has('payments') && !overviewLoadingRef.current.payments) {
         loadingTabsRef.current.add('payments')
         overviewLoadingRef.current.payments = true
-        loadPayments(forceRefresh).finally(() => loadingTabsRef.current.delete('payments'))
+        loadPayments(forceRefresh, snapshotTimestamp).finally(() => loadingTabsRef.current.delete('payments'))
       }
     }
     if (value === 'pending') {

@@ -136,6 +136,10 @@ export function SearchBar({ className }: SearchBarProps) {
     const handleSearch = async () => {
         setIsSearching(true)
         try {
+            // Set flag to indicate this is a new search (not back navigation)
+            // This tells the search page to use URL params instead of sessionStorage
+            sessionStorage.setItem('newSearchInitiated', 'true')
+
             const params = new URLSearchParams()
             params.set("type", activeType)
 
