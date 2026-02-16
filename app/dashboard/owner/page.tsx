@@ -259,7 +259,7 @@ function OwnerDashboard() {
       </div>
 
       {/* Main Content */}
-      <div className="container mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1 overflow-x-hidden w-full max-w-full">
+      <div className="container mx-auto px-4 py-6 flex-1 overflow-x-hidden w-full max-w-full">
         {/* Upgrade Banner for Free Users */}
         {tierFeatures && tierFeatures.planName === "Free" && (
           <div className="mb-6">

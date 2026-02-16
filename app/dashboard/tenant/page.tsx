@@ -71,35 +71,18 @@ function TenantDashboard() {
     <div className="min-h-screen flex flex-col bg-muted/50 overflow-x-hidden">
       {/* Dashboard Navigation */}
       <div className="sticky top-0 z-40 bg-background border-b">
-        <div className="container mx-auto px-3 sm:px-4">
+        <div className="container mx-auto px-4">
           <div className="flex items-center justify-between h-16">
+            {/* Left: Mobile Menu + Logo */}
             <div className="flex items-center gap-2 sm:gap-4">
-              <div onClick={() => router.push('/')} className="flex items-center gap-2 cursor-pointer flex-shrink-0">
-                <Image
-                  src="/zerorentals-logo.png"
-                  alt="ZeroRentals"
-                  width={32}
-                  height={32}
-                  className="h-8 w-8 object-contain"
-                />
-                <span className="text-xl font-bold hidden sm:inline">ZeroRentals</span>
-              </div>
-              <Badge variant="outline" className="hidden md:flex">Tenant Dashboard</Badge>
-            </div>
-            <div className="flex items-center gap-2 sm:gap-4">
-              <span className="text-sm text-muted-foreground hidden lg:block">
-                Welcome, {user?.name}
-              </span>
-
               {/* Mobile Navigation Sheet */}
               <Sheet>
                 <SheetTrigger asChild>
-                  <Button variant="outline" size="sm" className="md:hidden flex-shrink-0 gap-2">
+                  <Button variant="outline" size="sm" className="md:hidden flex-shrink-0">
                     <Menu className="h-4 w-4" />
-                    <span className="hidden sm:inline">Menu</span>
                   </Button>
                 </SheetTrigger>
-                <SheetContent side="right" className="w-[300px] sm:w-[340px] p-0">
+                <SheetContent side="left" className="w-[300px] sm:w-[340px] p-0">
                   <div className="flex flex-col h-full">
                     {/* User Info Header */}
                     <div className="p-6 border-b bg-muted/30">
@@ -161,7 +144,27 @@ function TenantDashboard() {
                 </SheetContent>
               </Sheet>
 
-              {/* Desktop Menu Dropdown - Hidden on mobile */}
+              {/* Logo */}
+              <div onClick={() => router.push('/')} className="flex items-center gap-2 cursor-pointer flex-shrink-0">
+                <Image
+                  src="/zerorentals-logo.png"
+                  alt="ZeroRentals"
+                  width={32}
+                  height={32}
+                  className="h-8 w-8 object-contain"
+                />
+                <span className="text-xl font-bold hidden sm:inline">ZeroRentals</span>
+              </div>
+              <Badge variant="outline" className="hidden md:flex">Tenant Dashboard</Badge>
+            </div>
+
+            {/* Right: Welcome + Desktop Buttons */}
+            <div className="flex items-center gap-2 sm:gap-4">
+              <span className="text-sm text-muted-foreground hidden lg:block">
+                Welcome, {user?.name}
+              </span>
+
+              {/* Desktop Menu - Hidden on mobile */}
               <div className="hidden md:flex items-center gap-2">
                 <Link href="/profile/tenant">
                   <Button variant="outline" size="sm" className="gap-2">
@@ -185,7 +188,7 @@ function TenantDashboard() {
       </div>
 
       {/* Main Content */}
-      <div className="container mx-auto px-4 py-8 flex-1">
+      <div className="container mx-auto px-4 py-6 flex-1 overflow-x-hidden w-full max-w-full">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
           <TabsList>
             <TabsTrigger value="overview">Overview</TabsTrigger>

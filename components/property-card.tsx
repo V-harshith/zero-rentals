@@ -22,10 +22,11 @@ interface PropertyCardProps {
 export function PropertyCard({ property, showFavorite = true, priority = false }: PropertyCardProps) {
     const { user } = useAuth()
     const router = useRouter()
-    const { isFavorite, addFavorite, removeFavorite, isLoading: isFavoritesLoading } = useFavorites()
+    const { favoriteIds, isFavorite, addFavorite, removeFavorite, isLoading: isFavoritesLoading } = useFavorites()
     const [localLoading, setLocalLoading] = useState(false)
 
-    const favorite = isFavorite(property.id)
+    // Use favoriteIds directly to ensure immediate UI updates
+    const favorite = favoriteIds.has(property.id)
 
     const toggleFavorite = async (e: React.MouseEvent) => {
         e.preventDefault()

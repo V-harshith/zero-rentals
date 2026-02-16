@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { PasswordInput } from "@/components/ui/password-input"
@@ -16,6 +16,8 @@ import { supabase } from "@/lib/supabase"
 export default function OwnerLoginPage() {
     const { user, login, isLoading: authLoading } = useAuth()
     const router = useRouter()
+    const searchParams = useSearchParams()
+    const redirectTo = searchParams.get('redirectTo')
     const [email, setEmail] = useState("")
     const [password, setPassword] = useState("")
     const [isLoading, setIsLoading] = useState(false)
@@ -23,10 +25,17 @@ export default function OwnerLoginPage() {
     // Redirect logged-in users to their dashboard
     useEffect(() => {
         if (!authLoading && user) {
+            // If there's a redirectTo parameter, use it
+            if (redirectTo) {
+                router.replace(redirectTo)
+                return
+            }
+
+            // Otherwise use default dashboard redirect
             const dashboardPath = `/dashboard/${user.role}`
             router.replace(dashboardPath)
         }
-    }, [user, authLoading, router])
+    }, [user, authLoading, router, redirectTo])
 
     // Show loading state while checking auth
     if (authLoading) {

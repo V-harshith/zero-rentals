@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { PasswordInput } from "@/components/ui/password-input"
@@ -15,6 +16,8 @@ import { useRouter } from "next/navigation"
 export default function AdminLoginPage() {
     const { user, login, isLoading: authLoading } = useAuth()
     const router = useRouter()
+    const searchParams = useSearchParams()
+    const redirectTo = searchParams.get('redirectTo')
     const [email, setEmail] = useState("")
     const [password, setPassword] = useState("")
     const [isLoading, setIsLoading] = useState(false)
@@ -22,10 +25,17 @@ export default function AdminLoginPage() {
     // Redirect logged-in users to their dashboard
     useEffect(() => {
         if (!authLoading && user) {
+            // If there's a redirectTo parameter, use it
+            if (redirectTo) {
+                router.replace(redirectTo)
+                return
+            }
+
+            // Otherwise use default dashboard redirect
             const dashboardPath = user.role === 'tenant' ? '/' : `/dashboard/${user.role}`
             router.replace(dashboardPath)
         }
-    }, [user, authLoading, router])
+    }, [user, authLoading, router, redirectTo])
 
     // Show loading state while checking auth
     if (authLoading) {

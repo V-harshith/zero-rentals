@@ -39,10 +39,12 @@ export function withAuth<P extends object>(
             // Wait for auth to finish loading
             if (isLoading) return
 
-            // No user - redirect to login
+            // No user - redirect to login with current path as redirectTo
             if (!user) {
                 const loginPath = Array.isArray(requiredRole) ? requiredRole[0] : requiredRole
-                router.replace(`/login/${loginPath}`)
+                const currentPath = window.location.pathname + window.location.search
+                const encodedRedirect = encodeURIComponent(currentPath)
+                router.replace(`/login/${loginPath}?redirectTo=${encodedRedirect}`)
                 return
             }
 

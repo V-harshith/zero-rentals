@@ -140,10 +140,8 @@ export function FavoritesProvider({ children }: { children: React.ReactNode }) {
     }
   }, [user])
 
-  const isFavorite = useCallback(
-    (id: string) => favoriteIds.has(id),
-    [favoriteIds]
-  )
+  // Direct check without useCallback to avoid stale closure issues
+  const isFavorite = (id: string) => favoriteIds.has(id)
 
   const refreshFavorites = useCallback(async () => {
     await loadFavorites()
