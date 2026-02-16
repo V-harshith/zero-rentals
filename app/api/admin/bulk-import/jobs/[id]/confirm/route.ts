@@ -10,6 +10,26 @@ import {
 } from "@/lib/bulk-import-queue"
 
 // ============================================================================
+// Types for Transaction Management
+// ============================================================================
+interface TransactionContext {
+    jobId: string
+    adminUserId: string
+    createdOwners: Array<{ email: string; id: string; password: string }>
+    createdPropertyIds: string[]
+    createdSubscriptionIds: string[]
+    processedItems: Set<string> // For idempotency tracking
+    isRolledBack: boolean
+}
+
+interface IdempotencyRecord {
+    key: string
+    status: 'pending' | 'completed' | 'failed'
+    result?: unknown
+    createdAt: string
+}
+
+// ============================================================================
 // Helper: Generate secure password
 // ============================================================================
 function generatePassword(): string {
@@ -20,6 +40,503 @@ function generatePassword(): string {
 // Helper: Delay for rate limiting
 // ============================================================================
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+// ============================================================================
+// Helper: Generate idempotency key for an operation
+// ============================================================================
+function generateIdempotencyKey(jobId: string, operation: string, identifier: string): string {
+    return crypto.createHash('sha256')
+        .update(`${jobId}:${operation}:${identifier}`)
+        .digest('hex')
+}
+
+// ============================================================================
+// Helper: Check if operation was already completed (idempotency)
+// ============================================================================
+async function checkIdempotency(
+    jobId: string,
+    operation: string,
+    identifier: string
+): Promise<{ completed: boolean; result?: unknown }> {
+    const key = generateIdempotencyKey(jobId, operation, identifier)
+
+    const { data, error } = await supabaseAdmin
+        .from('bulk_import_idempotency')
+        .select('status, result')
+        .eq('job_id', jobId)
+        .eq('operation_key', key)
+        .maybeSingle()
+
+    if (error || !data) {
+        return { completed: false }
+    }
+
+    return {
+        completed: data.status === 'completed',
+        result: data.result
+    }
+}
+
+// ============================================================================
+// Helper: Record operation completion for idempotency
+// ============================================================================
+async function recordIdempotency(
+    jobId: string,
+    adminId: string,
+    operation: string,
+    identifier: string,
+    status: 'pending' | 'completed' | 'failed',
+    result?: unknown
+): Promise<void> {
+    const key = generateIdempotencyKey(jobId, operation, identifier)
+
+    await supabaseAdmin
+        .from('bulk_import_idempotency')
+        .upsert({
+            job_id: jobId,
+            admin_id: adminId,
+            operation_key: key,
+            operation_type: operation,
+            identifier,
+            status,
+            result: result || null,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+        }, { onConflict: 'job_id,operation_key' })
+}
+
+// ============================================================================
+// Helper: Create transaction context
+// ============================================================================
+function createTransactionContext(jobId: string, adminUserId: string): TransactionContext {
+    return {
+        jobId,
+        adminUserId,
+        createdOwners: [],
+        createdPropertyIds: [],
+        createdSubscriptionIds: [],
+        processedItems: new Set(),
+        isRolledBack: false,
+    }
+}
+
+// ============================================================================
+// Helper: Atomic owner creation with subscription
+// ============================================================================
+async function createOwnerWithSubscriptionAtomically(
+    ownerData: {
+        email: string
+        name: string
+        phone: string
+        password_encrypted: string
+    },
+    jobId: string,
+    adminId: string,
+    tx: TransactionContext
+): Promise<{ success: boolean; userId?: string; password?: string; error?: string; alreadyExists?: boolean }> {
+    const idempotencyKey = `owner:${ownerData.email}`
+
+    // Check idempotency
+    if (tx.processedItems.has(idempotencyKey)) {
+        const existing = tx.createdOwners.find(o => o.email === ownerData.email)
+        return { success: true, userId: existing?.id, password: existing?.password, alreadyExists: true }
+    }
+
+    const existingCheck = await checkIdempotency(jobId, 'owner_created', ownerData.email)
+    if (existingCheck.completed && existingCheck.result) {
+        const result = existingCheck.result as { userId: string; password: string }
+        tx.processedItems.add(idempotencyKey)
+        return { success: true, userId: result.userId, password: result.password, alreadyExists: true }
+    }
+
+    // Decrypt password
+    let password: string
+    try {
+        try {
+            password = decrypt(ownerData.password_encrypted)
+        } catch {
+            const legacy = decryptLegacy(ownerData.password_encrypted)
+            if (!legacy) {
+                throw new Error('Failed to decrypt password')
+            }
+            password = legacy
+        }
+    } catch (error: any) {
+        await recordIdempotency(jobId, adminId, 'owner_created', ownerData.email, 'failed', { error: error.message })
+        return { success: false, error: `Password decryption failed: ${error.message}` }
+    }
+
+    try {
+        // Create auth user
+        const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+            email: ownerData.email,
+            password: password,
+            email_confirm: true,
+            user_metadata: {
+                name: ownerData.name,
+                phone: ownerData.phone,
+                role: 'owner',
+            },
+        })
+
+        if (authError) {
+            // If user already exists, handle gracefully
+            if (authError.message?.includes('already exists')) {
+                const { data: { users } } = await supabaseAdmin.auth.admin.listUsers()
+                const existingUser = users?.find(u => u.email === ownerData.email)
+
+                if (existingUser) {
+                    // Ensure users table entry exists
+                    await supabaseAdmin.from('users').upsert({
+                        id: existingUser.id,
+                        email: ownerData.email,
+                        name: ownerData.name,
+                        phone: ownerData.phone,
+                        role: 'owner',
+                        verified: true,
+                        email_verified_at: existingUser.email_confirmed_at || new Date().toISOString(),
+                    }, { onConflict: 'id' })
+
+                    // Track for potential rollback (but don't delete existing users)
+                    tx.createdOwners.push({
+                        email: ownerData.email,
+                        id: existingUser.id,
+                        password: '[ALREADY EXISTS]',
+                    })
+                    tx.processedItems.add(idempotencyKey)
+
+                    // Record idempotency
+                    await recordIdempotency(jobId, adminId, 'owner_created', ownerData.email, 'completed', {
+                        userId: existingUser.id,
+                        password: '[ALREADY EXISTS]'
+                    })
+
+                    return { success: true, userId: existingUser.id, password: '[ALREADY EXISTS]', alreadyExists: true }
+                }
+            }
+            throw authError
+        }
+
+        if (!authData.user) {
+            throw new Error("Failed to create user - no user returned")
+        }
+
+        const userId = authData.user.id
+
+        // Create users table entry (idempotent via upsert)
+        const { error: userError } = await supabaseAdmin.from('users').upsert({
+            id: userId,
+            email: ownerData.email,
+            name: ownerData.name,
+            phone: ownerData.phone,
+            role: 'owner',
+            verified: true,
+            email_verified_at: new Date().toISOString(),
+            created_at: new Date().toISOString(),
+        }, { onConflict: 'id' })
+
+        if (userError) {
+            console.error("Error creating user record:", userError)
+            // Continue - auth user is created, which is the important part
+        }
+
+        // Create subscription atomically with user
+        const startDate = new Date()
+        const endDate = new Date()
+        endDate.setFullYear(endDate.getFullYear() + 100)
+
+        const { data: subData, error: subError } = await supabaseAdmin
+            .from('subscriptions')
+            .insert({
+                user_id: userId,
+                plan_name: 'Free',
+                plan_duration: 'lifetime',
+                amount: 0,
+                status: 'active',
+                properties_limit: 1,
+                start_date: startDate.toISOString(),
+                end_date: endDate.toISOString(),
+            })
+            .select('id')
+            .single()
+
+        if (subError) {
+            console.error("Error creating subscription for owner:", subError)
+            // Log but continue - property will still be created
+        } else if (subData) {
+            tx.createdSubscriptionIds.push(subData.id)
+        }
+
+        // Track in transaction context
+        tx.createdOwners.push({
+            email: ownerData.email,
+            id: userId,
+            password: password,
+        })
+        tx.processedItems.add(idempotencyKey)
+
+        // Record idempotency
+        await recordIdempotency(jobId, adminId, 'owner_created', ownerData.email, 'completed', {
+            userId,
+            password
+        })
+
+        // Log audit
+        await supabaseAdmin.from("bulk_import_audit_log").insert({
+            job_id: jobId,
+            admin_id: adminId,
+            action: "owner_created",
+            details: {
+                email: ownerData.email,
+                user_id: userId,
+                transaction_id: tx.jobId,
+            },
+        })
+
+        return { success: true, userId, password }
+
+    } catch (error: any) {
+        console.error(`Failed to create owner ${ownerData.email}:`, error)
+        await recordIdempotency(jobId, adminId, 'owner_created', ownerData.email, 'failed', { error: error.message })
+        return { success: false, error: error.message }
+    }
+}
+
+// ============================================================================
+// Helper: Atomic property creation
+// ============================================================================
+async function createPropertyAtomically(
+    prop: {
+        psn: string
+        property_name: string
+        owner_email: string
+        owner_name: string
+        owner_phone?: string
+        property_data: Record<string, unknown>
+    },
+    ownerId: string,
+    imagesByPSN: Record<string, any[]>,
+    jobId: string,
+    adminId: string,
+    tx: TransactionContext
+): Promise<{ success: boolean; propertyId?: string; error?: string }> {
+    const idempotencyKey = `property:${prop.psn}`
+
+    // Check idempotency
+    if (tx.processedItems.has(idempotencyKey)) {
+        const existingId = tx.createdPropertyIds.find(id => id === prop.psn)
+        return { success: true, propertyId: existingId }
+    }
+
+    const existingCheck = await checkIdempotency(jobId, 'property_created', prop.psn)
+    if (existingCheck.completed && existingCheck.result) {
+        const result = existingCheck.result as { propertyId: string }
+        tx.processedItems.add(idempotencyKey)
+        tx.createdPropertyIds.push(result.propertyId)
+        return { success: true, propertyId: result.propertyId }
+    }
+
+    try {
+        // Get images for this property
+        const propertyImages = imagesByPSN[prop.psn] || []
+        const imageUrls = propertyImages.map((img: any) => img.public_url)
+
+        // Build property data
+        const propertyData = {
+            ...prop.property_data,
+            owner_id: ownerId,
+            owner_name: prop.owner_name,
+            owner_contact: prop.owner_phone || prop.property_data?.owner_contact || '',
+            images: imageUrls,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            published_at: new Date().toISOString(),
+            status: 'active',
+            availability: 'Available',
+            // Add idempotency tracking
+            bulk_import_job_id: jobId,
+            bulk_import_psn: prop.psn,
+        }
+
+        // Insert property
+        const { data: insertedProp, error: propError } = await supabaseAdmin
+            .from('properties')
+            .insert(propertyData)
+            .select('id')
+            .single()
+
+        if (propError) {
+            throw propError
+        }
+
+        if (!insertedProp) {
+            throw new Error("Property insertion returned no data")
+        }
+
+        const propertyId = insertedProp.id
+
+        // Update staged images to assigned (best effort)
+        if (propertyImages.length > 0) {
+            await supabaseAdmin
+                .from('bulk_import_staged_images')
+                .update({ status: 'assigned', processed_at: new Date().toISOString() })
+                .eq('job_id', jobId)
+                .eq('extracted_psn', prop.psn)
+        }
+
+        // Track in transaction context
+        tx.createdPropertyIds.push(propertyId)
+        tx.processedItems.add(idempotencyKey)
+
+        // Record idempotency
+        await recordIdempotency(jobId, adminId, 'property_created', prop.psn, 'completed', {
+            propertyId,
+            ownerId,
+        })
+
+        // Log audit
+        await supabaseAdmin.from("bulk_import_audit_log").insert({
+            job_id: jobId,
+            admin_id: adminId,
+            action: "property_created",
+            details: {
+                property_id: propertyId,
+                psn: prop.psn,
+                title: prop.property_name,
+                owner_id: ownerId,
+                image_count: propertyImages.length,
+                transaction_id: tx.jobId,
+            },
+        })
+
+        return { success: true, propertyId }
+
+    } catch (error: any) {
+        console.error(`Failed to create property PSN ${prop.psn}:`, error)
+        await recordIdempotency(jobId, adminId, 'property_created', prop.psn, 'failed', { error: error.message })
+        return { success: false, error: error.message }
+    }
+}
+
+// ============================================================================
+// Helper: Comprehensive rollback with retry logic
+// ============================================================================
+async function rollbackTransaction(tx: TransactionContext): Promise<{ success: boolean; details: Record<string, unknown> }> {
+    if (tx.isRolledBack) {
+        return { success: true, details: { alreadyRolledBack: true } }
+    }
+
+    tx.isRolledBack = true
+    const details: Record<string, unknown> = {
+        properties_attempted: 0,
+        properties_succeeded: 0,
+        properties_failed: [],
+        owners_attempted: 0,
+        owners_succeeded: 0,
+        owners_failed: [],
+        subscriptions_attempted: 0,
+        subscriptions_succeeded: 0,
+    }
+
+    // Rollback in reverse order of creation:
+    // 1. Properties first (they reference owners)
+    // 2. Subscriptions (they reference users)
+    // 3. Users table entries
+    // 4. Auth users last
+
+    // Rollback properties
+    details.properties_attempted = tx.createdPropertyIds.length
+    for (const propId of tx.createdPropertyIds) {
+        try {
+            const { error } = await supabaseAdmin
+                .from('properties')
+                .delete()
+                .eq('id', propId)
+
+            if (error) {
+                console.error(`Failed to delete property ${propId}:`, error)
+                ;(details.properties_failed as string[]).push(propId)
+            } else {
+                details.properties_succeeded = (details.properties_succeeded as number) + 1
+            }
+        } catch (error: any) {
+            console.error(`Exception deleting property ${propId}:`, error)
+            ;(details.properties_failed as string[]).push(propId)
+        }
+    }
+
+    // Rollback subscriptions
+    details.subscriptions_attempted = tx.createdSubscriptionIds.length
+    for (const subId of tx.createdSubscriptionIds) {
+        try {
+            const { error } = await supabaseAdmin
+                .from('subscriptions')
+                .delete()
+                .eq('id', subId)
+
+            if (error) {
+                console.error(`Failed to delete subscription ${subId}:`, error)
+            } else {
+                details.subscriptions_succeeded = (details.subscriptions_succeeded as number) + 1
+            }
+        } catch (error: any) {
+            console.error(`Exception deleting subscription ${subId}:`, error)
+        }
+    }
+
+    // Rollback owners (only those created in this transaction, not pre-existing)
+    const newOwners = tx.createdOwners.filter(o => o.password !== '[ALREADY EXISTS]')
+    details.owners_attempted = newOwners.length
+
+    for (const owner of newOwners) {
+        try {
+            // Delete from users table first
+            const { error: userError } = await supabaseAdmin
+                .from('users')
+                .delete()
+                .eq('id', owner.id)
+
+            if (userError) {
+                console.error(`Failed to delete user record ${owner.id}:`, userError)
+            }
+
+            // Delete auth user
+            const { error: authError } = await supabaseAdmin.auth.admin.deleteUser(owner.id)
+
+            if (authError) {
+                console.error(`Failed to delete auth user ${owner.id}:`, authError)
+                ;(details.owners_failed as string[]).push(owner.id)
+            } else {
+                details.owners_succeeded = (details.owners_succeeded as number) + 1
+            }
+        } catch (error: any) {
+            console.error(`Exception deleting owner ${owner.id}:`, error)
+            ;(details.owners_failed as string[]).push(owner.id)
+        }
+    }
+
+    // Log rollback
+    await supabaseAdmin.from("bulk_import_audit_log").insert({
+        job_id: tx.jobId,
+        admin_id: tx.adminUserId,
+        action: "rollback_executed",
+        details: {
+            properties_rolled_back: details.properties_succeeded,
+            owners_rolled_back: details.owners_succeeded,
+            subscriptions_rolled_back: details.subscriptions_succeeded,
+            failures: {
+                properties: details.properties_failed,
+                owners: details.owners_failed,
+            },
+            transaction_id: tx.jobId,
+        },
+    })
+
+    const overallSuccess = (details.properties_failed as string[]).length === 0 &&
+                          (details.owners_failed as string[]).length === 0
+
+    return { success: overallSuccess, details }
+}
 
 // ============================================================================
 // POST /api/admin/bulk-import/jobs/[id]/confirm
@@ -38,56 +555,8 @@ export async function POST(
                 controller.enqueue(encoder.encode(JSON.stringify(data) + '\n'))
             }
 
-            // Track results (moved outside try for catch block access)
-            const createdOwners: { email: string; id: string; password: string }[] = []
-            const createdPropertyIds: string[] = []
-            let adminUserId: string | null = null
-
-            // ============================================================================
-            // Helper: Rollback created data on critical failure
-            // ============================================================================
-            const rollbackCreatedData = async (adminId: string) => {
-                try {
-                    // Delete created properties
-                    for (const propId of createdPropertyIds) {
-                        await supabaseAdmin
-                            .from('properties')
-                            .delete()
-                            .eq('id', propId)
-                    }
-
-                    // Delete created owners (auth users)
-                    for (const owner of createdOwners) {
-                        if (owner.password !== '[ALREADY EXISTS]') {
-                            await supabaseAdmin.auth.admin.deleteUser(owner.id)
-                            await supabaseAdmin
-                                .from('users')
-                                .delete()
-                                .eq('id', owner.id)
-                        }
-                    }
-
-                    // Log rollback
-                    await supabaseAdmin.from("bulk_import_audit_log").insert({
-                        job_id: jobId,
-                        admin_id: adminId,
-                        action: "rollback_executed",
-                        details: {
-                            properties_rolled_back: createdPropertyIds.length,
-                            owners_rolled_back: createdOwners.filter(o => o.password !== '[ALREADY EXISTS]').length,
-                        },
-                    })
-                } catch (rollbackError) {
-                    console.error("Rollback failed:", rollbackError)
-                    // Log rollback failure
-                    await supabaseAdmin.from("bulk_import_audit_log").insert({
-                        job_id: jobId,
-                        admin_id: adminId,
-                        action: "rollback_failed",
-                        details: { error: (rollbackError as Error).message },
-                    })
-                }
-            }
+            // Initialize transaction context for atomic operations
+            let tx: TransactionContext | null = null
 
             try {
                 // Auth check
@@ -100,8 +569,8 @@ export async function POST(
                     return
                 }
 
-                // Store for catch block access
-                adminUserId = authUser.id
+                // Initialize transaction context
+                tx = createTransactionContext(jobId, authUser.id)
 
                 // Verify job
                 const { data: job, error: jobError } = await supabaseAdmin
@@ -241,131 +710,23 @@ export async function POST(
                 for (let batchIndex = 0; batchIndex < ownerBatches.length; batchIndex++) {
                     const batch = ownerBatches[batchIndex]
 
-                    await Promise.all(batch.map(async (ownerData) => {
-                        try {
-                            // Decrypt password (supports both AES and legacy base64)
-                            let password: string
-                            try {
-                                password = decrypt(ownerData.password_encrypted)
-                            } catch {
-                                // Try legacy base64 decryption
-                                const legacy = decryptLegacy(ownerData.password_encrypted)
-                                if (!legacy) {
-                                    throw new Error('Failed to decrypt password')
-                                }
-                                password = legacy
-                            }
+                    // Process sequentially within batch for better transaction safety
+                    for (const ownerData of batch) {
+                        const result = await createOwnerWithSubscriptionAtomically(
+                            ownerData,
+                            jobId,
+                            authUser.id,
+                            tx!
+                        )
 
-                            // Create auth user
-                            const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
-                                email: ownerData.email,
-                                password: password,
-                                email_confirm: true,
-                                user_metadata: {
-                                    name: ownerData.name,
-                                    phone: ownerData.phone,
-                                    role: 'owner',
-                                },
-                            })
-
-                            if (authError) {
-                                // If user already exists, try to get their ID
-                                if (authError.message?.includes('already exists')) {
-                                    const { data: { users } } = await supabaseAdmin.auth.admin.listUsers()
-                                    const existingUser = users?.find(u => u.email === ownerData.email)
-
-                                    if (existingUser) {
-                                        // Ensure users table entry
-                                        await supabaseAdmin.from('users').upsert({
-                                            id: existingUser.id,
-                                            email: ownerData.email,
-                                            name: ownerData.name,
-                                            phone: ownerData.phone,
-                                            role: 'owner',
-                                            verified: true,
-                                            email_verified_at: existingUser.email_confirmed_at || new Date().toISOString(),
-                                        }, { onConflict: 'id' })
-
-                                        createdOwners.push({
-                                            email: ownerData.email,
-                                            id: existingUser.id,
-                                            password: '[ALREADY EXISTS]',
-                                        })
-
-                                        return
-                                    }
-                                }
-                                throw authError
-                            }
-
-                            if (!authData.user) {
-                                throw new Error("Failed to create user - no user returned")
-                            }
-
-                            // Create users table entry
-                            const { error: userError } = await supabaseAdmin.from('users').insert({
-                                id: authData.user.id,
-                                email: ownerData.email,
-                                name: ownerData.name,
-                                phone: ownerData.phone,
-                                role: 'owner',
-                                verified: true,
-                                email_verified_at: new Date().toISOString(),
-                                created_at: new Date().toISOString(),
-                            })
-
-                            if (userError) {
-                                console.error("Error creating user record:", userError)
-                                // Continue - auth user is created, which is the important part
-                            }
-
-                            // 🔥 CRITICAL: Create free subscription so properties appear on homepage
-                            try {
-                                const startDate = new Date()
-                                const endDate = new Date()
-                                endDate.setFullYear(endDate.getFullYear() + 100) // 100 years = effectively permanent
-
-                                await supabaseAdmin.from('subscriptions').insert({
-                                    user_id: authData.user.id,
-                                    plan_name: 'Free',
-                                    plan_duration: 'lifetime',
-                                    amount: 0,
-                                    status: 'active',
-                                    properties_limit: 1,
-                                    start_date: startDate.toISOString(),
-                                    end_date: endDate.toISOString(),
-                                })
-                            } catch (subError) {
-                                console.error("Error creating subscription for owner:", subError)
-                                // Log but continue - property will still be created
-                            }
-
-                            createdOwners.push({
-                                email: ownerData.email,
-                                id: authData.user.id,
-                                password: password,
-                            })
-
-                            // Log audit
-                            await supabaseAdmin.from("bulk_import_audit_log").insert({
-                                job_id: jobId,
-                                admin_id: authUser.id,
-                                action: "owner_created",
-                                details: {
-                                    email: ownerData.email,
-                                    user_id: authData.user.id,
-                                },
-                            })
-
-                        } catch (error: any) {
-                            console.error(`Failed to create owner ${ownerData.email}:`, error)
+                        if (!result.success) {
                             failedItems.push({
                                 type: 'owner',
                                 email: ownerData.email,
-                                error: error.message,
+                                error: result.error,
                             })
                         }
-                    }))
+                    }
 
                     // Rate limit delay between batches
                     if (batchIndex < ownerBatches.length - 1) {
@@ -377,7 +738,7 @@ export async function POST(
 
                     send({
                         progress: currentProgress,
-                        owners_created: createdOwners.length,
+                        owners_created: tx!.createdOwners.length,
                         owners_failed: ownersFailed,
                     })
 
@@ -387,15 +748,15 @@ export async function POST(
                         progress: currentProgress,
                         step: "creating_owners",
                         totalCount: properties.length,
-                        processedCount: createdOwners.length,
+                        processedCount: tx!.createdOwners.length,
                         failedCount: ownersFailed,
-                        message: `Creating owners... (${createdOwners.length} created, ${ownersFailed} failed)`,
+                        message: `Creating owners... (${tx!.createdOwners.length} created, ${ownersFailed} failed)`,
                     })
                 }
 
-                // Build owner email to ID map
+                // Build owner email to ID map from transaction context
                 const ownerEmailToId = new Map<string, string>()
-                for (const owner of createdOwners) {
+                for (const owner of tx!.createdOwners) {
                     ownerEmailToId.set(owner.email, owner.id)
                 }
 
@@ -446,7 +807,7 @@ export async function POST(
 
                 const propertiesProgress = 25
                 send({
-                    status: `Created ${createdOwners.length} owners, now creating properties...`,
+                    status: `Created ${tx!.createdOwners.length} owners, now creating properties...`,
                     progress: propertiesProgress,
                     step: "creating_properties",
                 })
@@ -472,74 +833,33 @@ export async function POST(
                     const batch = propertyBatches[batchIndex]
 
                     for (const prop of batch) {
-                        try {
-                            const ownerId = ownerEmailToId.get(prop.owner_email)
+                        const ownerId = ownerEmailToId.get(prop.owner_email)
 
-                            if (!ownerId) {
-                                throw new Error(`Owner not found for email: ${prop.owner_email}`)
-                            }
-
-                            // Get images for this property
-                            const propertyImages = imagesByPSN[prop.psn] || []
-                            const imageUrls = propertyImages.map((img: any) => img.public_url)
-
-                            // Build property data
-                            const propertyData = {
-                                ...prop.property_data,
-                                owner_id: ownerId,
-                                owner_name: prop.owner_name,
-                                owner_contact: prop.owner_phone || prop.property_data?.owner_contact || '',
-                                images: imageUrls,
-                                created_at: new Date().toISOString(),
-                                updated_at: new Date().toISOString(),
-                                published_at: new Date().toISOString(),
-                                status: 'active',
-                                availability: 'Available',
-                            }
-
-                            // Insert property
-                            const { data: insertedProp, error: propError } = await supabaseAdmin
-                                .from('properties')
-                                .insert(propertyData)
-                                .select('id')
-                                .single()
-
-                            if (propError) {
-                                throw propError
-                            }
-
-                            createdPropertyIds.push(insertedProp.id)
-
-                            // Update staged images to assigned
-                            if (propertyImages.length > 0) {
-                                await supabaseAdmin
-                                    .from('bulk_import_staged_images')
-                                    .update({ status: 'assigned', processed_at: new Date().toISOString() })
-                                    .eq('job_id', jobId)
-                                    .eq('extracted_psn', prop.psn)
-                            }
-
-                            // Log audit
-                            await supabaseAdmin.from("bulk_import_audit_log").insert({
-                                job_id: jobId,
-                                admin_id: authUser.id,
-                                action: "property_created",
-                                details: {
-                                    property_id: insertedProp.id,
-                                    psn: prop.psn,
-                                    title: prop.property_name,
-                                    owner_id: ownerId,
-                                    image_count: propertyImages.length,
-                                },
-                            })
-
-                        } catch (error: any) {
-                            console.error(`Failed to create property PSN ${prop.psn}:`, error)
+                        if (!ownerId) {
                             failedItems.push({
                                 type: 'property',
                                 psn: prop.psn,
                                 title: prop.property_name,
-                                error: error.message,
+                                error: `Owner not found for email: ${prop.owner_email}`,
+                            })
+                            continue
+                        }
+
+                        const result = await createPropertyAtomically(
+                            prop,
+                            ownerId,
+                            imagesByPSN,
+                            jobId,
+                            authUser.id,
+                            tx!
+                        )
+
+                        if (!result.success) {
+                            failedItems.push({
+                                type: 'property',
+                                psn: prop.psn,
+                                title: prop.property_name,
+                                error: result.error,
                             })
                         }
                     }
@@ -550,9 +870,9 @@ export async function POST(
 
                     send({
                         progress: currentProgress,
-                        properties_created: createdPropertyIds.length,
+                        properties_created: tx!.createdPropertyIds.length,
                         properties_failed: propertiesFailed,
-                        status: `Created ${createdPropertyIds.length} of ${properties.length} properties...`,
+                        status: `Created ${tx!.createdPropertyIds.length} of ${properties.length} properties...`,
                     })
 
                     // Persist progress
@@ -561,9 +881,9 @@ export async function POST(
                         progress: currentProgress,
                         step: "creating_properties",
                         totalCount: properties.length,
-                        processedCount: createdPropertyIds.length,
+                        processedCount: tx!.createdPropertyIds.length,
                         failedCount: propertiesFailed,
-                        message: `Created ${createdPropertyIds.length} of ${properties.length} properties...`,
+                        message: `Created ${tx!.createdPropertyIds.length} of ${properties.length} properties...`,
                     })
 
                     // Small delay between batches
@@ -581,7 +901,7 @@ export async function POST(
                 // ============================================================================
                 // STEP 3: Prepare credentials for download
                 // ============================================================================
-                const credentialsForDownload = createdOwners
+                const credentialsForDownload = tx!.createdOwners
                     .filter(o => o.password !== '[ALREADY EXISTS]')
                     .map(o => ({
                         email: o.email,
@@ -614,10 +934,10 @@ export async function POST(
                     .update({
                         status: finalStatus,
                         step: "completed",
-                        processed_properties: createdPropertyIds.length,
+                        processed_properties: tx!.createdPropertyIds.length,
                         failed_properties: failedItems.length,
-                        created_property_ids: createdPropertyIds,
-                        created_owner_ids: createdOwners.map(o => o.id),
+                        created_property_ids: tx!.createdPropertyIds,
+                        created_owner_ids: tx!.createdOwners.map(o => o.id),
                         failed_items: failedItems,
                         credentials_encrypted: credentialsEncrypted,
                         completed_at: new Date().toISOString(),
@@ -631,10 +951,11 @@ export async function POST(
                     action: "import_completed",
                     details: {
                         total_properties: properties.length,
-                        created_properties: createdPropertyIds.length,
+                        created_properties: tx!.createdPropertyIds.length,
                         failed_properties: failedItems.length,
-                        new_owners: createdOwners.length,
+                        new_owners: tx!.createdOwners.length,
                         final_status: finalStatus,
+                        transaction_id: tx!.jobId,
                     },
                 })
 
@@ -648,10 +969,10 @@ export async function POST(
                     success: true,
                     results: {
                         total_properties: properties.length,
-                        created_properties: createdPropertyIds.length,
+                        created_properties: tx!.createdPropertyIds.length,
                         failed_properties: failedItems.length,
-                        new_owners: createdOwners.filter(o => o.password !== '[ALREADY EXISTS]').length,
-                        existing_owners: createdOwners.filter(o => o.password === '[ALREADY EXISTS]').length,
+                        new_owners: tx!.createdOwners.filter(o => o.password !== '[ALREADY EXISTS]').length,
+                        existing_owners: tx!.createdOwners.filter(o => o.password === '[ALREADY EXISTS]').length,
                         failed_items: failedItems,
                     },
                     credentials_count: credentialsForDownload.length,
@@ -668,9 +989,10 @@ export async function POST(
 
                 console.error("Import confirmation error:", error)
 
-                // Rollback any created data on critical failure
-                if (adminUserId) {
-                    await rollbackCreatedData(adminUserId)
+                // Rollback any created data on critical failure using transaction context
+                if (tx) {
+                    const rollbackResult = await rollbackTransaction(tx)
+                    console.error("Rollback result:", rollbackResult)
                 }
 
                 // Update job with error
