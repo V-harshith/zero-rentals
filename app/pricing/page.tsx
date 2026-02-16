@@ -145,7 +145,7 @@ export default function PricingPage() {
       description: "Most popular for PG owners",
       features: [
         "1 property listing",
-        "Max 20 photos per property",
+        "Max 15 photos per property",
         "Top featured placement",
         "Advanced analytics & insights",
         "Priority email support (12 hours)",
@@ -166,7 +166,7 @@ export default function PricingPage() {
       description: "Best for professional PG chains",
       features: [
         "1 property listing",
-        "Max 30 photos per property",
+        "Max 20 photos per property",
         "Premium featured placement",
         "Complete analytics suite",
         "24/7 priority support",
@@ -186,7 +186,7 @@ export default function PricingPage() {
       description: "Ultimate plan for large businesses",
       features: [
         "1 property listing",
-        "Max 50 photos per property",
+        "Max 20 photos per property",
         "Highest visibility",
         "Dedicated account manager",
         "API access for integrations",

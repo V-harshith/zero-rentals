@@ -102,14 +102,16 @@ export default function TenantLoginPage() {
     }
 
     return (
-        <div className="min-h-screen flex flex-col items-center justify-center bg-muted/30 p-4">
-            <div className="w-full max-w-md">
-                <Link href="/" className="inline-flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors p-2 hover:bg-white/50 rounded-md mb-6">
-                    <ArrowLeft className="h-4 w-4" />
-                    Back to Home
-                </Link>
-            </div>
-            <div className="w-full max-w-md space-y-6 animate-fadeIn">
+        <div className="min-h-screen flex flex-col items-center justify-center bg-muted/30 p-4 relative">
+            {/* Back to Home - Left positioned on desktop, top on mobile */}
+            <Link
+                href="/"
+                className="inline-flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors p-2 hover:bg-white/50 rounded-md absolute left-4 top-4 md:left-8 md:top-8"
+            >
+                <ArrowLeft className="h-4 w-4" />
+                Back to Home
+            </Link>
+            <div className="w-full max-w-md space-y-6 animate-fadeIn pt-8 md:pt-0">
                 {/* Header with Logo */}
                 <div className="text-center space-y-4">
                     <Link href="/" className="inline-flex items-center justify-center gap-2 group">
