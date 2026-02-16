@@ -24,7 +24,8 @@
       "mcp__plugin_claude-mem_mcp-search____IMPORTANT",
       "mcp__plugin_claude-mem_mcp-search__save_memory",
       "Bash(npx knip:*)",
-      "Bash(powershell:*)"
+      "Bash(powershell:*)",
+      "Bash(dir:*)"
     ]
   }
 }

@@ -34,6 +34,10 @@ export default function SearchPage() {
     const isNavigatingBackRef = useRef(false)
     const lastSyncedUrlRef = useRef<string>('')
 
+    // Pagination race condition prevention
+    const abortControllerRef = useRef<AbortController | null>(null)
+    const requestSequenceRef = useRef<number>(0)
+
     /**
      * Robust URL param parsing with validation
      */
@@ -197,23 +201,52 @@ export default function SearchPage() {
     const isSyncingRef = useRef(false)
 
     useEffect(() => {
-        let isMounted = true
+        // Increment request sequence for this fetch
+        const currentRequestId = ++requestSequenceRef.current
+
+        // Abort any in-flight request
+        if (abortControllerRef.current) {
+            abortControllerRef.current.abort()
+        }
+
+        // Create new abort controller for this request
+        const abortController = new AbortController()
+        abortControllerRef.current = abortController
+
         async function fetchProperties() {
+            // Set loading state for this specific page change
             setLoading(true)
             try {
-                const results = await searchProperties(filters)
-                if (isMounted) setFilteredProperties(results)
-            } catch {
-                // Show user-friendly error notification
-                if (isMounted) {
+                const results = await searchProperties(filters, abortController.signal)
+
+                // Ignore stale responses - only update if this is still the latest request
+                if (currentRequestId === requestSequenceRef.current) {
+                    setFilteredProperties(results)
+                }
+            } catch (error) {
+                // Ignore abort errors (user navigated away or clicked another page)
+                if (error instanceof Error && error.name === 'AbortError') {
+                    return
+                }
+
+                // Show user-friendly error notification only for latest request
+                if (currentRequestId === requestSequenceRef.current) {
                     toast.error("Failed to search properties. Please try again.")
                 }
             } finally {
-                if (isMounted) setLoading(false)
+                // Only clear loading state if this is still the latest request
+                if (currentRequestId === requestSequenceRef.current) {
+                    setLoading(false)
+                    abortControllerRef.current = null
+                }
             }
         }
         fetchProperties()
-        return () => { isMounted = false }
+
+        // Cleanup: abort request on unmount or filter change
+        return () => {
+            abortController.abort()
+        }
     }, [filters])
 
     // Sync URL with filters (only when filters change from user interaction, not from URL/restore)

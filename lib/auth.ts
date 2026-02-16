@@ -235,109 +235,74 @@ export async function signUp(
   validateEmail(email)
   validatePasswordStrength(password)
 
-  console.log("Auth: calling supabase.auth.signUp")
-  
-  // Determine the correct redirect URL based on environment
-  const getRedirectUrl = () => {
-    if (typeof window !== 'undefined') {
-      const origin = window.location.origin
-      return `${origin}/auth/confirmed`
-    }
-    // Fallback for server-side calls
-    return process.env.NEXT_PUBLIC_SITE_URL 
-      ? `${process.env.NEXT_PUBLIC_SITE_URL}/auth/confirmed`
-      : 'http://localhost:3000/auth/confirmed'
-  }
+  console.log("Auth: calling atomic registration API")
 
-  const { data: authData, error: authError } = await supabase.auth.signUp({
-    email,
-    password,
-    options: {
-      data: { 
-        name: userData.name, 
-        role: userData.role,
-        phone: userData.phone 
-      },
-      // CRITICAL: Set email redirect to ensure proper verification flow
-      emailRedirectTo: getRedirectUrl(),
+  // ---------------------------------------------------------------------------
+  // ATOMIC USER CREATION via Server API
+  // ---------------------------------------------------------------------------
+  // The registration API handles both auth user and profile creation atomically.
+  // If profile creation fails, the auth user is rolled back automatically.
+  // This prevents orphaned auth records.
+  // ---------------------------------------------------------------------------
+
+  const response = await fetch('/api/auth/register', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
     },
+    body: JSON.stringify({
+      email,
+      password,
+      name: userData.name,
+      phone: userData.phone,
+      role: userData.role,
+      preferred_city: userData.preferred_city,
+      preferred_area: userData.preferred_area,
+    }),
   })
 
-  if (authError) {
-    console.error("Auth: supabase.auth.signUp failed", authError)
-    handleAuthError(authError)
-  }
+  const result = await response.json()
 
-  if (!authData.user) {
-    throw new Error('User creation failed')
-  }
+  if (!response.ok || !result.success) {
+    console.error("Auth: Registration API failed:", result)
 
-  console.log("Auth: supabase.auth.signUp success", authData.user.id)
-
-  // CRITICAL SECURITY CHECK: Ensure user is NOT auto-confirmed
-  // If email_confirmed_at is set immediately after signup, it means
-  // email confirmations are disabled in Supabase settings (security risk)
-  // Check if email confirmation is properly configured
-  if (authData.user.email_confirmed_at) {
-    // User was auto-confirmed - this means email verification might be disabled in Supabase
-    // However, this is acceptable for development/testing environments
-    console.log("ℹ️ User was auto-confirmed (email verification may be disabled in Supabase settings)")
-  } else {
-    console.log("✅ User created in unconfirmed state (email verification required)")
-  }
-
-  // Edge case: Check if user already exists (can happen with race conditions)
-  const { data: existingUser } = await supabase
-    .from('users')
-    .select('id, email')
-    .eq('email', email.toLowerCase())
-    .maybeSingle()
-
-  if (existingUser && existingUser.id !== authData.user.id) {
-    console.error("Auth: Email already exists with different user ID")
-    // Clean up the auth user we just created
-    try {
-      await supabase.auth.admin.deleteUser(authData.user.id)
-    } catch (cleanupError) {
-      console.error("Failed to cleanup duplicate user:", cleanupError)
+    // Handle specific error codes
+    if (result.code === 'EMAIL_EXISTS') {
+      throw new Error('This email is already registered. Please login instead.')
     }
-    throw new Error('This email is already registered. Please login instead.')
+
+    if (result.code === 'WEAK_PASSWORD') {
+      throw new Error('Password is too weak. Please choose a stronger password.')
+    }
+
+    if (result.code === 'VALIDATION_ERROR') {
+      throw new Error(result.error || 'Invalid registration data')
+    }
+
+    // Generic error
+    throw new Error(result.error || 'Failed to create account. Please try again.')
   }
 
+  console.log("Auth: Registration successful, userId:", result.userId)
+
+  // Send verification email via server action (non-blocking)
+  // The API already triggers Supabase's verification email, but we also
+  // send our custom verification email for consistency
   const verificationToken = generateVerificationToken()
-  
-  try {
-    await createUserProfile(authData.user.id, email, userData, verificationToken)
-  } catch (profileError: any) {
-    console.error("Auth: Failed to create user profile", profileError)
-    
-    // Edge case: If profile creation fails, clean up the auth user
-    // to prevent orphaned auth records
-    try {
-      console.log("Auth: Cleaning up auth user due to profile creation failure")
-      await supabase.auth.admin.deleteUser(authData.user.id)
-    } catch (cleanupError) {
-      console.error("Auth: Failed to cleanup auth user:", cleanupError)
-    }
-    
-    throw new Error(`Failed to complete registration: ${profileError.message}`)
-  }
-
-  // Send verification email (non-blocking - don't fail signup if email fails)
   try {
     await sendVerificationViaAction(email, userData.name, verificationToken, userData.role)
   } catch (emailError: any) {
-    console.error("Auth: Failed to send verification email (non-fatal):", emailError)
+    console.error("Auth: Failed to send custom verification email (non-fatal):", emailError)
     // Don't throw - user is created, they can resend verification email later
   }
 
   console.log("Auth: signUp flow complete")
-  
+
   // Return user data with verification status
   return {
-    ...authData,
-    requiresVerification: !authData.user.email_confirmed_at,
-    verificationEmailSent: true
+    user: { id: result.userId, email },
+    requiresVerification: result.requiresVerification ?? true,
+    verificationEmailSent: true,
   }
 }
 

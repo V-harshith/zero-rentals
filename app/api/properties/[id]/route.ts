@@ -3,6 +3,64 @@ import { createClient } from '@/lib/supabase-server'
 import { getCurrentUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { csrfProtection } from '@/lib/csrf-server'
+import { createHash } from 'crypto'
+
+// In-memory store for idempotency keys (use Redis in production)
+const idempotencyStore = new Map<string, { response: unknown; timestamp: number }>()
+
+// Cleanup old idempotency keys every 10 minutes
+if (typeof setInterval !== 'undefined') {
+  setInterval(() => {
+    const now = Date.now()
+    const EXPIRY_MS = 24 * 60 * 60 * 1000 // 24 hours
+    for (const [key, record] of idempotencyStore.entries()) {
+      if (now - record.timestamp > EXPIRY_MS) {
+        idempotencyStore.delete(key)
+      }
+    }
+  }, 600000) // 10 minutes
+}
+
+/**
+ * Generate ETag for property data
+ */
+function generateETag(data: Record<string, unknown>): string {
+  const hash = createHash('md5').update(JSON.stringify(data)).digest('hex')
+  return `"${hash}"`
+}
+
+/**
+ * Compare two objects to determine if they are deeply equal
+ */
+function isDeepEqual(obj1: unknown, obj2: unknown): boolean {
+  if (obj1 === obj2) return true
+  if (typeof obj1 !== typeof obj2) return false
+  if (typeof obj1 !== 'object' || obj1 === null || obj2 === null) return false
+
+  const keys1 = Object.keys(obj1 as Record<string, unknown>)
+  const keys2 = Object.keys(obj2 as Record<string, unknown>)
+
+  if (keys1.length !== keys2.length) return false
+
+  for (const key of keys1) {
+    if (!keys2.includes(key)) return false
+    const val1 = (obj1 as Record<string, unknown>)[key]
+    const val2 = (obj2 as Record<string, unknown>)[key]
+
+    if (Array.isArray(val1) && Array.isArray(val2)) {
+      if (val1.length !== val2.length) return false
+      for (let i = 0; i < val1.length; i++) {
+        if (!isDeepEqual(val1[i], val2[i])) return false
+      }
+    } else if (typeof val1 === 'object' && val1 !== null) {
+      if (!isDeepEqual(val1, val2)) return false
+    } else if (val1 !== val2) {
+      return false
+    }
+  }
+
+  return true
+}
 
 export async function GET(
   request: NextRequest,
@@ -33,6 +91,15 @@ export async function GET(
       return NextResponse.json({ error: 'Property not found' }, { status: 404 })
     }
 
+    // Generate ETag for the response
+    const etag = generateETag(data)
+
+    // Check for If-None-Match header for conditional GET
+    const ifNoneMatch = request.headers.get('if-none-match')
+    if (ifNoneMatch && ifNoneMatch === etag) {
+      return new NextResponse(null, { status: 304, headers: { ETag: etag } })
+    }
+
     // Track view with deduplication and rate limiting
     const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
                request.headers.get('x-real-ip') ??
@@ -47,7 +114,7 @@ export async function GET(
       await supabase.rpc('increment_property_views', { property_id: id })
     }
 
-    return NextResponse.json({ data })
+    return NextResponse.json({ data }, { headers: { ETag: etag } })
   } catch {
     return NextResponse.json({ error: 'Failed to fetch property' }, { status: 500 })
   }
@@ -89,9 +156,10 @@ export async function PUT(
 
     const supabase = await createClient()
 
+    // Fetch current property data for ownership check and comparison
     const { data: property, error: fetchError } = await supabase
       .from('properties')
-      .select('owner_id')
+      .select('*')
       .eq('id', id)
       .maybeSingle()
 
@@ -107,9 +175,36 @@ export async function PUT(
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
+    // Check for If-Match header (ETag validation for optimistic locking)
+    const ifMatch = request.headers.get('if-match')
+    if (ifMatch) {
+      const currentETag = generateETag(property)
+      if (ifMatch !== currentETag && ifMatch !== '*') {
+        return NextResponse.json(
+          { error: 'Conflict: Property has been modified. Please refresh and try again.' },
+          { status: 412 }
+        )
+      }
+    }
+
     const body = await request.json()
 
-    // TODO: Add Zod schema validation for allowed fields
+    // Check for idempotency key
+    const idempotencyKey = request.headers.get('idempotency-key')
+    if (idempotencyKey) {
+      const idempotencyId = `${user.id}:${id}:${idempotencyKey}`
+      const cached = idempotencyStore.get(idempotencyId)
+      if (cached) {
+        // Return cached response for duplicate request
+        return NextResponse.json(cached.response, {
+          headers: {
+            'X-Idempotency-Replay': 'true',
+            'ETag': generateETag((cached.response as { data?: Record<string, unknown> }).data || {})
+          }
+        })
+      }
+    }
+
     // Prevent updating sensitive fields
     const allowedFields = [
       'title', 'description', 'price', 'availability', 'property_type',
@@ -124,6 +219,36 @@ export async function PUT(
       }
     }
 
+    // Compare values before updating - skip if no changes
+    const hasChanges = Object.keys(sanitizedBody).some(key => {
+      return !isDeepEqual(sanitizedBody[key], property[key])
+    })
+
+    if (!hasChanges) {
+      // No changes detected - return current data without updating
+      const response = {
+        data: property,
+        meta: {
+          idempotent: true,
+          changed: false,
+          message: 'No changes detected'
+        }
+      }
+
+      // Cache response if idempotency key provided
+      if (idempotencyKey) {
+        const idempotencyId = `${user.id}:${id}:${idempotencyKey}`
+        idempotencyStore.set(idempotencyId, { response, timestamp: Date.now() })
+      }
+
+      return NextResponse.json(response, {
+        headers: {
+          'ETag': generateETag(property)
+        }
+      })
+    }
+
+    // Perform the update
     const { data, error } = await supabase
       .from('properties')
       .update(sanitizedBody)
@@ -135,7 +260,25 @@ export async function PUT(
       return NextResponse.json({ error: 'Failed to update property' }, { status: 500 })
     }
 
-    return NextResponse.json({ data })
+    const response = {
+      data,
+      meta: {
+        idempotent: false,
+        changed: true
+      }
+    }
+
+    // Cache response if idempotency key provided
+    if (idempotencyKey) {
+      const idempotencyId = `${user.id}:${id}:${idempotencyKey}`
+      idempotencyStore.set(idempotencyId, { response, timestamp: Date.now() })
+    }
+
+    return NextResponse.json(response, {
+      headers: {
+        'ETag': generateETag(data || {})
+      }
+    })
   } catch {
     return NextResponse.json({ error: 'Failed to update property' }, { status: 500 })
   }

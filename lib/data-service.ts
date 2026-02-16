@@ -422,8 +422,13 @@ export async function getPropertyById(id: string): Promise<Property | null> {
   }
 }
 
-export async function searchProperties(filters: SearchFilters): Promise<Property[]> {
+export async function searchProperties(filters: SearchFilters, signal?: AbortSignal): Promise<Property[]> {
   try {
+    // Check if request was cancelled before starting
+    if (signal?.aborted) {
+      throw new Error('AbortError')
+    }
+
     const today = new Date().toISOString()
 
     // Get owners with valid active subscriptions and their plan names
@@ -434,6 +439,11 @@ export async function searchProperties(filters: SearchFilters): Promise<Property
       .gt('end_date', today)
 
     // Subscription fetch errors are handled silently - properties will still be shown
+
+    // Check if request was cancelled after subscription fetch
+    if (signal?.aborted) {
+      throw new Error('AbortError')
+    }
 
     // Create a map of owner_id to plan tier rank
     const ownerTierMap = new Map<string, number>()
@@ -451,6 +461,11 @@ export async function searchProperties(filters: SearchFilters): Promise<Property
 
     if (error) {
       return [] // Don't throw - return empty array
+    }
+
+    // Check if request was cancelled after data fetch
+    if (signal?.aborted) {
+      throw new Error('AbortError')
     }
 
     const properties = (data as PropertyRow[])
@@ -475,7 +490,11 @@ export async function searchProperties(filters: SearchFilters): Promise<Property
 
     const mappedProperties = sortedProperties.map(mapPropertyFromDB)
     return filterByPriceRange(mappedProperties, filters)
-  } catch {
+  } catch (error) {
+    // Re-throw abort errors for the caller to handle
+    if (error instanceof Error && error.message === 'AbortError') {
+      throw error
+    }
     return []
   }
 }
