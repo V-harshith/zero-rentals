@@ -58,7 +58,7 @@ export async function POST(request: NextRequest) {
 
     let query = supabase
       .from('users')
-      .select('id, name, email, phone, role, status, verified, preferred_city, preferred_area, subscription_plan, created_at, email_verified_at')
+      .select('id, name, email, phone, role, status, verified, preferred_city, preferred_area, created_at, email_verified_at')
       .order('created_at', { ascending: false })
       .limit(MAX_EXPORT_LIMIT)
 
@@ -137,7 +137,7 @@ function escapeCSVCell(cell: unknown): string {
 function convertToCSV(data: Record<string, unknown>[]): string {
   if (!data || data.length === 0) return ''
 
-  const headers = ['ID', 'Name', 'Email', 'Phone', 'Role', 'Status', 'Verified', 'Preferred City', 'Preferred Area', 'Subscription Plan', 'Created At']
+  const headers = ['ID', 'Name', 'Email', 'Phone', 'Role', 'Status', 'Verified', 'Preferred City', 'Preferred Area', 'Created At']
   const rows = data.map(user => {
     // Verified if BOTH verified flag is true AND email_verified_at is set
     const isVerified = user.verified === true && user.email_verified_at != null
@@ -151,7 +151,6 @@ function convertToCSV(data: Record<string, unknown>[]): string {
       isVerified ? 'Yes' : 'No',
       user.preferred_city || '',
       user.preferred_area || '',
-      user.subscription_plan || 'free',
       user.created_at ? new Date(String(user.created_at)).toLocaleDateString() : '',
     ]
   })

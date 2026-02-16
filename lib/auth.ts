@@ -206,9 +206,12 @@ async function fetchUserProfile(userId: string, retryCount = 0): Promise<{ data:
   return { data, error }
 }
 
-function validateUserStatus(userData: any) {
+function validateUserStatus(userData: any, emailConfirmedAt?: string | null) {
   // Enforce email verification check
-  if (!userData.email_verified_at) {
+  // Use Supabase Auth's email_confirmed_at as source of truth, fall back to database
+  const isEmailVerified = emailConfirmedAt || userData.email_verified_at
+
+  if (!isEmailVerified) {
     throw new Error('EMAIL_NOT_VERIFIED')
   }
 
@@ -390,7 +393,7 @@ export async function signIn(email: string, password: string) {
     throw new Error('User profile not found. Please contact support if this issue persists.')
   }
 
-  validateUserStatus(userData)
+  validateUserStatus(userData, data.user.email_confirmed_at)
 
   return { ...data, userData }
 }
