@@ -14,8 +14,7 @@ import React, { useEffect, useState, useCallback, useRef, Suspense } from "react
 import Link from "next/link"
 import { toast } from "sonner"
 import { getPendingProperties, getAllPayments, getTotalPropertyCount } from "@/lib/data-service"
-import { supabase } from "@/lib/supabase"
-import type { RealtimeChannel } from "@supabase/supabase-js"
+import { subscriptionManager } from "@/lib/supabase"
 import type { Property, Payment } from "@/lib/types"
 import { getAllUsers, type User as AdminUser } from "@/lib/user-service"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
@@ -159,6 +158,17 @@ function AdminDashboard() {
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
 
+  // Centralized loading state for overview tab - tracks ALL data fetches
+  const [overviewDataReady, setOverviewDataReady] = useState(false)
+
+  // Refs to track if data has been loaded at least once
+  const dataLoadedRef = useRef({
+    users: false,
+    payments: false,
+    pending: false,
+    totalStats: false
+  })
+
   // Sync tab with URL for better UX and shareability
   const [activeTab, setActiveTab] = useState(() => {
     const tabFromUrl = searchParams.get('tab')
@@ -176,8 +186,11 @@ function AdminDashboard() {
   const loadingPaymentsRef = useRef(false)
   const loadingPendingRef = useRef(false)
 
-  // Real-time subscriptions ref for cleanup
-  const subscriptionsRef = useRef<RealtimeChannel[]>([])
+  // Ref to track overview data loading state synchronously (prevents race conditions)
+  const overviewLoadingRef = useRef({
+    users: false,
+    payments: false
+  })
 
   // Last updated timestamps for data freshness
   const [lastUpdated, setLastUpdated] = useState<{
@@ -200,6 +213,25 @@ function AdminDashboard() {
     }
   }, [])
 
+  // Track when all overview data is ready (users, payments, pending, totalStats)
+  // This prevents charts from rendering with incomplete data
+  useEffect(() => {
+    const allLoaded =
+      dataLoadedRef.current.users &&
+      dataLoadedRef.current.payments &&
+      dataLoadedRef.current.pending &&
+      dataLoadedRef.current.totalStats &&
+      !loadingUsersRef.current &&
+      !loadingPaymentsRef.current &&
+      !loadingPendingRef.current
+
+    if (allLoaded && !overviewDataReady) {
+      setOverviewDataReady(true)
+    } else if (!allLoaded && overviewDataReady) {
+      setOverviewDataReady(false)
+    }
+  }, [users, payments, pendingProperties, totalPropertiesCount, overviewDataReady])
+
   useEffect(() => {
     // Initial load - sequential to avoid overwhelming the API
     const initDashboard = async () => {
@@ -220,61 +252,55 @@ function AdminDashboard() {
 
     initDashboard()
 
-    // Setup real-time subscriptions for data sync
-    if (user) {
+    // Setup real-time subscriptions for data sync using subscription manager
+    // This prevents duplicate subscriptions when multiple components subscribe
+    const cleanupFns: (() => void)[] = []
 
+    if (user) {
       // Subscribe to properties table changes
-      const propertiesChannel = supabase
-        .channel('admin-properties-changes')
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'properties' },
-          (payload) => {
-            // Refresh pending properties if a property was inserted/updated/deleted
-            if (activeTab === 'pending') {
-              loadPendingProperties(true)
-            }
+      const cleanupProperties = subscriptionManager.subscribe(
+        'admin-properties-changes',
+        'properties',
+        () => {
+          // Refresh pending properties if a property was inserted/updated/deleted
+          if (activeTab === 'pending') {
+            loadPendingProperties(true)
           }
-        )
-        .subscribe()
+        },
+        { event: '*', schema: 'public' }
+      )
+      cleanupFns.push(cleanupProperties)
 
       // Subscribe to users table changes
-      const usersChannel = supabase
-        .channel('admin-users-changes')
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'users' },
-          (payload) => {
-            if (activeTab === 'users' || activeTab === 'overview') {
-              loadUsers(true)
-            }
+      const cleanupUsers = subscriptionManager.subscribe(
+        'admin-users-changes',
+        'users',
+        () => {
+          if (activeTab === 'users' || activeTab === 'overview') {
+            loadUsers(true)
           }
-        )
-        .subscribe()
+        },
+        { event: '*', schema: 'public' }
+      )
+      cleanupFns.push(cleanupUsers)
 
       // Subscribe to payments table changes
-      const paymentsChannel = supabase
-        .channel('admin-payments-changes')
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'payments' },
-          (payload) => {
-            if (activeTab === 'payments' || activeTab === 'overview') {
-              loadPayments(true)
-            }
+      const cleanupPayments = subscriptionManager.subscribe(
+        'admin-payments-changes',
+        'payments',
+        () => {
+          if (activeTab === 'payments' || activeTab === 'overview') {
+            loadPayments(true)
           }
-        )
-        .subscribe()
-
-      subscriptionsRef.current = [propertiesChannel, usersChannel, paymentsChannel]
+        },
+        { event: '*', schema: 'public' }
+      )
+      cleanupFns.push(cleanupPayments)
     }
 
     return () => {
-      // Cleanup subscriptions on unmount
-      subscriptionsRef.current.forEach(channel => {
-        supabase.removeChannel(channel)
-      })
-      subscriptionsRef.current = []
+      // Cleanup all subscriptions on unmount
+      cleanupFns.forEach(cleanup => cleanup())
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, activeTab])
@@ -301,6 +327,7 @@ function AdminDashboard() {
       if (isMounted.current) {
         setPendingProperties(properties)
         setLastUpdated(prev => ({ ...prev, pending: new Date() }))
+        dataLoadedRef.current.pending = true
       }
     } catch (error) {
       if (isMounted.current) toast.error("Failed to load pending properties")
@@ -313,9 +340,13 @@ function AdminDashboard() {
   const loadTotalStats = async () => {
     try {
       const count = await getTotalPropertyCount()
-      if (isMounted.current) setTotalPropertiesCount(count)
+      if (isMounted.current) {
+        setTotalPropertiesCount(count)
+        dataLoadedRef.current.totalStats = true
+      }
     } catch {
       // Error loading stats - silently fail
+      dataLoadedRef.current.totalStats = true // Mark as loaded even on error to prevent infinite loading
     }
   }
 
@@ -357,12 +388,15 @@ function AdminDashboard() {
       if (isMounted.current) {
         setUsers(data)
         setLastUpdated(prev => ({ ...prev, users: new Date() }))
+        dataLoadedRef.current.users = true
       }
     } catch (error) {
       if (isMounted.current) toast.error("Failed to load users")
+      dataLoadedRef.current.users = true // Mark as loaded even on error
     } finally {
       clearTimeout(timeoutId)
       loadingUsersRef.current = false
+      overviewLoadingRef.current.users = false
       if (isMounted.current) setLoadingUsers(false)
     }
   }
@@ -399,12 +433,15 @@ function AdminDashboard() {
       if (isMounted.current) {
         setPayments(data)
         setLastUpdated(prev => ({ ...prev, payments: new Date() }))
+        dataLoadedRef.current.payments = true
       }
     } catch (error) {
       if (isMounted.current) toast.error("Failed to load payments")
+      dataLoadedRef.current.payments = true // Mark as loaded even on error
     } finally {
       clearTimeout(timeoutId)
       loadingPaymentsRef.current = false
+      overviewLoadingRef.current.payments = false
       if (isMounted.current) setLoadingPayments(false)
       loadingTabsRef.current.delete('payments')
     }
@@ -429,12 +466,15 @@ function AdminDashboard() {
     }
     if (value === 'overview') {
       // Load all data for stats if not already loaded
-      if (!loadingTabsRef.current.has('users')) {
+      // Use overviewLoadingRef to prevent duplicate requests during rapid tab switches
+      if (!loadingTabsRef.current.has('users') && !overviewLoadingRef.current.users) {
         loadingTabsRef.current.add('users')
+        overviewLoadingRef.current.users = true
         loadUsers(forceRefresh).finally(() => loadingTabsRef.current.delete('users'))
       }
-      if (!loadingTabsRef.current.has('payments')) {
+      if (!loadingTabsRef.current.has('payments') && !overviewLoadingRef.current.payments) {
         loadingTabsRef.current.add('payments')
+        overviewLoadingRef.current.payments = true
         loadPayments(forceRefresh).finally(() => loadingTabsRef.current.delete('payments'))
       }
     }
@@ -740,12 +780,20 @@ function AdminDashboard() {
           {/* Overview Tab */}
           <TabsContent value="overview">
             <div className="space-y-6">
-              <AdminStats
-                totalUsers={users.length}
-                totalProperties={totalPropertiesCount}
-                totalRevenue={totalRevenue}
-                pendingApprovals={pendingProperties.length}
-              />
+              {!overviewDataReady ? (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  {[...Array(4)].map((_, i) => (
+                    <Skeleton key={i} className="h-32" />
+                  ))}
+                </div>
+              ) : (
+                <AdminStats
+                  totalUsers={users.length}
+                  totalProperties={totalPropertiesCount}
+                  totalRevenue={totalRevenue}
+                  pendingApprovals={pendingProperties.length}
+                />
+              )}
 
               {/* Platform Overview Details */}
               <Card>
@@ -760,7 +808,11 @@ function AdminDashboard() {
                         <p className="text-sm text-muted-foreground">Property owners registered</p>
                       </div>
                       <Badge variant="outline" className="text-lg px-4 py-2">
-                        {loadingUsers ? "-" : users.filter(u => u.role === 'owner').length}
+                        {!overviewDataReady ? (
+                          <Skeleton className="h-6 w-12" />
+                        ) : (
+                          users.filter(u => u.role === 'owner').length
+                        )}
                       </Badge>
                     </div>
                     <div className="flex items-center justify-between p-4 border rounded-lg">
@@ -769,7 +821,11 @@ function AdminDashboard() {
                         <p className="text-sm text-muted-foreground">Users looking for properties</p>
                       </div>
                       <Badge variant="outline" className="text-lg px-4 py-2">
-                        {loadingUsers ? "-" : users.filter(u => u.role === 'tenant').length}
+                        {!overviewDataReady ? (
+                          <Skeleton className="h-6 w-12" />
+                        ) : (
+                          users.filter(u => u.role === 'tenant').length
+                        )}
                       </Badge>
                     </div>
                   </div>

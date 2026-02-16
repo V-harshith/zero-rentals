@@ -1,4 +1,5 @@
 import { createBrowserClient } from '@supabase/ssr'
+import type { RealtimeChannel, RealtimePostgresChangesPayload } from '@supabase/supabase-js'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -26,6 +27,216 @@ export const supabase = createBrowserClient(supabaseUrl, supabaseAnonKey, {
     },
   },
 })
+
+// ============================================================================
+// REALTIME SUBSCRIPTION MANAGER
+// ============================================================================
+// Prevents duplicate subscriptions to the same table/channel
+// Supports multiple callbacks per subscription for shared channels
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type TableRecord = { [key: string]: any }
+
+interface SubscriptionCallback<T extends TableRecord = TableRecord> {
+  id: string
+  callback: (payload: RealtimePostgresChangesPayload<T>) => void
+}
+
+interface ManagedSubscription<T extends TableRecord = TableRecord> {
+  channel: RealtimeChannel
+  callbacks: Map<string, SubscriptionCallback<T>['callback']>
+  table: string
+  schema: string
+  filter?: string
+  status: 'connecting' | 'connected' | 'error'
+}
+
+class SubscriptionManager {
+  private subscriptions: Map<string, ManagedSubscription> = new Map()
+  private static instance: SubscriptionManager | null = null
+
+  static getInstance(): SubscriptionManager {
+    if (!SubscriptionManager.instance) {
+      SubscriptionManager.instance = new SubscriptionManager()
+    }
+    return SubscriptionManager.instance
+  }
+
+  /**
+   * Subscribe to postgres changes with deduplication
+   * Multiple components can subscribe to the same table - they'll share one channel
+   */
+  subscribe<T extends TableRecord = TableRecord>(
+    channelName: string,
+    table: string,
+    callback: (payload: RealtimePostgresChangesPayload<T>) => void,
+    options: {
+      schema?: string
+      event?: 'INSERT' | 'UPDATE' | 'DELETE' | '*'
+      filter?: string
+    } = {}
+  ): () => void {
+    const { schema = 'public', event = '*', filter } = options
+    const callbackId = `${channelName}-${Math.random().toString(36).slice(2, 11)}`
+
+    // Check if subscription already exists for this channel
+    const existing = this.subscriptions.get(channelName)
+
+    if (existing) {
+      // Add callback to existing subscription
+      existing.callbacks.set(callbackId, callback as ManagedSubscription['callbacks'] extends Map<string, infer V> ? V : never)
+
+      // Return cleanup function
+      return () => this.unsubscribe(channelName, callbackId)
+    }
+
+    // Create new subscription
+    const callbacks = new Map<string, SubscriptionCallback<T>['callback']>()
+    callbacks.set(callbackId, callback)
+
+    // Build filter object - using type assertion to satisfy RealtimeChannel.on() overloads
+    const filterObj = {
+      event: event as 'INSERT' | 'UPDATE' | 'DELETE' | '*',
+      schema,
+      table,
+      ...(filter && { filter })
+    }
+
+    const channel = supabase
+      .channel(channelName)
+      .on(
+        'postgres_changes',
+        filterObj as {
+          event: '*'
+          schema: string
+          table: string
+          filter?: string
+        },
+        (payload: RealtimePostgresChangesPayload<T>) => {
+          // Broadcast to all registered callbacks
+          const managedSub = this.subscriptions.get(channelName)
+          if (managedSub) {
+            managedSub.callbacks.forEach((cb) => {
+              try {
+                cb(payload)
+              } catch (error) {
+                console.error(`[SubscriptionManager] Callback error for ${channelName}:`, error)
+              }
+            })
+          }
+        }
+      )
+      .subscribe((status) => {
+        const managedSub = this.subscriptions.get(channelName)
+        if (managedSub) {
+          managedSub.status = status === 'SUBSCRIBED' ? 'connected' : status === 'CLOSED' ? 'error' : 'connecting'
+        }
+      })
+
+    this.subscriptions.set(channelName, {
+      channel,
+      callbacks: callbacks as ManagedSubscription['callbacks'],
+      table,
+      schema,
+      filter,
+      status: 'connecting',
+    })
+
+    // Return cleanup function
+    return () => this.unsubscribe(channelName, callbackId)
+  }
+
+  /**
+   * Unsubscribe a specific callback from a channel
+   * Only removes the channel when all callbacks are removed
+   */
+  private unsubscribe(channelName: string, callbackId: string): void {
+    const managedSub = this.subscriptions.get(channelName)
+    if (!managedSub) return
+
+    // Remove specific callback
+    managedSub.callbacks.delete(callbackId)
+
+    // Only remove channel when no more callbacks
+    if (managedSub.callbacks.size === 0) {
+      this.removeChannel(channelName)
+    }
+  }
+
+  /**
+   * Force remove a channel and cleanup
+   */
+  removeChannel(channelName: string): void {
+    const managedSub = this.subscriptions.get(channelName)
+    if (!managedSub) return
+
+    // Remove from tracking first to prevent race conditions
+    this.subscriptions.delete(channelName)
+
+    // Then remove from supabase
+    try {
+      supabase.removeChannel(managedSub.channel)
+    } catch (error) {
+      console.error(`[SubscriptionManager] Error removing channel ${channelName}:`, error)
+    }
+  }
+
+  /**
+   * Get status of a subscription
+   */
+  getStatus(channelName: string): 'connecting' | 'connected' | 'error' | 'not_found' {
+    const managedSub = this.subscriptions.get(channelName)
+    return managedSub?.status ?? 'not_found'
+  }
+
+  /**
+   * Get all active subscription names
+   */
+  getActiveSubscriptions(): string[] {
+    return Array.from(this.subscriptions.keys())
+  }
+
+  /**
+   * Cleanup all subscriptions - useful for logout/reset
+   */
+  cleanup(): void {
+    this.subscriptions.forEach((managedSub, channelName) => {
+      try {
+        supabase.removeChannel(managedSub.channel)
+      } catch (error) {
+        console.error(`[SubscriptionManager] Error cleaning up ${channelName}:`, error)
+      }
+    })
+    this.subscriptions.clear()
+  }
+}
+
+// Export singleton instance
+export const subscriptionManager = SubscriptionManager.getInstance()
+
+/**
+ * Hook-compatible subscription helper
+ * Returns a cleanup function that can be used directly in useEffect
+ *
+ * Usage:
+ * useEffect(() => {
+ *   return subscribeToTable('my-channel', 'properties', (payload) => {
+ *     console.log('Change received:', payload)
+ *   })
+ * }, [])
+ */
+export function subscribeToTable<T extends TableRecord = TableRecord>(
+  channelName: string,
+  table: string,
+  callback: (payload: RealtimePostgresChangesPayload<T>) => void,
+  options?: {
+    schema?: string
+    event?: 'INSERT' | 'UPDATE' | 'DELETE' | '*'
+    filter?: string
+  }
+): () => void {
+  return subscriptionManager.subscribe(channelName, table, callback, options)
+}
 
 // Database Types
 export interface Database {

@@ -4,6 +4,7 @@ import { supabaseAdmin } from '@/lib/supabase-admin'
 import { sendPropertyRejectionNotification } from '@/lib/email-service'
 import { csrfProtection } from '@/lib/csrf-server'
 import { rateLimit } from '@/lib/rate-limit'
+import { transitionPropertyStatus } from '@/lib/data-service'
 
 export async function PUT(
   request: NextRequest,
@@ -58,7 +59,7 @@ export async function PUT(
     // 2. Fetch Property (Admin Client)
     const { data: property, error: fetchError } = await supabaseAdmin
       .from('properties')
-      .select('title, owner_id')
+      .select('title, owner_id, status')
       .eq('id', params.id)
       .maybeSingle()
 
@@ -70,22 +71,49 @@ export async function PUT(
       return NextResponse.json({ error: 'Property not found' }, { status: 404 })
     }
 
-    // 3. Update Property (Admin Client - Bypass RLS)
-    const { data, error } = await supabaseAdmin
-      .from('properties')
-      .update({
-        status: 'rejected',
-      })
-      .eq('id', params.id)
-      .select()
-      .maybeSingle()
+    // 3. Use atomic status transition to reject
+    const transitionResult = await transitionPropertyStatus(
+      params.id,
+      'rejected',
+      authUser.id,
+      reason || 'Property rejected by admin'
+    )
 
-    if (error) {
-      throw error
+    if (!transitionResult.success) {
+      if (transitionResult.error?.includes('already has status')) {
+        return NextResponse.json({
+          success: true,
+          message: 'Property already rejected',
+          data: { id: params.id, status: 'rejected' }
+        })
+      }
+
+      if (transitionResult.error?.includes('Invalid status transition')) {
+        return NextResponse.json(
+          { error: transitionResult.error },
+          { status: 400 }
+        )
+      }
+
+      return NextResponse.json(
+        { error: transitionResult.error || 'Failed to reject property' },
+        { status: 500 }
+      )
     }
 
-    // 4. Send Email (Fail Safe)
-    if (property && property.owner_id) {
+    // 4. Fetch updated property data
+    const { data: updatedProperty, error: fetchUpdatedError } = await supabaseAdmin
+      .from('properties')
+      .select('*')
+      .eq('id', params.id)
+      .single()
+
+    if (fetchUpdatedError) {
+      console.error('[ADMIN REJECT] Failed to fetch updated property:', fetchUpdatedError)
+    }
+
+    // 5. Send Email (Fail Safe)
+    if (property && property.owner_id && transitionResult.changed) {
       try {
         const { data: owner, error: ownerError } = await supabaseAdmin
           .from('users')
@@ -106,7 +134,16 @@ export async function PUT(
       }
     }
 
-    return NextResponse.json({ data })
+    return NextResponse.json({
+      success: true,
+      message: transitionResult.message || 'Property rejected successfully',
+      data: updatedProperty,
+      transition: {
+        oldStatus: transitionResult.oldStatus,
+        newStatus: transitionResult.newStatus,
+        transitionId: transitionResult.transitionId
+      }
+    })
   } catch (error: any) {
     console.error('[ADMIN REJECT] Error:', error?.message || error)
     return NextResponse.json(

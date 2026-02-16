@@ -4,6 +4,7 @@ import { supabaseAdmin } from '@/lib/supabase-admin'
 import { sendPropertyApprovalNotification } from '@/lib/email-service'
 import { csrfProtection } from '@/lib/csrf-server'
 import { rateLimit } from '@/lib/rate-limit'
+import { transitionPropertyStatus } from '@/lib/data-service'
 
 export async function PUT(
   request: NextRequest,
@@ -60,74 +61,58 @@ export async function PUT(
       return NextResponse.json({ error: 'Property not found' }, { status: 404 })
     }
 
-    // Idempotency check: If already approved/active, return success
-    if (property.status === 'active') {
-      const { data: existingProperty } = await supabaseAdmin
-        .from('properties')
-        .select('*')
-        .eq('id', params.id)
-        .single()
+    // 3. Use atomic status transition (handles idempotency, validation, and race conditions)
+    const transitionResult = await transitionPropertyStatus(
+      params.id,
+      'active',
+      authUser.id,
+      'Property approved by admin'
+    )
 
-      return NextResponse.json({
-        success: true,
-        message: 'Property already approved',
-        data: existingProperty
-      })
-    }
+    if (!transitionResult.success) {
+      // Handle specific error cases
+      if (transitionResult.error?.includes('already has status')) {
+        const { data: existingProperty } = await supabaseAdmin
+          .from('properties')
+          .select('*')
+          .eq('id', params.id)
+          .single()
 
-    // Only allow approval from pending status
-    if (property.status !== 'pending') {
-      return NextResponse.json(
-        { error: `Cannot approve property with status: ${property.status}` },
-        { status: 400 }
-      )
-    }
-
-    // 3. Update Property with optimistic locking (Use Admin Client to BYPASS RLS)
-    // Only update if status is still 'pending' to prevent race conditions
-    const { data, error } = await supabaseAdmin
-      .from('properties')
-      .update({
-        status: 'active',
-        availability: 'Available', // CRITICAL: Required for properties to show in getProperties()
-        published_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', params.id)
-      .eq('status', 'pending') // Optimistic lock - only update if still pending
-      .select()
-      .maybeSingle()
-
-    // If no rows updated, another request may have already processed it
-    if (!data && !error) {
-      const { data: currentProperty } = await supabaseAdmin
-        .from('properties')
-        .select('*')
-        .eq('id', params.id)
-        .single()
-
-      if (currentProperty?.status === 'active') {
         return NextResponse.json({
           success: true,
           message: 'Property already approved',
-          data: currentProperty
+          data: existingProperty
         })
       }
 
+      if (transitionResult.error?.includes('Invalid status transition')) {
+        return NextResponse.json(
+          { error: transitionResult.error },
+          { status: 400 }
+        )
+      }
+
       return NextResponse.json(
-        { error: 'Property status changed during approval. Please refresh and try again.' },
-        { status: 409 }
+        { error: transitionResult.error || 'Failed to approve property' },
+        { status: 500 }
       )
     }
 
-    if (error) {
-      throw error
+    // 4. Fetch the updated property data for response
+    const { data: updatedProperty, error: fetchUpdatedError } = await supabaseAdmin
+      .from('properties')
+      .select('*')
+      .eq('id', params.id)
+      .single()
+
+    if (fetchUpdatedError) {
+      // Transition succeeded but fetch failed - log but don't fail
+      console.error('[ADMIN APPROVE] Failed to fetch updated property:', fetchUpdatedError)
     }
 
-    // 4. Send Email (Fail Safe)
-    if (property && property.owner_id) {
+    // 5. Send Email (Fail Safe)
+    if (property && property.owner_id && transitionResult.changed) {
       try {
-        // Use Admin client here too just in case
         const { data: owner, error: ownerError } = await supabaseAdmin
           .from('users')
           .select('email, name')
@@ -146,7 +131,16 @@ export async function PUT(
       }
     }
 
-    return NextResponse.json({ data })
+    return NextResponse.json({
+      success: true,
+      message: transitionResult.message || 'Property approved successfully',
+      data: updatedProperty,
+      transition: {
+        oldStatus: transitionResult.oldStatus,
+        newStatus: transitionResult.newStatus,
+        transitionId: transitionResult.transitionId
+      }
+    })
   } catch (error: any) {
     console.error('[ADMIN APPROVE] Error:', error?.message || error)
     return NextResponse.json(

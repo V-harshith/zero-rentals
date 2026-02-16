@@ -4,24 +4,138 @@ import { createRazorpayOrder, verifyRazorpaySignature } from "@/lib/payment-serv
 import { supabaseAdmin } from "@/lib/supabase-admin"
 import { PLAN_LIMITS } from "@/lib/constants"
 
+// In-memory store for recent idempotency keys (resets on server restart)
+// For production, use Redis or database
+const recentIdempotencyKeys = new Map<string, { timestamp: number; orderId: string }>()
+const IDEMPOTENCY_KEY_TTL = 24 * 60 * 60 * 1000 // 24 hours
+
+// Cleanup old idempotency keys periodically
+setInterval(() => {
+    const now = Date.now()
+    for (const [key, value] of recentIdempotencyKeys.entries()) {
+        if (now - value.timestamp > IDEMPOTENCY_KEY_TTL) {
+            recentIdempotencyKeys.delete(key)
+        }
+    }
+}, 60 * 60 * 1000) // Run every hour
+
+/**
+ * Check for existing payment or subscription before creating new order
+ * Prevents duplicate payments from the same user
+ */
+export async function checkExistingPaymentAction(userId: string, planName: string) {
+    try {
+        // Check for recent pending payments (last 5 minutes)
+        const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString()
+        const { data: recentPayments, error: paymentError } = await supabaseAdmin
+            .from('payment_logs')
+            .select('id, status, created_at')
+            .eq('user_id', userId)
+            .gte('created_at', fiveMinutesAgo)
+            .order('created_at', { ascending: false })
+            .limit(1)
+
+        if (paymentError) {
+            console.error('Error checking recent payments:', paymentError)
+        }
+
+        const hasRecentPayment = recentPayments && recentPayments.length > 0 &&
+            recentPayments[0].status === 'pending'
+
+        // Check for active subscription for this plan
+        const { data: activeSubscription, error: subError } = await supabaseAdmin
+            .from('subscriptions')
+            .select('id, plan_name, status')
+            .eq('user_id', userId)
+            .eq('status', 'active')
+            .maybeSingle()
+
+        if (subError) {
+            console.error('Error checking active subscription:', subError)
+        }
+
+        const hasActiveSubscription = activeSubscription?.plan_name === planName
+
+        return {
+            success: true,
+            hasRecentPayment,
+            hasActiveSubscription,
+            activeSubscription
+        }
+    } catch (error: any) {
+        console.error('Error in checkExistingPaymentAction:', error)
+        return { success: false, error: error.message }
+    }
+}
+
+// Store full order details for idempotency
+const orderDetailsCache = new Map<string, { id: string; amount: number; currency: string }>()
+
 export async function initiatePlanPurchaseAction(
     userId: string,
     planName: string,
     amount: number,
-    duration: string
+    duration: string,
+    idempotencyKey?: string
 ) {
     try {
+        // Check idempotency key if provided
+        if (idempotencyKey) {
+            const existing = recentIdempotencyKeys.get(idempotencyKey)
+            if (existing) {
+                // Return the existing order with full details
+                const cachedOrder = orderDetailsCache.get(existing.orderId)
+                if (cachedOrder) {
+                    return {
+                        success: true,
+                        order: cachedOrder,
+                        idempotent: true
+                    }
+                }
+            }
+        }
+
         const { order, error } = await createRazorpayOrder(amount, 'INR', {
             userId,
             planName,
             duration
         })
+
         if (error) throw error
+
+        // Store idempotency key and order details
+        if (idempotencyKey && order?.id) {
+            recentIdempotencyKeys.set(idempotencyKey, {
+                timestamp: Date.now(),
+                orderId: order.id
+            })
+            // Cache order details for idempotent responses
+            orderDetailsCache.set(order.id, {
+                id: order.id,
+                amount: Number(order.amount),
+                currency: order.currency
+            })
+        }
+
         return { success: true, order }
     } catch (error: any) {
         return { success: false, error: error.message }
     }
 }
+
+// In-memory store for processed idempotency keys in fulfillment
+const processedFulfillmentKeys = new Map<string, { timestamp: number; result: any }>()
+const FULFILLMENT_KEY_TTL = 24 * 60 * 60 * 1000 // 24 hours
+
+// Cleanup old fulfillment keys periodically
+setInterval(() => {
+    const now = Date.now()
+    for (const [key, value] of processedFulfillmentKeys.entries()) {
+        if (now - value.timestamp > FULFILLMENT_KEY_TTL) {
+            processedFulfillmentKeys.delete(key)
+        }
+    }
+}, 60 * 60 * 1000) // Run every hour
 
 export async function fulfillSubscriptionAction(data: {
     userId: string
@@ -31,8 +145,17 @@ export async function fulfillSubscriptionAction(data: {
     razorpayOrderId: string
     razorpayPaymentId: string
     razorpaySignature: string
+    idempotencyKey?: string
 }) {
     try {
+        // Check idempotency key if provided
+        if (data.idempotencyKey) {
+            const existingResult = processedFulfillmentKeys.get(data.idempotencyKey)
+            if (existingResult) {
+                return { success: true, message: 'Payment already processed (idempotent)', idempotent: true }
+            }
+        }
+
         // 🔥 CRITICAL FIX: Idempotency check - prevent duplicate processing
         const { data: existingPayment } = await supabaseAdmin
             .from('payment_logs')
@@ -41,6 +164,13 @@ export async function fulfillSubscriptionAction(data: {
             .maybeSingle()
 
         if (existingPayment?.status === 'success') {
+            // Store result for idempotency
+            if (data.idempotencyKey) {
+                processedFulfillmentKeys.set(data.idempotencyKey, {
+                    timestamp: Date.now(),
+                    result: { success: true, message: 'Payment already processed' }
+                })
+            }
             return { success: true, message: 'Payment already processed' }
         }
 
@@ -153,6 +283,14 @@ export async function fulfillSubscriptionAction(data: {
                 amount: data.amount,
                 transactionId: data.razorpayPaymentId,
                 endDate: endDate.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })
+            })
+        }
+
+        // Store successful result for idempotency
+        if (data.idempotencyKey) {
+            processedFulfillmentKeys.set(data.idempotencyKey, {
+                timestamp: Date.now(),
+                result: { success: true }
             })
         }
 

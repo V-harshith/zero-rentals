@@ -4,6 +4,65 @@ import { mapPropertyFromDB, mapPropertyToDB, type PropertyRow } from '@/lib/data
 import { PropertySchema } from '@/lib/validation'
 import { PLAN_TIER_RANK, getPlanTierRank } from '@/lib/constants'
 
+// ============================================================================
+// PROPERTY STATUS STATE MACHINE
+// ============================================================================
+
+export type PropertyStatus = 'pending' | 'active' | 'rejected' | 'inactive'
+
+interface StatusTransition {
+  from: PropertyStatus
+  to: PropertyStatus
+  action: string
+  requiresAdmin: boolean
+}
+
+// Valid state transitions for properties
+const VALID_TRANSITIONS: StatusTransition[] = [
+  // Approval flow
+  { from: 'pending', to: 'active', action: 'approve', requiresAdmin: true },
+  { from: 'pending', to: 'rejected', action: 'reject', requiresAdmin: true },
+
+  // Deactivation flow
+  { from: 'active', to: 'inactive', action: 'deactivate', requiresAdmin: false },
+  { from: 'inactive', to: 'active', action: 'reactivate', requiresAdmin: false },
+
+  // Rejection and resubmission
+  { from: 'active', to: 'rejected', action: 'reject', requiresAdmin: true },
+  { from: 'rejected', to: 'pending', action: 'resubmit', requiresAdmin: false },
+  { from: 'rejected', to: 'active', action: 'approve', requiresAdmin: true },
+]
+
+/**
+ * Validates if a status transition is allowed
+ */
+export function isValidStatusTransition(
+  from: PropertyStatus,
+  to: PropertyStatus
+): boolean {
+  if (from === to) return true // Idempotent
+  return VALID_TRANSITIONS.some(t => t.from === from && t.to === to)
+}
+
+/**
+ * Gets the action name for a status transition
+ */
+export function getTransitionAction(
+  from: PropertyStatus,
+  to: PropertyStatus
+): string | null {
+  const transition = VALID_TRANSITIONS.find(t => t.from === from && t.to === to)
+  return transition?.action || null
+}
+
+/**
+ * Gets all valid next statuses from a given status
+ */
+export function getValidNextStatuses(from: PropertyStatus): PropertyStatus[] {
+  return VALID_TRANSITIONS
+    .filter(t => t.from === from)
+    .map(t => t.to)
+}
 
 // ============================================================================
 // HELPER FUNCTIONS (Internal)
@@ -889,3 +948,388 @@ export async function getTenantStats(userId: string): Promise<{
 // Favorites functionality has been moved to the client-side context
 // All favorites operations now use Supabase directly from the browser
 // See: lib/favorites-context.tsx
+
+// ============================================================================
+// ATOMIC PROPERTY STATUS TRANSITIONS
+// ============================================================================
+
+export interface StatusTransitionResult {
+  success: boolean
+  message?: string
+  error?: string
+  propertyId?: string
+  oldStatus?: PropertyStatus
+  newStatus?: PropertyStatus
+  changed?: boolean
+  transitionId?: string
+}
+
+export interface FeaturedStatusResult {
+  success: boolean
+  message?: string
+  error?: string
+  propertyId?: string
+  featured?: boolean
+  changed?: boolean
+}
+
+/**
+ * Atomically transitions a property's status using database transaction
+ * Uses Supabase RPC for atomicity and state machine validation
+ *
+ * @param propertyId - The property UUID
+ * @param newStatus - Target status
+ * @param adminId - Admin user ID (for audit trail)
+ * @param reason - Optional reason for the transition
+ * @returns StatusTransitionResult with success/failure details
+ */
+export async function transitionPropertyStatus(
+  propertyId: string,
+  newStatus: PropertyStatus,
+  adminId?: string,
+  reason?: string
+): Promise<StatusTransitionResult> {
+  try {
+    // Client-side validation before calling RPC
+    const { data: property, error: fetchError } = await supabase
+      .from('properties')
+      .select('status')
+      .eq('id', propertyId)
+      .maybeSingle()
+
+    if (fetchError) {
+      return {
+        success: false,
+        error: `Failed to fetch property: ${fetchError.message}`,
+        propertyId
+      }
+    }
+
+    if (!property) {
+      return {
+        success: false,
+        error: 'Property not found',
+        propertyId
+      }
+    }
+
+    // Validate transition is allowed
+    const currentStatus = property.status as PropertyStatus
+    if (!isValidStatusTransition(currentStatus, newStatus)) {
+      return {
+        success: false,
+        error: `Invalid status transition: ${currentStatus} -> ${newStatus}`,
+        propertyId,
+        oldStatus: currentStatus,
+        newStatus
+      }
+    }
+
+    // Call the atomic RPC function
+    const { data, error } = await supabase.rpc('transition_property_status', {
+      p_property_id: propertyId,
+      p_new_status: newStatus,
+      p_admin_id: adminId || null,
+      p_reason: reason || null
+    })
+
+    if (error) {
+      return {
+        success: false,
+        error: `Transition failed: ${error.message}`,
+        propertyId,
+        oldStatus: currentStatus,
+        newStatus
+      }
+    }
+
+    // Parse the JSON result from the RPC
+    const result = data as {
+      success: boolean
+      message?: string
+      error?: string
+      property_id?: string
+      old_status?: PropertyStatus
+      new_status?: PropertyStatus
+      changed?: boolean
+      transition_id?: string
+    }
+
+    return {
+      success: result.success,
+      message: result.message,
+      error: result.error,
+      propertyId: result.property_id || propertyId,
+      oldStatus: result.old_status,
+      newStatus: result.new_status,
+      changed: result.changed,
+      transitionId: result.transition_id
+    }
+  } catch (error: any) {
+    return {
+      success: false,
+      error: `Unexpected error: ${error?.message || 'Unknown error'}`,
+      propertyId
+    }
+  }
+}
+
+/**
+ * Sets the featured status of a property atomically
+ * Only active properties can be featured
+ *
+ * @param propertyId - The property UUID
+ * @param featured - Whether to feature the property
+ * @param adminId - Admin user ID (for audit trail)
+ * @returns FeaturedStatusResult with success/failure details
+ */
+export async function setPropertyFeatured(
+  propertyId: string,
+  featured: boolean,
+  adminId?: string
+): Promise<FeaturedStatusResult> {
+  try {
+    const { data, error } = await supabase.rpc('set_property_featured', {
+      p_property_id: propertyId,
+      p_featured: featured,
+      p_admin_id: adminId || null
+    })
+
+    if (error) {
+      return {
+        success: false,
+        error: `Failed to update featured status: ${error.message}`,
+        propertyId
+      }
+    }
+
+    const result = data as {
+      success: boolean
+      message?: string
+      error?: string
+      property_id?: string
+      featured?: boolean
+      changed?: boolean
+    }
+
+    return {
+      success: result.success,
+      message: result.message,
+      error: result.error,
+      propertyId: result.property_id || propertyId,
+      featured: result.featured,
+      changed: result.changed
+    }
+  } catch (error: any) {
+    return {
+      success: false,
+      error: `Unexpected error: ${error?.message || 'Unknown error'}`,
+      propertyId
+    }
+  }
+}
+
+/**
+ * Bulk transition multiple properties to a new status
+ * Each transition is atomic, but the bulk operation is not wrapped in a transaction
+ * to avoid long-running transactions
+ *
+ * @param propertyIds - Array of property UUIDs
+ * @param newStatus - Target status for all properties
+ * @param adminId - Admin user ID (for audit trail)
+ * @param reason - Optional reason for the transition
+ * @returns Object with success count, failure count, and individual results
+ */
+export async function bulkTransitionPropertyStatus(
+  propertyIds: string[],
+  newStatus: PropertyStatus,
+  adminId?: string,
+  reason?: string
+): Promise<{
+  success: boolean
+  total: number
+  successful: number
+  failed: number
+  results: StatusTransitionResult[]
+}> {
+  try {
+    const { data, error } = await supabase.rpc('bulk_transition_property_status', {
+      p_property_ids: propertyIds,
+      p_new_status: newStatus,
+      p_admin_id: adminId || null,
+      p_reason: reason || null
+    })
+
+    if (error) {
+      return {
+        success: false,
+        total: propertyIds.length,
+        successful: 0,
+        failed: propertyIds.length,
+        results: propertyIds.map(id => ({
+          success: false,
+          error: `Bulk operation failed: ${error.message}`,
+          propertyId: id
+        }))
+      }
+    }
+
+    const result = data as {
+      success: boolean
+      total: number
+      successful: number
+      failed: number
+      results: Array<{
+        success: boolean
+        message?: string
+        error?: string
+        property_id?: string
+        old_status?: PropertyStatus
+        new_status?: PropertyStatus
+        changed?: boolean
+        transition_id?: string
+      }>
+    }
+
+    return {
+      success: result.success,
+      total: result.total,
+      successful: result.successful,
+      failed: result.failed,
+      results: result.results.map(r => ({
+        success: r.success,
+        message: r.message,
+        error: r.error,
+        propertyId: r.property_id,
+        oldStatus: r.old_status,
+        newStatus: r.new_status,
+        changed: r.changed,
+        transitionId: r.transition_id
+      }))
+    }
+  } catch (error: any) {
+    return {
+      success: false,
+      total: propertyIds.length,
+      successful: 0,
+      failed: propertyIds.length,
+      results: propertyIds.map(id => ({
+        success: false,
+        error: `Unexpected error: ${error?.message || 'Unknown error'}`,
+        propertyId: id
+      }))
+    }
+  }
+}
+
+/**
+ * Gets the status transition history for a property
+ * Requires admin privileges
+ *
+ * @param propertyId - The property UUID
+ * @returns Array of status transition records
+ */
+export async function getPropertyStatusHistory(propertyId: string): Promise<{
+  success: boolean
+  history?: Array<{
+    id: string
+    oldStatus: string
+    newStatus: string
+    adminName?: string
+    reason?: string
+    createdAt: string
+  }>
+  error?: string
+}> {
+  try {
+    const { data, error } = await supabase.rpc('get_property_status_history', {
+      p_property_id: propertyId
+    })
+
+    if (error) {
+      return {
+        success: false,
+        error: `Failed to fetch history: ${error.message}`
+      }
+    }
+
+    const history = (data || []).map((item: any) => ({
+      id: item.id,
+      oldStatus: item.old_status,
+      newStatus: item.new_status,
+      adminName: item.admin_name,
+      reason: item.reason,
+      createdAt: item.created_at
+    }))
+
+    return {
+      success: true,
+      history
+    }
+  } catch (error: any) {
+    return {
+      success: false,
+      error: `Unexpected error: ${error?.message || 'Unknown error'}`
+    }
+  }
+}
+
+/**
+ * Legacy wrapper: Approve a property (pending -> active)
+ * Maintains backward compatibility with existing code
+ */
+export async function approvePropertyAtomic(
+  propertyId: string,
+  adminId?: string
+): Promise<StatusTransitionResult> {
+  return transitionPropertyStatus(propertyId, 'active', adminId, 'Property approved by admin')
+}
+
+/**
+ * Legacy wrapper: Reject a property (pending -> rejected or active -> rejected)
+ * Maintains backward compatibility with existing code
+ */
+export async function rejectPropertyAtomic(
+  propertyId: string,
+  reason?: string,
+  adminId?: string
+): Promise<StatusTransitionResult> {
+  return transitionPropertyStatus(
+    propertyId,
+    'rejected',
+    adminId,
+    reason || 'Property rejected by admin'
+  )
+}
+
+/**
+ * Legacy wrapper: Deactivate a property (active -> inactive)
+ * Maintains backward compatibility with existing code
+ */
+export async function deactivateProperty(
+  propertyId: string,
+  reason?: string
+): Promise<StatusTransitionResult> {
+  return transitionPropertyStatus(
+    propertyId,
+    'inactive',
+    undefined,
+    reason || 'Property deactivated'
+  )
+}
+
+/**
+ * Legacy wrapper: Reactivate a property (inactive -> active)
+ * Maintains backward compatibility with existing code
+ */
+export async function reactivateProperty(
+  propertyId: string,
+  adminId?: string
+): Promise<StatusTransitionResult> {
+  return transitionPropertyStatus(
+    propertyId,
+    'active',
+    adminId,
+    'Property reactivated'
+  )
+}

@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase-server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 import { csrfProtection } from '@/lib/csrf-server'
 import { rateLimit } from '@/lib/rate-limit'
+import { setPropertyFeatured } from '@/lib/data-service'
 
 /**
  * POST /api/admin/properties/[id]/feature
@@ -68,7 +69,7 @@ export async function POST(
     // 2. Fetch Property to verify it exists (Use Admin client)
     const { data: property, error: fetchError } = await supabaseAdmin
       .from('properties')
-      .select('id, title, featured, owner_id')
+      .select('id, title, featured, owner_id, status')
       .eq('id', params.id)
       .maybeSingle()
 
@@ -80,29 +81,57 @@ export async function POST(
       return NextResponse.json({ error: 'Property not found' }, { status: 404 })
     }
 
-    // 3. Update Property featured status (Use Admin Client to BYPASS RLS)
-    const { data, error } = await supabaseAdmin
-      .from('properties')
-      .update({
-        featured: featured,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', params.id)
-      .select()
-      .maybeSingle()
+    // 3. Use atomic featured status update
+    const featuredResult = await setPropertyFeatured(params.id, featured, authUser.id)
 
-    if (error) {
-      throw error
+    if (!featuredResult.success) {
+      // Handle specific error: only active properties can be featured
+      if (featuredResult.error?.includes('Only active properties can be featured')) {
+        return NextResponse.json(
+          { error: featuredResult.error, currentStatus: property.status },
+          { status: 400 }
+        )
+      }
+
+      // Handle idempotency
+      if (featuredResult.error?.includes('already set to')) {
+        return NextResponse.json({
+          success: true,
+          message: `Property already ${featured ? 'featured' : 'unfeatured'}`,
+          data: {
+            id: params.id,
+            title: property.title,
+            featured: featured,
+          }
+        })
+      }
+
+      return NextResponse.json(
+        { error: featuredResult.error || 'Failed to update featured status' },
+        { status: 500 }
+      )
+    }
+
+    // Fetch updated property data
+    const { data: updatedProperty, error: fetchUpdatedError } = await supabaseAdmin
+      .from('properties')
+      .select('id, title, featured')
+      .eq('id', params.id)
+      .single()
+
+    if (fetchUpdatedError) {
+      console.error('[ADMIN FEATURE] Failed to fetch updated property:', fetchUpdatedError)
     }
 
     return NextResponse.json({
       success: true,
-      data: {
-        id: data?.id,
-        title: data?.title,
-        featured: data?.featured,
+      data: updatedProperty || {
+        id: params.id,
+        title: property.title,
+        featured: featured,
       },
-      message: featured ? 'Property featured successfully' : 'Property unfeatured successfully'
+      message: featuredResult.message || (featured ? 'Property featured successfully' : 'Property unfeatured successfully'),
+      changed: featuredResult.changed
     })
   } catch (error: any) {
     console.error('[ADMIN FEATURE] Error:', error?.message || error)
