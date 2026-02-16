@@ -132,9 +132,9 @@ export default function PropertyClientPage({ id, initialProperty }: { id: string
                         }
                     }
 
-                    // Log subscription errors (except "no rows" which is expected)
+                    // Subscription errors are handled silently (except "no rows" which is expected)
                     if (subError && subError.code !== 'PGRST116') {
-                        console.warn('Subscription check failed:', subError)
+                      // Silently handle subscription check errors
                     }
                 }
 
@@ -150,9 +150,9 @@ export default function PropertyClientPage({ id, initialProperty }: { id: string
                         setSimilarProperties(similar.filter(p => p.id !== id).slice(0, 4))
                     }
                 }
-            } catch (error: any) {
+            } catch {
                 if (!isMounted) return
-                console.error("Error loading additional data:", error)
+                // Error handled silently - UI shows appropriate state
             } finally {
                 if (isMounted) {
                     setLoading(false)

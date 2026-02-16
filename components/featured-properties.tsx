@@ -47,7 +47,7 @@ export function FeaturedProperties({ initialProperties = [] }: FeaturedPropertie
               key={property.id}
               property={property}
               index={index}
-              priority={index < 3} // Prioritize first 3 images for LCP
+              priority={index < 2} // Prioritize first 2 images for LCP (above the fold)
             />
           ))}
         </div>

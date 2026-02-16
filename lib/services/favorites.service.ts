@@ -20,7 +20,7 @@ export async function getFavorites(): Promise<Property[]> {
       .order('created_at', { ascending: false })
 
     if (error) {
-      console.error('Error fetching favorites:', error)
+      // Error handled silently - return empty array
       return []
     }
 
@@ -31,8 +31,8 @@ export async function getFavorites(): Promise<Property[]> {
         return prop ? mapPropertyFromDB(prop) : null
       })
       .filter(Boolean) as Property[]
-  } catch (error) {
-    console.error('Error fetching favorites:', error)
+  } catch {
+    // Error handled silently - return empty array
     return []
   }
 }
@@ -48,13 +48,13 @@ export async function addFavorite(propertyId: string): Promise<boolean> {
         // Duplicate - already in favorites, that's fine
         return true
       }
-      console.error('Error adding favorite:', error)
+      // Error handled silently
       return false
     }
 
     return true
-  } catch (error) {
-    console.error('Error adding favorite:', error)
+  } catch {
+    // Error handled silently
     return false
   }
 }
@@ -67,13 +67,13 @@ export async function removeFavorite(propertyId: string): Promise<boolean> {
       .eq('property_id', propertyId)
 
     if (error) {
-      console.error('Error removing favorite:', error)
+      // Error handled silently
       return false
     }
 
     return true
-  } catch (error) {
-    console.error('Error removing favorite:', error)
+  } catch {
+    // Error handled silently
     return false
   }
 }
@@ -87,13 +87,13 @@ export async function checkIsFavorite(propertyId: string): Promise<boolean> {
       .maybeSingle()
 
     if (error) {
-      console.error('Error checking favorite status:', error)
+      // Error handled silently
       return false
     }
 
     return !!data
-  } catch (error) {
-    console.error('Error checking favorite status:', error)
+  } catch {
+    // Error handled silently
     return false
   }
 }

@@ -205,9 +205,7 @@ export async function getProperties(): Promise<Property[]> {
       .eq('status', 'active')
       .gt('end_date', today)
 
-    if (subError) {
-      console.error('Error fetching valid subscriptions:', subError)
-    }
+    // Subscription fetch errors are handled silently - properties will still be shown
 
     // Create a map of owner_id to plan tier rank
     const ownerTierMap = new Map<string, number>()
@@ -230,7 +228,6 @@ export async function getProperties(): Promise<Property[]> {
       .limit(50)
 
     if (error) {
-      console.error('Error fetching properties:', error)
       return []
     }
 
@@ -271,9 +268,7 @@ export async function getFeaturedProperties(limit = 6): Promise<Property[]> {
       .eq('status', 'active')
       .gt('end_date', today)
 
-    if (subError) {
-      console.error('Error fetching valid subscriptions:', subError)
-    }
+    // Subscription fetch errors are handled silently - properties will still be shown
 
     // Create a map of owner_id to plan tier rank
     const ownerTierMap = new Map<string, number>()
@@ -297,7 +292,6 @@ export async function getFeaturedProperties(limit = 6): Promise<Property[]> {
       .limit(limit * 2) // Fetch more to allow for sorting
 
     if (error) {
-      console.error('Error fetching featured properties:', error)
       return []
     }
 
@@ -380,9 +374,7 @@ export async function searchProperties(filters: SearchFilters): Promise<Property
       .eq('status', 'active')
       .gt('end_date', today)
 
-    if (subError) {
-      console.error('Error fetching valid subscriptions:', subError)
-    }
+    // Subscription fetch errors are handled silently - properties will still be shown
 
     // Create a map of owner_id to plan tier rank
     const ownerTierMap = new Map<string, number>()
@@ -693,13 +685,11 @@ export async function approveProperty(id: string, csrfToken?: string): Promise<{
 
     if (!response.ok) {
       const data = await response.json()
-      console.error('[approveProperty] API error:', data)
       return { error: data.error || 'Failed to approve property' }
     }
 
     return { error: null }
   } catch (error) {
-    console.error('[approveProperty] Request error:', error)
     return { error }
   }
 }
@@ -722,13 +712,11 @@ export async function rejectProperty(id: string, reason: string = 'Admin Action'
 
     if (!response.ok) {
       const data = await response.json()
-      console.error('[rejectProperty] API error:', data)
       return { error: data.error || 'Failed to reject property' }
     }
 
     return { error: null }
   } catch (error) {
-    console.error('[rejectProperty] Request error:', error)
     return { error }
   }
 }

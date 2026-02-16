@@ -4,15 +4,8 @@ import React, { useEffect, useState, useRef } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import Image from "next/image"
-import { LogOut, Loader2, User, Menu, Edit, ChevronDown } from "lucide-react"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+import { LogOut, Loader2, User, Menu, Edit, Home, Heart } from "lucide-react"
+import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
 import { useAuth } from "@/lib/auth-context"
 import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
@@ -98,39 +91,94 @@ function TenantDashboard() {
                 Welcome, {user?.name}
               </span>
 
-              {/* User Actions Dropdown */}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
+              {/* Mobile Navigation Sheet */}
+              <Sheet>
+                <SheetTrigger asChild>
+                  <Button variant="outline" size="sm" className="md:hidden flex-shrink-0 gap-2">
+                    <Menu className="h-4 w-4" />
+                    <span className="hidden sm:inline">Menu</span>
+                  </Button>
+                </SheetTrigger>
+                <SheetContent side="right" className="w-[300px] sm:w-[340px] p-0">
+                  <div className="flex flex-col h-full">
+                    {/* User Info Header */}
+                    <div className="p-6 border-b bg-muted/30">
+                      <p className="font-semibold text-lg">{user?.name}</p>
+                      <p className="text-sm text-muted-foreground mt-1">{user?.email}</p>
+                      <Badge variant="outline" className="mt-3">Tenant Dashboard</Badge>
+                    </div>
+
+                    {/* Navigation Links */}
+                    <nav className="flex-1 p-4 space-y-3">
+                      <Button
+                        variant="outline"
+                        className="w-full justify-start gap-3 h-12 text-base"
+                        onClick={() => setActiveTab('overview')}
+                      >
+                        <Home className="h-5 w-5" />
+                        Overview
+                      </Button>
+                      <Button
+                        variant="outline"
+                        className="w-full justify-start gap-3 h-12 text-base"
+                        onClick={() => setActiveTab('favorites')}
+                      >
+                        <Heart className="h-5 w-5" />
+                        Favorites
+                      </Button>
+
+                      <div className="my-4 border-t" />
+
+                      <Link href="/profile/tenant">
+                        <Button
+                          variant="outline"
+                          className="w-full justify-start gap-3 h-12 text-base"
+                        >
+                          <Edit className="h-5 w-5" />
+                          Edit Profile
+                        </Button>
+                      </Link>
+
+                      <div className="my-4 border-t" />
+
+                      <Button
+                        variant="ghost"
+                        onClick={logout}
+                        className="w-full justify-start gap-3 h-12 text-base text-red-600 hover:text-red-700 hover:bg-red-50"
+                      >
+                        <LogOut className="h-5 w-5" />
+                        Logout
+                      </Button>
+                    </nav>
+
+                    {/* Footer */}
+                    <div className="p-4 border-t bg-muted/30">
+                      <p className="text-xs text-muted-foreground text-center">
+                        ZeroRentals Property Search
+                      </p>
+                    </div>
+                  </div>
+                </SheetContent>
+              </Sheet>
+
+              {/* Desktop Menu Dropdown - Hidden on mobile */}
+              <div className="hidden md:flex items-center gap-2">
+                <Link href="/profile/tenant">
                   <Button variant="outline" size="sm" className="gap-2">
                     <User className="h-4 w-4" />
-                    <span className="hidden sm:inline">Menu</span>
-                    <ChevronDown className="h-3 w-3" />
+                    Profile
                   </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56">
-                  <DropdownMenuLabel>
-                    <div className="flex flex-col">
-                      <span className="font-medium">{user?.name}</span>
-                      <span className="text-xs text-muted-foreground">{user?.email}</span>
-                    </div>
-                  </DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem asChild>
-                    <Link href="/profile/tenant" className="cursor-pointer flex items-center gap-2">
-                      <Edit className="h-4 w-4" />
-                      Edit Profile
-                    </Link>
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    onClick={logout}
-                    className="cursor-pointer text-red-600 focus:text-red-600 focus:bg-red-50 flex items-center gap-2"
-                  >
-                    <LogOut className="h-4 w-4" />
-                    Logout
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+                </Link>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={logout}
+                  className="gap-2 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white hover:text-white"
+                >
+                  <LogOut className="h-4 w-4" />
+                  Logout
+                </Button>
+              </div>
             </div>
           </div>
         </div>

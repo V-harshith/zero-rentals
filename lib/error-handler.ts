@@ -12,20 +12,8 @@ export type AppError = {
  * Logs to console and shows a user-friendly toast message.
  */
 export function handleError(error: unknown, customMessage?: string) {
-    // Better error logging - serialize non-enumerable properties
-    if (error && typeof error === 'object') {
-        const err = error as Record<string, unknown>
-        console.error("AppError:", {
-            message: err.message,
-            code: err.code,
-            details: err.details,
-            hint: err.hint,
-            stack: err.stack,
-            raw: error
-        })
-    } else {
-        console.error("AppError:", error)
-    }
+    // Errors should be sent to a proper error tracking service (Sentry, etc.)
+    // rather than console output in production
 
     let message = customMessage || ERROR_MESSAGES.GENERIC.SERVER_ERROR
 

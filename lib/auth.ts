@@ -179,12 +179,19 @@ async function autoHealMissingProfile(authUser: any) {
   return newUser
 }
 
-async function fetchUserProfile(userId: string) {
+async function fetchUserProfile(userId: string, retryCount = 0): Promise<{ data: any; error: any }> {
   const { data, error } = await supabase
     .from('users')
     .select('role, name, phone, verified, status, email_verified_at')
     .eq('id', userId)
     .maybeSingle()
+
+  // Handle race condition: if no data found but this is first attempt, retry after delay
+  // This handles database replication lag after auto-heal
+  if (!data && !error && retryCount < 2) {
+    await new Promise(resolve => setTimeout(resolve, 300 * (retryCount + 1)))
+    return fetchUserProfile(userId, retryCount + 1)
+  }
 
   return { data, error }
 }
@@ -384,10 +391,22 @@ export async function signIn(email: string, password: string) {
 
   if (userError || !userData) {
     if (!userData) {
+      // Attempt to auto-heal missing profile
       userData = await autoHealMissingProfile(data.user)
+      // Retry fetching after auto-heal to ensure data is committed
+      if (userData) {
+        const { data: refetchedData } = await fetchUserProfile(data.user.id, 1)
+        if (refetchedData) {
+          userData = refetchedData
+        }
+      }
     } else {
       throw new Error('Failed to load user profile. Please try logging in again.')
     }
+  }
+
+  if (!userData) {
+    throw new Error('User profile not found. Please contact support if this issue persists.')
   }
 
   validateUserStatus(userData)

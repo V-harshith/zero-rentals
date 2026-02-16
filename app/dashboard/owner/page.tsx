@@ -159,41 +159,54 @@ function OwnerDashboard() {
                     <Menu className="h-4 w-4" />
                   </Button>
                 </SheetTrigger>
-                <SheetContent side="left" className="w-[280px]">
-                  <div className="flex flex-col gap-4 mt-8">
-                    <div className="pb-4 border-b">
-                      <p className="font-medium">{user?.name}</p>
-                      <p className="text-sm text-muted-foreground">{user?.email}</p>
+                <SheetContent side="left" className="w-[300px] sm:w-[340px] p-0">
+                  <div className="flex flex-col h-full">
+                    {/* User Info Header */}
+                    <div className="p-6 border-b bg-muted/30">
+                      <p className="font-semibold text-lg">{user?.name}</p>
+                      <p className="text-sm text-muted-foreground mt-1">{user?.email}</p>
+                      <Badge variant="outline" className="mt-3">Owner Dashboard</Badge>
                     </div>
 
-                    <Link href={ROUTES.PROFILE_OWNER} onClick={() => setMobileMenuOpen(false)}>
-                      <Button variant="outline" size="sm" className="w-full justify-start">
-                        <Edit className="h-4 w-4 mr-2" />
-                        Edit Profile
-                      </Button>
-                    </Link>
-
-                    {hasAnalytics && (
-                      <Link href="/dashboard/owner/analytics" onClick={() => setMobileMenuOpen(false)}>
-                        <Button variant="outline" size="sm" className="w-full justify-start">
-                          <TrendingUp className="h-4 w-4 mr-2" />
-                          Analytics
+                    {/* Navigation Links */}
+                    <nav className="flex-1 p-4 space-y-3">
+                      <Link href={ROUTES.PROFILE_OWNER} onClick={() => setMobileMenuOpen(false)}>
+                        <Button variant="outline" className="w-full justify-start gap-3 h-12 text-base">
+                          <Edit className="h-5 w-5" />
+                          Edit Profile
                         </Button>
                       </Link>
-                    )}
 
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setMobileMenuOpen(false)
-                        logout()
-                      }}
-                      className="w-full justify-start bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white hover:text-white"
-                    >
-                      <LogOut className="h-4 w-4 mr-2" />
-                      Logout
-                    </Button>
+                      {hasAnalytics && (
+                        <Link href="/dashboard/owner/analytics" onClick={() => setMobileMenuOpen(false)}>
+                          <Button variant="outline" className="w-full justify-start gap-3 h-12 text-base">
+                            <TrendingUp className="h-5 w-5" />
+                            Analytics
+                          </Button>
+                        </Link>
+                      )}
+
+                      <div className="my-4 border-t" />
+
+                      <Button
+                        variant="ghost"
+                        onClick={() => {
+                          setMobileMenuOpen(false)
+                          logout()
+                        }}
+                        className="w-full justify-start gap-3 h-12 text-base text-red-600 hover:text-red-700 hover:bg-red-50"
+                      >
+                        <LogOut className="h-5 w-5" />
+                        Logout
+                      </Button>
+                    </nav>
+
+                    {/* Footer */}
+                    <div className="p-4 border-t bg-muted/30">
+                      <p className="text-xs text-muted-foreground text-center">
+                        ZeroRentals Property Management
+                      </p>
+                    </div>
                   </div>
                 </SheetContent>
               </Sheet>

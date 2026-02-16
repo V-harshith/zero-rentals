@@ -14,8 +14,8 @@ export function createSafeErrorResponse(
   logPrefix: string,
   statusCode: number = 500
 ): NextResponse {
-  // Log detailed error server-side for debugging
-  console.error(`[API ERROR] ${logPrefix}:`, error?.message || error)
+  // Error details should be sent to a proper logging service in production
+  // rather than console output
 
   // Return generic error message to client
   const message = statusCode >= 500

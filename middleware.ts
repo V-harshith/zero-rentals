@@ -17,14 +17,7 @@ export async function middleware(request: NextRequest) {
   const isOwnerRoute = path.startsWith('/dashboard/owner') || path.startsWith('/property/add') || path.startsWith('/property/edit')
   const isProtectedRoute = isAdminRoute || isOwnerRoute || path.startsWith('/dashboard/tenant') || path.startsWith('/profile')
 
-  // Log auth state for debugging (sanitized - no PII)
-  if (process.env.NODE_ENV === 'development') {
-    if (user) {
-      console.log(`[MIDDLEWARE] User ${maskUserId(user.id)} accessing ${path}`)
-    } else {
-      console.log(`[MIDDLEWARE] No session for ${path}`)
-    }
-  }
+  // Auth state logging removed for production - errors handled silently
 
   // 1. Allow access to login/register pages regardless of auth state
   if (isAuthRoute) {
@@ -54,7 +47,6 @@ export async function middleware(request: NextRequest) {
       // SECURITY: Fail-closed - deny access on database errors
       // This prevents unauthorized access when database is unavailable
       if (roleError) {
-        console.error(`[MIDDLEWARE] Error fetching role for user ${maskUserId(user.id)}`)
         // Redirect to error page instead of allowing access
         return NextResponse.redirect(new URL('/login/tenant?error=database_error', request.url))
       }
@@ -72,8 +64,7 @@ export async function middleware(request: NextRequest) {
         const redirectPath = role === 'owner' ? '/dashboard/owner' : '/dashboard/admin'
         return NextResponse.redirect(new URL(redirectPath, request.url))
       }
-    } catch (error) {
-      console.error(`[MIDDLEWARE] Exception in role check for user ${maskUserId(user.id)}`)
+    } catch {
       // SECURITY: Fail-closed - deny access on exceptions
       return NextResponse.redirect(new URL('/login/tenant?error=auth_error', request.url))
     }

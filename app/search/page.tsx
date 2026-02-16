@@ -419,7 +419,7 @@ export default function SearchPage() {
                                     <PropertyCard
                                         key={property.id}
                                         property={property}
-                                        priority={index < 6} // Prioritize first 6 images for LCP
+                                        priority={index < 2} // Prioritize first 2 images for LCP (above the fold)
                                     />
                                 ))}
                             </div>

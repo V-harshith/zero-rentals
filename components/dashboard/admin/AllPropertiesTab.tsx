@@ -54,7 +54,6 @@ export function AllPropertiesTab() {
         // Add visibility change listener for auto-refresh when tab becomes visible
         const handleVisibilityChange = () => {
             if (document.visibilityState === 'visible') {
-                console.log('[ADMIN] AllPropertiesTab became visible - refreshing data')
                 fetchProperties()
             }
         }

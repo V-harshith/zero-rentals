@@ -74,7 +74,6 @@ export async function updateSession(request: NextRequest) {
   if (cached && (now - cached.timestamp) < SESSION_CACHE_TTL) {
     // Use cached session - reduces load on Supabase and prevents race conditions
     user = cached.user
-    console.log(`[MIDDLEWARE] Using cached session for user: ${user ? 'authenticated' : 'unauthenticated'}`)
   } else {
     // No cache or cache expired - fetch fresh session
     try {
@@ -83,14 +82,7 @@ export async function updateSession(request: NextRequest) {
         // If error is "Invalid Refresh Token", we treat user as null (logged out)
         // This happens when the session on server is revoked but client has old cookie
         // We don't throw, just let them be unauthenticated
-        if (error.message?.includes('Refresh Token Not Found') || error.message?.includes('Invalid Refresh Token')) {
-          console.warn(`[MIDDLEWARE] Invalid refresh token, treating as logged out: ${error.message}`)
-        } else if (error.message?.includes('session') || error.status === 403) {
-          // Session-related errors - might be race condition, log but don't spam
-          console.warn(`[MIDDLEWARE] Session error (possible race condition): ${error.message}`)
-        } else {
-          console.error(`[MIDDLEWARE] Error fetching user:`, error)
-        }
+        // Session errors are handled silently to prevent console spam
       }
       user = supabaseUser
 
@@ -107,14 +99,8 @@ export async function updateSession(request: NextRequest) {
           }
         }
       }
-    } catch (err: any) {
-      if (err?.message?.includes('Refresh Token Not Found') || err?.message?.includes('Invalid Refresh Token')) {
-        console.warn(`[MIDDLEWARE] Exception: Invalid refresh token, treating as logged out: ${err.message}`)
-      } else if (err?.message?.includes('session') || err?.status === 403) {
-        console.warn(`[MIDDLEWARE] Exception: Session error (possible race condition): ${err.message}`)
-      } else {
-        console.error(`[MIDDLEWARE] Unexpected exception fetching user:`, err)
-      }
+    } catch {
+      // Session errors are handled silently to prevent console spam
     }
   }
 

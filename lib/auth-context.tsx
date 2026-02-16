@@ -51,6 +51,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const hasInitializedRef = useRef(false)
   const pendingLoadPromiseRef = useRef<Promise<void> | null>(null)
   const lastLoadTimeRef = useRef<number>(0)
+  const loginInProgressRef = useRef(false)
   const COOLDOWN_MS = 5000 // 5-second cooldown between requests
 
   // Memoized function to load user - prevents duplicate calls with deduplication
@@ -58,13 +59,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Check cooldown to prevent rapid successive calls
     const now = Date.now()
     if (now - lastLoadTimeRef.current < COOLDOWN_MS) {
-      console.log(`[AUTH] Skipping loadUser from "${source}" - within cooldown period`)
       return
     }
 
     // Skip if already loading - return existing promise for deduplication
     if (isLoadingUserRef.current && pendingLoadPromiseRef.current) {
-      console.log(`[AUTH] Reusing pending loadUser promise from "${source}"`)
       return pendingLoadPromiseRef.current
     }
 
@@ -106,7 +105,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const safetyTimeout = setTimeout(() => {
       setIsLoading((current) => {
         if (current) {
-          console.log('[AUTH] Safety timeout reached - forcing loading state to false')
           return false
         }
         return current
@@ -132,6 +130,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Mark loading as complete once initial session check is done
         setIsLoading(false)
       } else if (event === "SIGNED_IN" && session) {
+        // Skip if we're already processing a login (prevents race condition)
+        if (loginInProgressRef.current || isLoadingUserRef.current) {
+          return
+        }
         // Small delay to let the session fully propagate
         setTimeout(() => loadUser("SIGNED_IN"), 100)
       } else if (event === "SIGNED_OUT") {
@@ -139,8 +141,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIsLoading(false)
       } else if (event === "TOKEN_REFRESHED") {
         // Session was refreshed - reload user to ensure we have latest data
-        console.log('[AUTH] Token refreshed - reloading user data')
-        await loadUser("TOKEN_REFRESHED")
+        // Skip if we're already loading to prevent race conditions
+        if (!isLoadingUserRef.current) {
+          await loadUser("TOKEN_REFRESHED")
+        }
       }
     })
 
@@ -160,7 +164,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // CRITICAL FIX: Listen for visibility changes to recover session when tab becomes active
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        console.log('[AUTH] Tab became visible - checking session recovery')
         // Only reload if we don't have a user and aren't already loading
         if (!user && !isLoadingUserRef.current) {
           loadUser("visibility-change")
@@ -179,11 +182,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [loadUser])
 
   const login = async (email: string, password: string): Promise<boolean> => {
+    // Prevent race condition with onAuthStateChange listener
+    loginInProgressRef.current = true
     setIsLoading(true)
 
     // Add timeout protection for login
     const loginTimeout = setTimeout(() => {
       setIsLoading(false)
+      loginInProgressRef.current = false
       toast.error('Login Timeout', {
         description: 'Login is taking too long. Please check your connection and try again.',
       })
@@ -195,7 +201,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearTimeout(loginTimeout) // Clear timeout on success
 
       if (!userData) {
-        throw new Error('User data not found')
+        throw new Error('User profile not found. Please try again or contact support if the issue persists.')
       }
 
       const authenticatedUser: UserWithLegacyType = {
@@ -206,8 +212,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         type: userData.role as UserType,
       }
 
+      // Set user state and mark loading complete
       setUser(authenticatedUser)
       setIsLoading(false)
+      loginInProgressRef.current = false
 
       // Redirect based on user type - all users go to their dashboard
       router.push(`/dashboard/${userData.role}`)
@@ -215,9 +223,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (error: any) {
       clearTimeout(loginTimeout) // Clear timeout on error
       setIsLoading(false)
+      loginInProgressRef.current = false
 
       // Handle specific error messages from lib/auth.ts
-      if (error.message.includes('Invalid email or password') || error.message.includes('Invalid login credentials')) {
+      if (error.message?.includes('Invalid email or password') || error.message?.includes('Invalid login credentials')) {
         toast.error('Login Failed', {
           description: 'The email or password you entered is incorrect. Please check your credentials and try again.',
           duration: 4000,
@@ -235,7 +244,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       // Handle account suspended
-      if (error.message.includes('account has been suspended')) {
+      if (error.message?.includes('account has been suspended')) {
         toast.error('Account Suspended', {
           description: error.message,
           duration: 6000,
@@ -243,32 +252,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return false
       }
 
+      // Handle profile not found (race condition during login)
+      if (error.message?.includes('profile not found') || error.message?.includes('User data not found')) {
+        toast.error('Login Issue', {
+          description: 'There was a problem loading your profile. Please try again. If the issue persists, contact support.',
+          duration: 5000,
+        })
+        return false
+      }
+
       // Handle other errors
       toast.error('Login Error', {
-        description: error.message || 'An unexpected error occurred during login. Please try again.',
+        description: error?.message || 'An unexpected error occurred during login. Please try again.',
       })
       return false
     }
   }
 
   const logout = async () => {
-    console.log('[AUTH] Logout: Starting logout process')
-
     // 1. Clear user state IMMEDIATELY (optimistic update)
     setUser(null)
 
     try {
       // 2. Sign out from Supabase in background
-      const { error } = await supabase.auth.signOut()
-      if (error) {
-        console.error('[AUTH] Logout: Supabase signOut error', error)
-      }
-    } catch (error) {
-      console.error('[AUTH] Logout: Error during logout', error)
+      await supabase.auth.signOut()
+    } catch {
+      // Error handled silently
     }
 
     // 3. Force immediate redirect (use href instead of replace for reliability)
-    console.log('[AUTH] Logout: Redirecting to home')
     window.location.href = '/'
   }
 

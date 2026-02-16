@@ -84,45 +84,55 @@ function MobileNav({ userName, onLogout }: { userName: string; onLogout: () => v
           <Menu className="h-4 w-4" />
         </Button>
       </SheetTrigger>
-      <SheetContent side="left" className="w-[280px] p-0">
+      <SheetContent side="left" className="w-[300px] sm:w-[340px] p-0">
         <div className="flex flex-col h-full">
-          {/* User Info */}
-          <div className="p-4 border-b bg-muted/50">
-            <p className="font-medium">{userName}</p>
-            <p className="text-sm text-muted-foreground">Administrator</p>
+          {/* User Info Header */}
+          <div className="p-6 border-b bg-muted/30">
+            <p className="font-semibold text-lg">{userName}</p>
+            <p className="text-sm text-muted-foreground mt-1">Administrator</p>
+            <Badge variant="outline" className="mt-3">Admin Dashboard</Badge>
           </div>
 
           {/* Navigation Links */}
-          <nav className="flex-1 p-2 space-y-1">
+          <nav className="flex-1 p-4 space-y-3">
             <Button
-              variant="ghost"
-              className="w-full justify-start gap-3"
+              variant="outline"
+              className="w-full justify-start gap-3 h-12 text-base"
               onClick={() => handleNavigate('/post-property')}
             >
-              <Plus className="h-4 w-4" />
+              <Plus className="h-5 w-5" />
               Post Property
             </Button>
             <Button
-              variant="ghost"
-              className="w-full justify-start gap-3"
+              variant="outline"
+              className="w-full justify-start gap-3 h-12 text-base"
               onClick={() => handleNavigate('/profile/admin')}
             >
-              <Users className="h-4 w-4" />
+              <Users className="h-5 w-5" />
               Profile
             </Button>
-            <div className="my-2 border-t" />
+
+            <div className="my-4 border-t" />
+
             <Button
               variant="ghost"
-              className="w-full justify-start gap-3 text-red-600 hover:text-red-700 hover:bg-red-50"
+              className="w-full justify-start gap-3 h-12 text-base text-red-600 hover:text-red-700 hover:bg-red-50"
               onClick={() => {
                 setOpen(false)
                 onLogout()
               }}
             >
-              <LogOut className="h-4 w-4" />
+              <LogOut className="h-5 w-5" />
               Logout
             </Button>
           </nav>
+
+          {/* Footer */}
+          <div className="p-4 border-t bg-muted/30">
+            <p className="text-xs text-muted-foreground text-center">
+              ZeroRentals Admin Portal
+            </p>
+          </div>
         </div>
       </SheetContent>
     </Sheet>

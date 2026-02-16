@@ -42,14 +42,14 @@ export function FavoritesProvider({ children }: { children: React.ReactNode }) {
         .eq('user_id', user.id)
 
       if (error) {
-        console.error('Error loading favorites:', error)
+        // Error handled silently - toast shown for user feedback
         return
       }
 
       const ids = new Set(data.map(f => f.property_id))
       setFavoriteIds(ids)
-    } catch (error) {
-      console.error('Error loading favorites:', error)
+    } catch {
+      // Error handled silently - toast shown for user feedback
     } finally {
       setIsLoading(false)
     }
@@ -88,21 +88,19 @@ export function FavoritesProvider({ children }: { children: React.ReactNode }) {
           return true
         }
 
-        console.error('Error adding favorite:', error)
         toast.error("Failed to add to favorites")
         return false
       }
 
       toast.success("Added to favorites")
       return true
-    } catch (error) {
+    } catch {
       // Rollback on error
       setFavoriteIds(prev => {
         const next = new Set(prev)
         next.delete(propertyId)
         return next
       })
-      console.error('Error adding favorite:', error)
       toast.error("Failed to add to favorites")
       return false
     }
@@ -128,17 +126,15 @@ export function FavoritesProvider({ children }: { children: React.ReactNode }) {
       if (error) {
         // Rollback on error
         setFavoriteIds(prev => new Set([...prev, propertyId]))
-        console.error('Error removing favorite:', error)
         toast.error("Failed to remove from favorites")
         return false
       }
 
       toast.success("Removed from favorites")
       return true
-    } catch (error) {
+    } catch {
       // Rollback on error
       setFavoriteIds(prev => new Set([...prev, propertyId]))
-      console.error('Error removing favorite:', error)
       toast.error("Failed to remove from favorites")
       return false
     }
