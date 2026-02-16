@@ -52,9 +52,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const pendingLoadPromiseRef = useRef<Promise<void> | null>(null)
   const lastLoadTimeRef = useRef<number>(0)
   const loginInProgressRef = useRef(false)
+  const currentUserRef = useRef<User | null>(null) // Track current user without closure issues
   const COOLDOWN_MS = 5000 // 5-second cooldown between requests
 
   // Memoized function to load user - prevents duplicate calls with deduplication
+  // DEPENDENCY: user - must include to prevent stale closure
   const loadUser = useCallback(async (source: string) => {
     // Check cooldown to prevent rapid successive calls
     const now = Date.now()
@@ -74,17 +76,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const currentUser = await getCurrentUser()
         if (currentUser) {
-          setUser({
+          const userWithRole = {
             ...currentUser,
             role: currentUser.role as UserType,
             type: currentUser.role as UserType,
-          } as UserWithLegacyType)
+          } as UserWithLegacyType
+          setUser(userWithRole)
+          currentUserRef.current = userWithRole // Update ref for closure-free access
           initializeSessionManagement()
         } else {
           setUser(null)
+          currentUserRef.current = null
         }
       } catch {
         setUser(null)
+        currentUserRef.current = null
       } finally {
         isLoadingUserRef.current = false
         pendingLoadPromiseRef.current = null
@@ -93,7 +99,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     pendingLoadPromiseRef.current = loadPromise
     return loadPromise
-  }, [])
+  }, [user])
 
   // Load user on mount and listen for auth changes
   useEffect(() => {
@@ -123,21 +129,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === "INITIAL_SESSION") {
-        // Session restored from cookies - load user if we haven't already
-        if (session && !user) {
+        // Session restored from cookies - always load user on initial session
+        // The loadUser function has deduplication to prevent duplicate calls
+        if (session) {
           await loadUser("INITIAL_SESSION")
         }
         // Mark loading as complete once initial session check is done
         setIsLoading(false)
       } else if (event === "SIGNED_IN" && session) {
-        // Skip if we're already processing a login (prevents race condition)
-        if (loginInProgressRef.current || isLoadingUserRef.current) {
+        // Skip if we're already processing a login via the login() function
+        // This prevents race condition where both login() and this listener try to set user
+        if (loginInProgressRef.current) {
           return
         }
         // Small delay to let the session fully propagate
         setTimeout(() => loadUser("SIGNED_IN"), 100)
       } else if (event === "SIGNED_OUT") {
         setUser(null)
+        currentUserRef.current = null
         setIsLoading(false)
       } else if (event === "TOKEN_REFRESHED") {
         // Session was refreshed - reload user to ensure we have latest data
@@ -153,6 +162,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (e.key === 'supabase.auth.token') {
         if (!e.newValue) {
           setUser(null)
+          currentUserRef.current = null
         } else {
           loadUser("cross-tab")
         }
@@ -165,7 +175,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         // Only reload if we don't have a user and aren't already loading
-        if (!user && !isLoadingUserRef.current) {
+        // Use ref to avoid stale closure issues
+        if (!currentUserRef.current && !isLoadingUserRef.current) {
           loadUser("visibility-change")
         }
       }
@@ -214,6 +225,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       // Set user state and mark loading complete
       setUser(authenticatedUser)
+      currentUserRef.current = authenticatedUser // Update ref for closure-free access
       setIsLoading(false)
       loginInProgressRef.current = false
 
@@ -272,6 +284,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = async () => {
     // 1. Clear user state IMMEDIATELY (optimistic update)
     setUser(null)
+    currentUserRef.current = null // Clear ref to prevent stale user detection
 
     try {
       // 2. Sign out from Supabase in background
