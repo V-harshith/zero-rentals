@@ -84,8 +84,12 @@ export function FavoritesProvider({ children }: { children: React.ReactNode }) {
       return existingRequest
     }
 
-    // Optimistic update
-    setFavoriteIds(prev => new Set([...prev, propertyId]))
+    // Store previous state for potential rollback
+    let previousState: Set<string> | null = null
+    setFavoriteIds(prev => {
+      previousState = new Set(prev)
+      return new Set([...prev, propertyId])
+    })
 
     // Create the request and track it
     const request = (async () => {
@@ -95,39 +99,43 @@ export function FavoritesProvider({ children }: { children: React.ReactNode }) {
           .insert([{ user_id: user.id, property_id: propertyId }])
 
         if (error) {
-          // Rollback on error
-          if (isMounted.current) {
-            setFavoriteIds(prev => {
-              const next = new Set(prev)
-              next.delete(propertyId)
-              return next
-            })
-          }
-
+          // Handle duplicate key error - property already in favorites
           if (error.code === '23505') {
-            // Duplicate - already in favorites, that's fine
+            // Already in favorites, ensure UI reflects this
             if (isMounted.current) {
               setFavoriteIds(prev => new Set([...prev, propertyId]))
             }
             return true
           }
 
-          toast.error("Failed to add to favorites")
+          // Rollback to previous state on error
+          if (isMounted.current && previousState) {
+            setFavoriteIds(previousState)
+          }
+
+          // Handle auth errors specifically
+          if (error.code === '401' || error.code === '403') {
+            toast.error("Session expired. Please login again")
+          } else {
+            toast.error("Failed to add to favorites")
+          }
           return false
         }
 
         toast.success("Added to favorites")
         return true
-      } catch {
-        // Rollback on error
-        if (isMounted.current) {
-          setFavoriteIds(prev => {
-            const next = new Set(prev)
-            next.delete(propertyId)
-            return next
-          })
+      } catch (error) {
+        // Rollback to previous state on network or unexpected errors
+        if (isMounted.current && previousState) {
+          setFavoriteIds(previousState)
         }
-        toast.error("Failed to add to favorites")
+
+        // Provide specific error messages based on error type
+        if (error instanceof TypeError && error.message.includes('fetch')) {
+          toast.error("Network error. Please check your connection")
+        } else {
+          toast.error("Failed to add to favorites")
+        }
         return false
       } finally {
         // Clean up in-flight tracking
@@ -148,8 +156,10 @@ export function FavoritesProvider({ children }: { children: React.ReactNode }) {
       return existingRequest
     }
 
-    // Optimistic update
+    // Store previous state for potential rollback
+    let previousState: Set<string> | null = null
     setFavoriteIds(prev => {
+      previousState = new Set(prev)
       const next = new Set(prev)
       next.delete(propertyId)
       return next
@@ -165,22 +175,34 @@ export function FavoritesProvider({ children }: { children: React.ReactNode }) {
           .eq('property_id', propertyId)
 
         if (error) {
-          // Rollback on error
-          if (isMounted.current) {
-            setFavoriteIds(prev => new Set([...prev, propertyId]))
+          // Rollback to previous state on error
+          if (isMounted.current && previousState) {
+            setFavoriteIds(previousState)
           }
-          toast.error("Failed to remove from favorites")
+
+          // Handle auth errors specifically
+          if (error.code === '401' || error.code === '403') {
+            toast.error("Session expired. Please login again")
+          } else {
+            toast.error("Failed to remove from favorites")
+          }
           return false
         }
 
         toast.success("Removed from favorites")
         return true
-      } catch {
-        // Rollback on error
-        if (isMounted.current) {
-          setFavoriteIds(prev => new Set([...prev, propertyId]))
+      } catch (error) {
+        // Rollback to previous state on network or unexpected errors
+        if (isMounted.current && previousState) {
+          setFavoriteIds(previousState)
         }
-        toast.error("Failed to remove from favorites")
+
+        // Provide specific error messages based on error type
+        if (error instanceof TypeError && error.message.includes('fetch')) {
+          toast.error("Network error. Please check your connection")
+        } else {
+          toast.error("Failed to remove from favorites")
+        }
         return false
       } finally {
         // Clean up in-flight tracking

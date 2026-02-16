@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
@@ -23,6 +23,21 @@ import { PricingStep } from "@/components/post-property/PricingStep"
 import { RulesStep } from "@/components/post-property/RulesStep"
 import { MediaStep } from "@/components/post-property/MediaStep"
 import { type FormData, type RoomData } from "@/components/post-property/types"
+
+// Image processing types
+interface ImageProcessingItem {
+  id: string
+  file: File
+  status: 'pending' | 'compressing' | 'completed' | 'error'
+  error?: string
+  compressedFile?: File
+}
+
+interface ImageProcessingState {
+  isProcessing: boolean
+  queue: ImageProcessingItem[]
+  currentIndex: number
+}
 
 const INITIAL_DATA: FormData = {
   propertyType: 'PG',
@@ -136,6 +151,15 @@ function PostPropertyPage() {
   // Track created property for rollback on failure
   const createdPropertyRef = useRef<{ id: string } | null>(null)
 
+  // Image processing queue state
+  const imageProcessingRef = useRef<ImageProcessingState>({
+    isProcessing: false,
+    queue: [],
+    currentIndex: 0
+  })
+  const abortControllerRef = useRef<AbortController | null>(null)
+  const [processingImageIds, setProcessingImageIds] = useState<Set<string>>(new Set())
+
   // Form draft persistence key
   const DRAFT_KEY = isEditMode ? `property-draft-edit-${editPropertyId}` : 'property-draft-new'
 
@@ -230,10 +254,14 @@ function PostPropertyPage() {
     localStorage.removeItem(DRAFT_KEY)
   }
 
-  // Cleanup scripts on unmount
+  // Cleanup scripts and image processing on unmount
   useEffect(() => {
     return () => {
       cleanupScripts();
+      // Cancel any in-flight image processing
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
     };
   }, []);
 
@@ -488,60 +516,252 @@ function PostPropertyPage() {
     updateRoomData(roomType, "amenities", newAmenities)
   }
 
-  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      const newFiles = Array.from(e.target.files)
-
-      // 🔥 CRITICAL FIX: Validate file size and format
-      const MAX_FILE_SIZE = 5 * 1024 * 1024 // 5MB
-      const ALLOWED_FORMATS = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
-
-      const invalidFiles: string[] = []
-      const validFiles: File[] = []
-
-      newFiles.forEach(file => {
-        // Check file size
-        if (file.size > MAX_FILE_SIZE) {
-          invalidFiles.push(`${file.name} (too large - max 5MB)`)
-          return
-        }
-
-        // Check file format
-        if (!ALLOWED_FORMATS.includes(file.type)) {
-          invalidFiles.push(`${file.name} (invalid format - use JPG, PNG, or WebP)`)
-          return
-        }
-
-        validFiles.push(file)
-      })
-
-      // Show errors for invalid files
-      if (invalidFiles.length > 0) {
-        toast.error(
-          `Invalid files:\n${invalidFiles.join('\n')}`,
-          { duration: 5000 }
-        )
-      }
-
-      // Check total count limit
-      if (formData.images.length + validFiles.length > maxPhotos) {
-        toast.error(`Your plan allows a maximum of ${maxPhotos} images`)
+  // Compress image with cancellation support
+  const compressImage = useCallback(async (
+    file: File,
+    signal: AbortSignal
+  ): Promise<File> => {
+    return new Promise((resolve, reject) => {
+      if (signal.aborted) {
+        reject(new Error('Image processing cancelled'))
         return
       }
 
-      // Add valid files
-      if (validFiles.length > 0) {
-        setFormData(prev => ({
-          ...prev,
-          images: [...prev.images, ...validFiles]
-        }))
-
-        if (validFiles.length > 0) {
-          toast.success(`${validFiles.length} image(s) added successfully`)
-        }
+      // Skip compression for small images
+      if (file.size <= 2 * 1024 * 1024) {
+        resolve(file)
+        return
       }
+
+      const img = new Image()
+      const url = URL.createObjectURL(file)
+
+      const cleanup = () => {
+        URL.revokeObjectURL(url)
+      }
+
+      const handleAbort = () => {
+        cleanup()
+        reject(new Error('Image processing cancelled'))
+      }
+
+      signal.addEventListener('abort', handleAbort)
+
+      img.onload = () => {
+        if (signal.aborted) {
+          handleAbort()
+          return
+        }
+
+        const canvas = document.createElement('canvas')
+        const ctx = canvas.getContext('2d')
+        if (!ctx) {
+          signal.removeEventListener('abort', handleAbort)
+          cleanup()
+          reject(new Error('Could not create canvas context'))
+          return
+        }
+
+        // Calculate new dimensions (max 1920px on longest side)
+        let { width, height } = img
+        const maxDimension = 1920
+        if (width > maxDimension || height > maxDimension) {
+          if (width > height) {
+            height = Math.round((height * maxDimension) / width)
+            width = maxDimension
+          } else {
+            width = Math.round((width * maxDimension) / height)
+            height = maxDimension
+          }
+        }
+
+        canvas.width = width
+        canvas.height = height
+        ctx.drawImage(img, 0, 0, width, height)
+
+        canvas.toBlob(
+          (blob) => {
+            signal.removeEventListener('abort', handleAbort)
+            cleanup()
+
+            if (signal.aborted) {
+              reject(new Error('Image processing cancelled'))
+              return
+            }
+
+            if (blob) {
+              const compressedFile = new File([blob], file.name, {
+                type: file.type,
+                lastModified: file.lastModified
+              })
+              resolve(compressedFile)
+            } else {
+              reject(new Error('Compression failed'))
+            }
+          },
+          file.type,
+          0.85 // Quality
+        )
+      }
+
+      img.onerror = () => {
+        signal.removeEventListener('abort', handleAbort)
+        cleanup()
+        reject(new Error('Failed to load image'))
+      }
+
+      img.src = url
+    })
+  }, [])
+
+  // Process image queue
+  const processImageQueue = useCallback(async () => {
+    const state = imageProcessingRef.current
+
+    if (state.isProcessing || state.currentIndex >= state.queue.length) {
+      return
     }
-  }
+
+    state.isProcessing = true
+    setProcessingImageIds(new Set(state.queue.map(item => item.id)))
+
+    // Create new abort controller for this batch
+    abortControllerRef.current = new AbortController()
+    const { signal } = abortControllerRef.current
+
+    try {
+      while (state.currentIndex < state.queue.length && !signal.aborted) {
+        const item = state.queue[state.currentIndex]
+
+        // Update status to compressing
+        item.status = 'compressing'
+        setProcessingImageIds(prev => new Set(prev).add(item.id))
+
+        try {
+          // Compress the image
+          const compressedFile = await compressImage(item.file, signal)
+
+          if (signal.aborted) {
+            throw new Error('Image processing cancelled')
+          }
+
+          item.compressedFile = compressedFile
+          item.status = 'completed'
+
+          // Add to form data immediately after compression
+          setFormData(prev => ({
+            ...prev,
+            images: [...prev.images, compressedFile]
+          }))
+
+          // Remove from processing set
+          setProcessingImageIds(prev => {
+            const next = new Set(prev)
+            next.delete(item.id)
+            return next
+          })
+        } catch (error: any) {
+          if (error.message === 'Image processing cancelled') {
+            throw error
+          }
+          item.status = 'error'
+          item.error = error.message
+          setProcessingImageIds(prev => {
+            const next = new Set(prev)
+            next.delete(item.id)
+            return next
+          })
+          toast.error(`Failed to process ${item.file.name}: ${error.message}`)
+        }
+
+        state.currentIndex++
+      }
+
+      // Show success toast for completed batch
+      const completedCount = state.queue.filter(i => i.status === 'completed').length
+      if (completedCount > 0 && !signal.aborted) {
+        toast.success(`${completedCount} image(s) added successfully`)
+      }
+    } catch (error: any) {
+      if (error.message !== 'Image processing cancelled') {
+        console.error('Image processing error:', error)
+      }
+    } finally {
+      state.isProcessing = false
+      setProcessingImageIds(new Set())
+
+      // Clear processed items from queue
+      state.queue = state.queue.filter(item => item.status === 'pending' || item.status === 'compressing')
+      state.currentIndex = 0
+
+      // Reset abort controller
+      abortControllerRef.current = null
+    }
+  }, [compressImage])
+
+  const handleImageSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0) return
+
+    const newFiles = Array.from(e.target.files)
+
+    // Validate file size and format
+    const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB (server limit)
+    const ALLOWED_FORMATS = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
+
+    const invalidFiles: string[] = []
+    const validFiles: File[] = []
+
+    newFiles.forEach(file => {
+      // Check file size
+      if (file.size > MAX_FILE_SIZE) {
+        invalidFiles.push(`${file.name} (too large - max 10MB)`)
+        return
+      }
+
+      // Check file format
+      if (!ALLOWED_FORMATS.includes(file.type)) {
+        invalidFiles.push(`${file.name} (invalid format - use JPG, PNG, or WebP)`)
+        return
+      }
+
+      validFiles.push(file)
+    })
+
+    // Show errors for invalid files
+    if (invalidFiles.length > 0) {
+      toast.error(
+        `Invalid files:\n${invalidFiles.join('\n')}`,
+        { duration: 5000 }
+      )
+    }
+
+    // Check total count limit
+    const currentImageCount = formData.images.length + imageProcessingRef.current.queue.length
+    if (currentImageCount + validFiles.length > maxPhotos) {
+      toast.error(`Your plan allows a maximum of ${maxPhotos} images`)
+      return
+    }
+
+    // Add valid files to processing queue
+    if (validFiles.length > 0) {
+      const newItems: ImageProcessingItem[] = validFiles.map(file => ({
+        id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        file,
+        status: 'pending'
+      }))
+
+      imageProcessingRef.current.queue.push(...newItems)
+
+      // Start processing
+      processImageQueue()
+    }
+
+    // Reset input to allow selecting same files again
+    e.target.value = ''
+  }, [formData.images.length, maxPhotos, processImageQueue])
+
+  // Check if image processing is active
+  const isImageProcessing = imageProcessingRef.current.isProcessing
 
   const removeImage = (index: number) => {
     setFormData(prev => ({
@@ -1285,6 +1505,8 @@ function PostPropertyPage() {
                 removeExistingImage={(index) => {
                   setExistingImages(prev => prev.filter((_, i) => i !== index))
                 }}
+                isProcessing={isImageProcessing}
+                processingCount={processingImageIds.size}
               />
             )}
 

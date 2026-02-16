@@ -2,6 +2,179 @@ import { NextRequest, NextResponse } from 'next/server'
 import { validateWebhookSignature } from '@/lib/payment-service'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 
+// Event sequence numbers for ordering (higher = more recent)
+const EVENT_SEQUENCE: Record<string, number> = {
+    'subscription.created': 1,
+    'subscription.updated': 2,
+    'subscription.charged': 3,
+    'subscription.cancelled': 4,
+    'order.paid': 5,
+    'payment.captured': 6,
+    'payment.failed': 6,
+    'invoice.paid': 7,
+    'invoice.failed': 7
+}
+
+interface WebhookEventRecord {
+    id: string
+    event_id: string
+    event_type: string
+    status: 'pending' | 'processing' | 'completed' | 'failed'
+    sequence_number: number
+    entity_id: string | null
+    created_at: string
+    processed_at: string | null
+}
+
+/**
+ * Extract entity ID from webhook payload for sequencing
+ * This identifies which subscription/order the event belongs to
+ */
+function getEntityId(event: { event: string; payload: Record<string, { entity: { id: string; subscription_id?: string } }> }): string | null {
+    const payload = event.payload
+
+    // Try to extract entity ID based on event type
+    if (payload.subscription?.entity) {
+        return payload.subscription.entity.id
+    }
+    if (payload.order?.entity) {
+        return payload.order.entity.id
+    }
+    if (payload.payment?.entity) {
+        return payload.payment.entity.subscription_id || payload.payment.entity.id
+    }
+    if (payload.invoice?.entity) {
+        return payload.invoice.entity.subscription_id || payload.invoice.entity.id
+    }
+
+    return null
+}
+
+/**
+ * Check if event should be processed now or queued for later
+ * Returns true if this event can be processed, false if it should be queued
+ */
+async function shouldProcessEvent(
+    eventType: string,
+    entityId: string | null,
+    sequenceNumber: number
+): Promise<{ shouldProcess: boolean; pendingEvents: WebhookEventRecord[] }> {
+    if (!entityId) {
+        // No entity ID, process immediately (can't sequence)
+        return { shouldProcess: true, pendingEvents: [] }
+    }
+
+    // Check for any pending events for this entity with lower sequence numbers
+    const { data: pendingEvents, error } = await supabaseAdmin
+        .from('webhook_events')
+        .select('id, event_id, event_type, status, sequence_number, entity_id, created_at, processed_at')
+        .eq('entity_id', entityId)
+        .lt('sequence_number', sequenceNumber)
+        .in('status', ['pending', 'processing', 'failed'])
+        .order('sequence_number', { ascending: true })
+
+    if (error) {
+        console.error('Error checking pending events:', error)
+        // On error, allow processing to avoid getting stuck
+        return { shouldProcess: true, pendingEvents: [] }
+    }
+
+    // If there are pending events with lower sequence numbers, queue this one
+    if (pendingEvents && pendingEvents.length > 0) {
+        return { shouldProcess: false, pendingEvents }
+    }
+
+    return { shouldProcess: true, pendingEvents: [] }
+}
+
+/**
+ * Process any queued events that can now be processed
+ * Called after completing an event
+ */
+async function processQueuedEvents(entityId: string | null): Promise<void> {
+    if (!entityId) return
+
+    // Find queued events for this entity ordered by sequence
+    const { data: queuedEvents, error } = await supabaseAdmin
+        .from('webhook_events')
+        .select('id, event_id, event_type, payload, sequence_number')
+        .eq('entity_id', entityId)
+        .eq('status', 'pending')
+        .order('sequence_number', { ascending: true })
+
+    if (error || !queuedEvents || queuedEvents.length === 0) {
+        return
+    }
+
+    // Process each queued event in order
+    for (const queuedEvent of queuedEvents) {
+        // Check if prerequisites are now met
+        const { shouldProcess } = await shouldProcessEvent(
+            queuedEvent.event_type,
+            entityId,
+            queuedEvent.sequence_number
+        )
+
+        if (shouldProcess) {
+            console.log('Processing queued event:', queuedEvent.event_id)
+
+            // Update status to processing
+            await supabaseAdmin
+                .from('webhook_events')
+                .update({ status: 'processing' })
+                .eq('event_id', queuedEvent.event_id)
+
+            try {
+                // Process the event based on type
+                await processEventByType(queuedEvent.event_type, queuedEvent.payload)
+
+                // Mark as completed
+                await supabaseAdmin
+                    .from('webhook_events')
+                    .update({
+                        status: 'completed',
+                        processed_at: new Date().toISOString()
+                    })
+                    .eq('event_id', queuedEvent.event_id)
+            } catch (error) {
+                // Mark as failed
+                await supabaseAdmin
+                    .from('webhook_events')
+                    .update({
+                        status: 'failed',
+                        error: (error as Error).message,
+                        processed_at: new Date().toISOString()
+                    })
+                    .eq('event_id', queuedEvent.event_id)
+
+                // Stop processing queue on error to maintain order
+                break
+            }
+        } else {
+            // Still can't process this one, stop here
+            break
+        }
+    }
+}
+
+/**
+ * Process event based on its type
+ */
+async function processEventByType(eventType: string, payload: { payload: { order: { entity: { notes: { userId: string; planName: string; duration: string }; amount: number; id: string } } } }): Promise<void> {
+    if (eventType === 'order.paid') {
+        const order = payload.payload.order.entity
+        const notes = order.notes
+        await fulfillSubscription(
+            notes.userId,
+            notes.planName,
+            notes.duration,
+            order.amount / 100,
+            order.id
+        )
+    }
+    // Add other event types as needed
+}
+
 export async function POST(req: NextRequest) {
     const body = await req.text()
     const signature = req.headers.get('x-razorpay-signature')
@@ -28,13 +201,16 @@ export async function POST(req: NextRequest) {
     }
 
     const event = JSON.parse(body)
+    const eventType = event.event as string
+    const entityId = getEntityId(event)
+    const sequenceNumber = EVENT_SEQUENCE[eventType] || 999
 
     // 🔥 CRITICAL: Idempotency check using Razorpay's event ID
     // Store processed event IDs to prevent duplicate processing
     if (idempotencyKey) {
         const { data: existingEvent, error: checkError } = await supabaseAdmin
             .from('webhook_events')
-            .select('id, processed_at')
+            .select('id, processed_at, status')
             .eq('event_id', idempotencyKey)
             .maybeSingle()
 
@@ -47,7 +223,44 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({
                 received: true,
                 idempotent: true,
-                processed_at: existingEvent.processed_at
+                processed_at: existingEvent.processed_at,
+                status: existingEvent.status
+            })
+        }
+
+        // Check event sequencing - should we process now or queue?
+        const { shouldProcess, pendingEvents } = await shouldProcessEvent(
+            eventType,
+            entityId,
+            sequenceNumber
+        )
+
+        if (!shouldProcess) {
+            console.log('Queuing out-of-order event:', idempotencyKey, 'type:', eventType,
+                'pending:', pendingEvents.map(e => e.event_type).join(', '))
+
+            // Store as pending (queued for later)
+            const { error: insertError } = await supabaseAdmin
+                .from('webhook_events')
+                .insert({
+                    event_id: idempotencyKey,
+                    event_type: eventType,
+                    payload: event,
+                    status: 'pending',
+                    sequence_number: sequenceNumber,
+                    entity_id: entityId,
+                    created_at: new Date().toISOString()
+                })
+
+            if (insertError) {
+                console.error('Failed to queue webhook event:', insertError)
+            }
+
+            return NextResponse.json({
+                received: true,
+                queued: true,
+                reason: 'out_of_order',
+                pending_events: pendingEvents.length
             })
         }
 
@@ -56,9 +269,11 @@ export async function POST(req: NextRequest) {
             .from('webhook_events')
             .insert({
                 event_id: idempotencyKey,
-                event_type: event.event,
+                event_type: eventType,
                 payload: event,
                 status: 'processing',
+                sequence_number: sequenceNumber,
+                entity_id: entityId,
                 created_at: new Date().toISOString()
             })
 
@@ -85,7 +300,7 @@ export async function POST(req: NextRequest) {
 
     try {
         // Handle order.paid event
-        if (event.event === 'order.paid') {
+        if (eventType === 'order.paid') {
             const order = event.payload.order.entity
             const notes = order.notes
             const userId = notes.userId
@@ -107,6 +322,9 @@ export async function POST(req: NextRequest) {
                 })
                 .eq('event_id', idempotencyKey)
         }
+
+        // Process any queued events that can now proceed
+        await processQueuedEvents(entityId)
 
         return NextResponse.json({ received: true, processed: true })
     } catch (error) {

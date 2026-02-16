@@ -201,7 +201,7 @@ function AdminDashboard() {
   }, [])
 
   useEffect(() => {
-    // Initial load
+    // Initial load - sequential to avoid overwhelming the API
     const initDashboard = async () => {
       // CRITICAL: Only fetch data when user is confirmed loaded
       if (!user) {
@@ -209,11 +209,10 @@ function AdminDashboard() {
       }
 
       try {
-        // Run critical fetches in parallel
-        await Promise.all([
-          loadPendingProperties(),
-          loadTotalStats(),
-        ])
+        // Load critical data first (pending properties)
+        await loadPendingProperties()
+        // Then load stats (less critical)
+        await loadTotalStats()
       } catch {
         // Error handled silently - toast shown by individual loaders
       }

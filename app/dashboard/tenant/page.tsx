@@ -31,6 +31,9 @@ function TenantDashboard() {
   const hasLoaded = useRef(false)
   const isMounted = useRef(true)
 
+  // Ref to track in-flight requests for deduplication (synchronous check)
+  const loadingPropertiesRef = useRef(false)
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -56,10 +59,13 @@ function TenantDashboard() {
     hasLoaded.current = true
 
     async function fetchData() {
-      if (!user) {
+      // Prevent duplicate concurrent requests using ref (synchronous check)
+      if (loadingPropertiesRef.current || !user) {
         if (isMounted.current) setLoading(false)
         return
       }
+
+      loadingPropertiesRef.current = true
 
       try {
         if (isMounted.current) setLoading(true)
@@ -68,6 +74,7 @@ function TenantDashboard() {
       } catch {
         if (isMounted.current) toast.error("Failed to load dashboard data")
       } finally {
+        loadingPropertiesRef.current = false
         if (isMounted.current) setLoading(false)
       }
     }

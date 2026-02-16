@@ -1,7 +1,7 @@
 "use client"
 
 import { Label } from "@/components/ui/label"
-import { ImagePlus, X } from "lucide-react"
+import { ImagePlus, X, Loader2 } from "lucide-react"
 import type { FormData } from "./types"
 import { memo, useEffect, useRef } from "react"
 
@@ -15,6 +15,9 @@ interface MediaStepProps {
     isEditMode?: boolean
     existingImages?: string[]
     removeExistingImage?: (index: number) => void
+    // Image processing props
+    isProcessing?: boolean
+    processingCount?: number
 }
 
 const MediaStepComponent = ({
@@ -25,7 +28,9 @@ const MediaStepComponent = ({
     maxPhotos,
     isEditMode = false,
     existingImages = [],
-    removeExistingImage
+    removeExistingImage,
+    isProcessing = false,
+    processingCount = 0
 }: MediaStepProps) => {
     const updateField = (field: keyof FormData, value: string) => {
         setFormData({ ...formData, [field]: value })
@@ -113,24 +118,42 @@ const MediaStepComponent = ({
                 )}
 
                 {/* Upload Area */}
-                <div className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:bg-gray-50 transition-colors relative cursor-pointer group">
+                <div className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors relative group ${
+                    isProcessing
+                        ? 'border-blue-300 bg-blue-50/50 cursor-wait'
+                        : 'border-gray-300 hover:bg-gray-50 cursor-pointer'
+                }`}>
                     <input
                         type="file"
                         multiple
                         accept="image/png, image/jpeg, image/jpg, image/webp"
                         onChange={handleImageSelect}
-                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                        disabled={totalImages >= maxPhotos}
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10 disabled:cursor-wait"
+                        disabled={totalImages >= maxPhotos || isProcessing}
                     />
                     <div className="flex flex-col items-center gap-3">
-                        <div className="bg-blue-50 p-4 rounded-full group-hover:bg-blue-100 transition-colors">
-                            <ImagePlus className="h-8 w-8 text-blue-600" />
+                        <div className={`p-4 rounded-full transition-colors ${
+                            isProcessing ? 'bg-blue-100' : 'bg-blue-50 group-hover:bg-blue-100'
+                        }`}>
+                            {isProcessing ? (
+                                <Loader2 className="h-8 w-8 text-blue-600 animate-spin" />
+                            ) : (
+                                <ImagePlus className="h-8 w-8 text-blue-600" />
+                            )}
                         </div>
                         <div>
                             <p className="font-semibold text-lg">
-                                {isEditMode ? 'Click to add more photos' : 'Click to upload photos'}
+                                {isProcessing
+                                    ? `Processing ${processingCount} image${processingCount !== 1 ? 's' : ''}...`
+                                    : isEditMode
+                                        ? 'Click to add more photos'
+                                        : 'Click to upload photos'}
                             </p>
-                            <p className="text-sm text-muted-foreground">or drag and drop here</p>
+                            <p className="text-sm text-muted-foreground">
+                                {isProcessing
+                                    ? 'Please wait while we compress your images'
+                                    : 'or drag and drop here'}
+                            </p>
                         </div>
                     </div>
                 </div>

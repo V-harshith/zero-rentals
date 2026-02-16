@@ -48,6 +48,10 @@ function OwnerDashboard() {
   const [loading, setLoading] = useState(true)
   const isMounted = useRef(true)
 
+  // Refs to track in-flight requests for deduplication (synchronous check)
+  const loadingPropertiesRef = useRef(false)
+  const loadingSubscriptionRef = useRef(false)
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -55,22 +59,39 @@ function OwnerDashboard() {
     }
   }, [])
 
-  // Fetch data on mount
+  // Fetch data on mount - sequential loading to avoid overwhelming API
   useEffect(() => {
     // CRITICAL: Only fetch data when user is confirmed loaded
     if (!user) {
-
       return
     }
 
+    // Sequential loading to prevent race conditions and API overload
+    const loadData = async () => {
+      setLoading(true)
+      try {
+        // Load properties first (critical data)
+        await fetchOwnerData()
+        // Then load subscription (secondary data)
+        await checkSubscription()
+      } catch {
+        // Errors handled by individual fetch functions
+      } finally {
+        if (isMounted.current) {
+          setLoading(false)
+        }
+      }
+    }
 
-    fetchOwnerData()
-    checkSubscription()
+    loadData()
   }, [user])
 
   // Fetch owner's properties and calculate stats
   const fetchOwnerData = async () => {
-    if (!user) return
+    // Prevent duplicate concurrent requests using ref (synchronous check)
+    if (loadingPropertiesRef.current || !user) return
+
+    loadingPropertiesRef.current = true
 
     try {
       const { data: propertiesData, error } = await supabase
@@ -92,15 +113,16 @@ function OwnerDashboard() {
         handleError(error, "Failed to load dashboard data")
       }
     } finally {
-      if (isMounted.current) {
-        setLoading(false)
-      }
+      loadingPropertiesRef.current = false
     }
   }
 
   // Check subscription status
   async function checkSubscription() {
-    if (!user) return
+    // Prevent duplicate concurrent requests using ref (synchronous check)
+    if (loadingSubscriptionRef.current || !user) return
+
+    loadingSubscriptionRef.current = true
 
     try {
       const [features, { data: sub }] = await Promise.all([
@@ -125,6 +147,8 @@ function OwnerDashboard() {
         console.error('Failed to check subscription:', error)
         toast.error('Unable to load subscription status. Please refresh.')
       }
+    } finally {
+      loadingSubscriptionRef.current = false
     }
   }
 
