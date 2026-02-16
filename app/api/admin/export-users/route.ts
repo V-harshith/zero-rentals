@@ -138,18 +138,22 @@ function convertToCSV(data: Record<string, unknown>[]): string {
   if (!data || data.length === 0) return ''
 
   const headers = ['ID', 'Name', 'Email', 'Phone', 'Role', 'Status', 'Verified', 'Preferred City', 'Preferred Area', 'Created At']
-  const rows = data.map(user => [
-    user.id,
-    user.name,
-    user.email,
-    user.phone || '',
-    user.role,
-    user.status,
-    user.verified ? 'Yes' : 'No',
-    user.preferred_city || '',
-    user.preferred_area || '',
-    user.created_at ? new Date(String(user.created_at)).toLocaleDateString() : '',
-  ])
+  const rows = data.map(user => {
+    // Verified if BOTH verified flag is true AND email_verified_at is set
+    const isVerified = user.verified === true && user.email_verified_at != null
+    return [
+      user.id,
+      user.name,
+      user.email,
+      user.phone || '',
+      user.role,
+      user.status,
+      isVerified ? 'Yes' : 'No',
+      user.preferred_city || '',
+      user.preferred_area || '',
+      user.created_at ? new Date(String(user.created_at)).toLocaleDateString() : '',
+    ]
+  })
 
   const csvContent = [
     headers.join(','),

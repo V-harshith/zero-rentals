@@ -298,7 +298,8 @@ export async function POST(request: NextRequest) {
                                                         name: ownerName,
                                                         phone: ownerPhone,
                                                         role: 'owner',
-                                                        email_verified_at: existingAuthUser.email_confirmed_at || new Date().toISOString(),
+                                                        verified: true,
+                                                email_verified_at: existingAuthUser.email_confirmed_at || new Date().toISOString(),
                                                     }, { onConflict: 'id' })
 
                                                     ownerCache.set(ownerEmail, { id: existingAuthUser.id, name: ownerName, phone: ownerPhone })
@@ -318,7 +319,7 @@ export async function POST(request: NextRequest) {
                                                 name: ownerName,
                                                 phone: ownerPhone,
                                                 role: 'owner',
-                                                verified: false,
+                                                verified: true,
                                                 email_verified_at: new Date().toISOString(),
                                             }, { onConflict: 'id' })
 

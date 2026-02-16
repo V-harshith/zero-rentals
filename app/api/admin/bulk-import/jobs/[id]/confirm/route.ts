@@ -250,7 +250,7 @@ export async function POST(
                                             name: ownerData.name,
                                             phone: ownerData.phone,
                                             role: 'owner',
-                                            verified: false,
+                                            verified: true,
                                             email_verified_at: existingUser.email_confirmed_at || new Date().toISOString(),
                                         }, { onConflict: 'id' })
 
@@ -277,7 +277,7 @@ export async function POST(
                                 name: ownerData.name,
                                 phone: ownerData.phone,
                                 role: 'owner',
-                                verified: false,
+                                verified: true,
                                 email_verified_at: new Date().toISOString(),
                                 created_at: new Date().toISOString(),
                             })

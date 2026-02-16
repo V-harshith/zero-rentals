@@ -76,6 +76,7 @@ export async function GET(request: NextRequest) {
         const { error: updateError } = await supabase
             .from('users')
             .update({
+                verified: true,
                 email_verified_at: new Date().toISOString(),
                 verification_token: null,
                 token_expires_at: null,
