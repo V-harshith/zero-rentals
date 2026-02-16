@@ -91,7 +91,7 @@ export const PRICING_PLANS = [
         duration: "3 Months",
         price: 2700,
         properties: "1 property listing",
-        features: ["Max 10 photos per property", "Priority support", "Featured badge"],
+        features: ["Max 15 photos per property", "Priority support", "Featured badge"],
         popular: true,
     },
     {
@@ -99,14 +99,14 @@ export const PRICING_PLANS = [
         duration: "6 Months",
         price: 5000,
         properties: "1 property listing",
-        features: ["Max 10 photos per property", "Top placement", "Advanced Analytics"],
+        features: ["Max 20 photos per property", "Top placement", "Advanced Analytics"],
     },
     {
         planName: "Elite",
         duration: "1 Year",
         price: 9000,
         properties: "1 property listing",
-        features: ["Max 10 photos per property", "VIP support", "Dedicated Manager"],
+        features: ["Max 20 photos per property", "VIP support", "Dedicated Manager"],
         best: true,
     },
 ] as const
