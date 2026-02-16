@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { validateWebhookSignature } from '@/lib/payment-service'
 import { supabaseAdmin } from '@/lib/supabase-admin'
+import { handleCancelledToRenewed } from '@/lib/subscription-service-server'
 import {
-    handleCancelledToRenewed,
     determineSubscriptionAction,
     type SubscriptionStatus
 } from '@/lib/subscription-service'

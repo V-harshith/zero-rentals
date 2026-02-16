@@ -3,7 +3,7 @@ import crypto from 'crypto'
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { PLAN_FEATURES } from '@/lib/constants'
-import { handleCancelledToRenewed } from '@/lib/subscription-service'
+import { handleCancelledToRenewed } from '@/lib/subscription-service-server'
 
 export async function POST(request: NextRequest) {
     try {

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { expireSubscriptions } from '@/lib/subscription-service'
+import { expireSubscriptions } from '@/lib/subscription-service-server'
 
 /**
  * Subscription Expiry Cron Job
