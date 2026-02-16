@@ -4,8 +4,15 @@ import React, { useEffect, useState, useRef } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import Image from "next/image"
-import { LogOut, Loader2, User, Menu, Edit } from "lucide-react"
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
+import { LogOut, Loader2, User, Menu, Edit, ChevronDown } from "lucide-react"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { useAuth } from "@/lib/auth-context"
 import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
@@ -28,8 +35,17 @@ function TenantDashboard() {
   const [recentProperties, setRecentProperties] = useState<Property[]>([])
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'overview')
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const hasLoaded = useRef(false)
+
+  // Sync tab state to URL
+  useEffect(() => {
+    const currentTab = searchParams.get('tab') || 'overview'
+    if (activeTab !== currentTab) {
+      const params = new URLSearchParams(searchParams.toString())
+      params.set('tab', activeTab)
+      router.replace(`/dashboard/tenant?${params.toString()}`, { scroll: false })
+    }
+  }, [activeTab, searchParams, router])
 
   useEffect(() => {
     // Skip if still loading auth or already loaded
@@ -82,60 +98,39 @@ function TenantDashboard() {
                 Welcome, {user?.name}
               </span>
 
-              {/* Mobile Menu - Contains all nav items in dropdown */}
-              <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
-                <SheetTrigger asChild>
-                  <Button variant="outline" size="sm" className="md:hidden">
-                    <Menu className="h-4 w-4" />
+              {/* User Actions Dropdown */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="gap-2">
+                    <User className="h-4 w-4" />
+                    <span className="hidden sm:inline">Menu</span>
+                    <ChevronDown className="h-3 w-3" />
                   </Button>
-                </SheetTrigger>
-                <SheetContent side="right" className="w-[280px]">
-                  <div className="flex flex-col gap-4 mt-8">
-                    <div className="pb-4 border-b">
-                      <p className="font-medium">{user?.name}</p>
-                      <p className="text-sm text-muted-foreground">{user?.email}</p>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuLabel>
+                    <div className="flex flex-col">
+                      <span className="font-medium">{user?.name}</span>
+                      <span className="text-xs text-muted-foreground">{user?.email}</span>
                     </div>
-
-                    <Link href="/profile/tenant" onClick={() => setMobileMenuOpen(false)}>
-                      <Button variant="outline" size="sm" className="w-full justify-start">
-                        <Edit className="h-4 w-4 mr-2" />
-                        Edit Profile
-                      </Button>
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem asChild>
+                    <Link href="/profile/tenant" className="cursor-pointer flex items-center gap-2">
+                      <Edit className="h-4 w-4" />
+                      Edit Profile
                     </Link>
-
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setMobileMenuOpen(false)
-                        logout()
-                      }}
-                      className="w-full justify-start bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white hover:text-white"
-                    >
-                      <LogOut className="h-4 w-4 mr-2" />
-                      Logout
-                    </Button>
-                  </div>
-                </SheetContent>
-              </Sheet>
-
-              {/* Desktop Only Buttons - Hidden on mobile */}
-              <Link href="/profile/tenant" className="hidden md:block">
-                <Button variant="outline" size="sm" className="gap-2">
-                  <User className="h-4 w-4" />
-                  <span className="hidden sm:inline">Profile</span>
-                </Button>
-              </Link>
-
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={logout}
-                className="hidden md:flex gap-2 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white hover:text-white"
-              >
-                <LogOut className="h-4 w-4 mr-2" />
-                <span className="hidden sm:inline">Logout</span>
-              </Button>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={logout}
+                    className="cursor-pointer text-red-600 focus:text-red-600 focus:bg-red-50 flex items-center gap-2"
+                  >
+                    <LogOut className="h-4 w-4" />
+                    Logout
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
         </div>

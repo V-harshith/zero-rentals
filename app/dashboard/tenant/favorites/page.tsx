@@ -11,6 +11,7 @@ import Link from "next/link"
 import { toast } from "sonner"
 import type { Property } from "@/lib/types"
 import { withAuth } from "@/lib/with-auth"
+import { supabase } from "@/lib/supabase"
 
 interface Favorite {
   id: string
@@ -27,23 +28,44 @@ function FavoritesPage() {
   const [isLoading, setIsLoading] = useState(true)
 
   const fetchFavorites = useCallback(async () => {
+    if (!user) return
+
     try {
       setIsLoading(true)
-      const response = await fetch("/api/favorites")
-      if (response.ok) {
-        const { data } = await response.json()
-        setFavorites(data || [])
-      } else {
-        const error = await response.json().catch(() => ({ error: 'Failed to load favorites' }))
-        toast.error(error.error || 'Failed to load favorites')
+
+      // Use Supabase directly instead of API
+      const { data, error } = await supabase
+        .from('favorites')
+        .select(`
+          id,
+          user_id,
+          property_id,
+          created_at,
+          properties (*)
+        `)
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+
+      if (error) {
+        console.error('Error fetching favorites:', error)
+        toast.error('Failed to load favorites')
+        return
       }
+
+      // Type assertion needed because Supabase returns nested properties as arrays
+      const typedData = (data || []).map(item => ({
+        ...item,
+        properties: Array.isArray(item.properties) ? item.properties[0] : item.properties
+      })) as Favorite[]
+
+      setFavorites(typedData)
     } catch (error) {
       console.error("Error fetching favorites:", error)
       toast.error('Unable to connect to server')
     } finally {
       setIsLoading(false)
     }
-  }, [])
+  }, [user])
 
   // Fetch favorites when user is available and when favoriteIds change
   useEffect(() => {
@@ -59,7 +81,7 @@ function FavoritesPage() {
       <div className="container mx-auto px-4 py-8">
         <div className="mb-6">
           <Button variant="ghost" asChild className="mb-4">
-            <Link href="/dashboard/tenant">
+            <Link href="/dashboard/tenant?tab=favorites">
               <ArrowLeft className="h-4 w-4 mr-2" />
               Back to Dashboard
             </Link>

@@ -50,6 +50,25 @@ export default function SearchPage() {
 
     const [filters, setFilters] = useState<SearchFilters>(() => parseFilters(searchParams))
 
+    // Check for saved filters from sessionStorage on mount (handles back button navigation)
+    useEffect(() => {
+        const savedFiltersRaw = sessionStorage.getItem('savedSearchFilters')
+        if (savedFiltersRaw) {
+            try {
+                const { filters: savedFilters, timestamp } = JSON.parse(savedFiltersRaw)
+                // Check if saved within last 30 minutes
+                if (Date.now() - timestamp < 30 * 60 * 1000) {
+                    setFilters(savedFilters)
+                }
+                // Clear sessionStorage after restoring
+                sessionStorage.removeItem('savedSearchFilters')
+            } catch {
+                // Invalid JSON, clear it
+                sessionStorage.removeItem('savedSearchFilters')
+            }
+        }
+    }, [])
+
     // Re-initialize filters when searchParams change (e.g., back/forward navigation)
     useEffect(() => {
         setFilters(parseFilters(searchParams))
@@ -98,8 +117,9 @@ export default function SearchPage() {
         if (filters.propertyType) params.set("type", filters.propertyType)
         if (filters.roomType?.length) params.set("roomType", filters.roomType.join(","))
         if (filters.amenities?.length) params.set("amenities", filters.amenities.join(","))
-        if (filters.minPrice) params.set("minPrice", filters.minPrice.toString())
-        if (filters.maxPrice) params.set("maxPrice", filters.maxPrice.toString())
+        // Only set price params if they differ from defaults (minPrice=0, maxPrice=50000)
+        if (filters.minPrice !== undefined && filters.minPrice > 0) params.set("minPrice", filters.minPrice.toString())
+        if (filters.maxPrice !== undefined && filters.maxPrice < 50000) params.set("maxPrice", filters.maxPrice.toString())
         if (filters.gender) params.set("gender", filters.gender)
         if (filters.preferredTenant) params.set("preferredTenant", filters.preferredTenant)
         if (filters.lookingFor) params.set("lookingFor", filters.lookingFor)

@@ -8,6 +8,8 @@ import Link from "next/link"
 import { useFavorites } from "@/lib/favorites-context"
 import { PropertyCard } from "@/components/property-card"
 import type { Property } from "@/lib/types"
+import { supabase } from "@/lib/supabase"
+import { useAuth } from "@/lib/auth-context"
 
 // Type alias for location derived from Property
 type PropertyLocation = Property['location']
@@ -58,6 +60,7 @@ interface FavoriteRecord {
 }
 
 export function SavedPropertiesTab() {
+    const { user } = useAuth()
     const { favoriteIds, isLoading, count } = useFavorites()
     const [properties, setProperties] = useState<Property[]>([])
     const [fetchingDetails, setFetchingDetails] = useState(false)
@@ -65,9 +68,9 @@ export function SavedPropertiesTab() {
     // Fetch full property details when favoriteIds change
     useEffect(() => {
         let isMounted = true
-        
+
         async function fetchPropertyDetails() {
-            if (favoriteIds.size === 0) {
+            if (!user || favoriteIds.size === 0) {
                 if (isMounted) {
                     setProperties([])
                     setFetchingDetails(false)
@@ -77,18 +80,23 @@ export function SavedPropertiesTab() {
 
             try {
                 if (isMounted) setFetchingDetails(true)
-                
-                const response = await fetch('/api/favorites')
-                
-                if (!response.ok) {
+
+                // Use Supabase directly instead of API
+                const { data, error } = await supabase
+                    .from('favorites')
+                    .select(`
+                        id,
+                        property_id,
+                        properties (*)
+                    `)
+                    .eq('user_id', user.id)
+                    .order('created_at', { ascending: false })
+
+                if (error || !isMounted) {
                     if (isMounted) setFetchingDetails(false)
                     return
                 }
-                
-                const { data } = await response.json()
-                
-                if (!isMounted) return
-                
+
                 // Helper function to determine price based on room type
                 const getPrice = (prop: RawProperty): number => {
                     const roomType = prop.room_type || prop.roomType || ''
@@ -116,11 +124,12 @@ export function SavedPropertiesTab() {
                                    prop.four_sharing_price || 0
                     }
                 }
-                
+
                 // Normalize database fields to match TypeScript interface
-                const validProps = data
-                    .map((fav: FavoriteRecord) => {
-                        const prop = fav.properties
+                const validProps = (data || [])
+                    .map((fav) => {
+                        // Supabase returns nested properties as arrays, get first element
+                        const prop = Array.isArray(fav.properties) ? fav.properties[0] : fav.properties
                         if (!prop || !prop.id) return null
 
                         // Map database fields to interface fields
@@ -151,7 +160,7 @@ export function SavedPropertiesTab() {
                         }
                     })
                     .filter(Boolean)
-                
+
                 if (isMounted) {
                     setProperties(validProps)
                     setFetchingDetails(false)
@@ -162,11 +171,11 @@ export function SavedPropertiesTab() {
         }
 
         fetchPropertyDetails()
-        
+
         return () => {
             isMounted = false
         }
-    }, [favoriteIds])
+    }, [favoriteIds, user])
 
     if (isLoading || fetchingDetails) {
         return (
@@ -206,7 +215,7 @@ export function SavedPropertiesTab() {
                         </CardDescription>
                     </div>
                     <Button variant="outline" asChild>
-                        <Link href="/search">Find More</Link>
+                        <Link href="/search">Explore Properties</Link>
                     </Button>
                 </div>
             </CardHeader>

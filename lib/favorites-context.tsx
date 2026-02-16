@@ -1,272 +1,148 @@
 "use client"
 
-import { createContext, useContext, useState, useEffect, useCallback, useRef } from "react"
+import { createContext, useContext, useState, useEffect, useCallback } from "react"
 import { useAuth } from "./auth-context"
 import { toast } from "sonner"
-
-interface PendingAction {
-  type: "add" | "remove"
-  propertyId: string
-  timestamp: number
-  retries: number
-}
-
-interface FavoriteRecord {
-  id: string
-  property_id: string
-}
+import { supabase } from "./supabase"
 
 interface FavoritesContextType {
   favoriteIds: Set<string>
-  favoriteRecords: Map<string, string> // property_id -> favorite_id
   count: number
   isLoading: boolean
-  isSyncing: boolean
   isFavorite: (id: string) => boolean
-  addFavorite: (id: string) => void
-  removeFavorite: (id: string) => void
+  addFavorite: (id: string) => Promise<boolean>
+  removeFavorite: (id: string) => Promise<boolean>
   refreshFavorites: () => Promise<void>
 }
 
 const FavoritesContext = createContext<FavoritesContextType | null>(null)
 
-const CACHE_KEY = "favorites_cache"
-const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes
-const SYNC_DEBOUNCE = 2000 // 2 seconds
-const MAX_RETRIES = 3
-
 export function FavoritesProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth()
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set())
-  const [favoriteRecords, setFavoriteRecords] = useState<Map<string, string>>(new Map())
   const [isLoading, setIsLoading] = useState(false)
-  const [isSyncing, setIsSyncing] = useState(false)
-  const [syncQueue, setSyncQueue] = useState<PendingAction[]>([])
-  const syncTimerRef = useRef<NodeJS.Timeout | undefined>(undefined)
-  const hasFetchedRef = useRef<string | false>(false)
 
-  // Load from cache and fetch favorites when user is available
+  // Load favorites when user changes
   useEffect(() => {
-    // Only proceed if we have a logged-in tenant user
     if (user?.role === "tenant") {
-      // Try to load from cache first for immediate UI display
-      const cached = loadFromCache()
-      if (cached && cached.userId === user.id) {
-        setFavoriteIds(new Set(cached.ids))
-        setFavoriteRecords(new Map(cached.records || []))
-      }
-
-      // Always fetch fresh data from server (if not already fetched for this user)
-      if (!hasFetchedRef.current || hasFetchedRef.current !== user.id) {
-        hasFetchedRef.current = user.id
-        loadFavorites()
-      }
-    } else if (!user) {
-      // Clear on logout
-      hasFetchedRef.current = false
+      loadFavorites()
+    } else {
       setFavoriteIds(new Set())
-      setFavoriteRecords(new Map())
-      clearCache()
     }
   }, [user])
-
-  // Background sync processor
-  useEffect(() => {
-    if (syncQueue.length > 0 && !isSyncing) {
-      // Clear existing timer
-      if (syncTimerRef.current) {
-        clearTimeout(syncTimerRef.current)
-      }
-      
-      // Debounce sync
-      syncTimerRef.current = setTimeout(() => {
-        processSyncQueue()
-      }, SYNC_DEBOUNCE)
-    }
-
-    return () => {
-      if (syncTimerRef.current) {
-        clearTimeout(syncTimerRef.current)
-      }
-    }
-  }, [syncQueue, isSyncing])
-
-  const loadFromCache = () => {
-    try {
-      const cached = localStorage.getItem(CACHE_KEY)
-      if (!cached) return null
-
-      const data = JSON.parse(cached)
-      const age = Date.now() - data.timestamp
-
-      if (age > CACHE_DURATION) {
-        localStorage.removeItem(CACHE_KEY)
-        return null
-      }
-
-      return data
-    } catch {
-      return null
-    }
-  }
-
-  const saveToCache = (ids: string[], records?: Map<string, string>) => {
-    try {
-      localStorage.setItem(
-        CACHE_KEY,
-        JSON.stringify({
-          ids,
-          records: records ? Array.from(records.entries()) : [],
-          userId: user?.id,
-          timestamp: Date.now(),
-        })
-      )
-    } catch {
-      // Ignore cache save errors
-    }
-  }
-
-  const clearCache = () => {
-    try {
-      localStorage.removeItem(CACHE_KEY)
-    } catch {
-      // Ignore cache clear errors
-    }
-  }
 
   const loadFavorites = async () => {
     if (!user) return
 
     setIsLoading(true)
     try {
-      const response = await fetch("/api/favorites")
-      if (!response.ok) throw new Error("Failed to fetch favorites")
+      const { data, error } = await supabase
+        .from('favorites')
+        .select('property_id')
+        .eq('user_id', user.id)
 
-      const { data } = await response.json()
-      const ids = data.map((f: { property_id: string }) => f.property_id)
-      const records = new Map<string, string>(
-        data.map((f: { id: string; property_id: string }) => [f.property_id, f.id])
-      )
+      if (error) {
+        console.error('Error loading favorites:', error)
+        return
+      }
 
-      setFavoriteIds(new Set(ids))
-      setFavoriteRecords(records)
-      saveToCache(ids, records)
-    } catch {
-      // Don't show error toast on initial load, use cache if available
+      const ids = new Set(data.map(f => f.property_id))
+      setFavoriteIds(ids)
+    } catch (error) {
+      console.error('Error loading favorites:', error)
     } finally {
       setIsLoading(false)
     }
   }
 
-  const addFavorite = useCallback((id: string) => {
-    // Optimistic update
-    setFavoriteIds((prev) => new Set([...prev, id]))
+  const addFavorite = useCallback(async (propertyId: string): Promise<boolean> => {
+    if (!user) {
+      toast.error("Please login to save favorites")
+      return false
+    }
 
-    // Queue for sync
-    setSyncQueue((prev) => [
-      ...prev,
-      { type: "add", propertyId: id, timestamp: Date.now(), retries: 0 },
-    ])
-  }, [])
+    if (user.role !== 'tenant') {
+      toast.error("Only tenants can save favorites")
+      return false
+    }
 
-  const removeFavorite = useCallback((id: string) => {
     // Optimistic update
-    setFavoriteIds((prev) => {
+    setFavoriteIds(prev => new Set([...prev, propertyId]))
+
+    try {
+      const { error } = await supabase
+        .from('favorites')
+        .insert([{ user_id: user.id, property_id: propertyId }])
+
+      if (error) {
+        // Rollback on error
+        setFavoriteIds(prev => {
+          const next = new Set(prev)
+          next.delete(propertyId)
+          return next
+        })
+
+        if (error.code === '23505') {
+          // Duplicate - already in favorites, that's fine
+          setFavoriteIds(prev => new Set([...prev, propertyId]))
+          return true
+        }
+
+        console.error('Error adding favorite:', error)
+        toast.error("Failed to add to favorites")
+        return false
+      }
+
+      toast.success("Added to favorites")
+      return true
+    } catch (error) {
+      // Rollback on error
+      setFavoriteIds(prev => {
+        const next = new Set(prev)
+        next.delete(propertyId)
+        return next
+      })
+      console.error('Error adding favorite:', error)
+      toast.error("Failed to add to favorites")
+      return false
+    }
+  }, [user])
+
+  const removeFavorite = useCallback(async (propertyId: string): Promise<boolean> => {
+    if (!user) return false
+
+    // Optimistic update
+    setFavoriteIds(prev => {
       const next = new Set(prev)
-      next.delete(id)
+      next.delete(propertyId)
       return next
     })
 
-    // Queue for sync
-    setSyncQueue((prev) => [
-      ...prev,
-      { type: "remove", propertyId: id, timestamp: Date.now(), retries: 0 },
-    ])
-  }, [])
+    try {
+      const { error } = await supabase
+        .from('favorites')
+        .delete()
+        .eq('user_id', user.id)
+        .eq('property_id', propertyId)
 
-  const processSyncQueue = async () => {
-    if (syncQueue.length === 0 || isSyncing || !user) return
-
-    setIsSyncing(true)
-    const queue = [...syncQueue]
-    const failedActions: PendingAction[] = []
-
-    for (const action of queue) {
-      try {
-        if (action.type === "add") {
-          const response = await fetch("/api/favorites", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ property_id: action.propertyId }),
-          })
-
-          if (!response.ok) throw new Error("Failed to add favorite")
-
-          // Store the returned favorite ID to avoid N+1 queries on future removals
-          const { data: favoriteRecord } = await response.json()
-          if (favoriteRecord?.id) {
-            setFavoriteRecords(prev => {
-              const next = new Map(prev)
-              next.set(action.propertyId, favoriteRecord.id)
-              return next
-            })
-          }
-        } else {
-          // Use stored favorite ID to avoid N+1 query
-          const favoriteId = favoriteRecords.get(action.propertyId)
-
-          if (favoriteId) {
-            const deleteResponse = await fetch(`/api/favorites/${favoriteId}`, {
-              method: "DELETE",
-            })
-            if (!deleteResponse.ok) throw new Error("Failed to remove favorite")
-            // Remove from records map after successful deletion
-            setFavoriteRecords(prev => {
-              const next = new Map(prev)
-              next.delete(action.propertyId)
-              return next
-            })
-          }
-        }
-
-        // Success - remove from queue
-        setSyncQueue((prev) => prev.filter((a) => a !== action))
-      } catch {
-        // Retry logic
-
-        // Retry logic
-        if (action.retries < MAX_RETRIES) {
-          failedActions.push({ ...action, retries: action.retries + 1 })
-        } else {
-          // Max retries exceeded - rollback optimistic update
-          if (action.type === "add") {
-            setFavoriteIds((prev) => {
-              const next = new Set(prev)
-              next.delete(action.propertyId)
-              return next
-            })
-            toast.error("Failed to add to favorites. Please try again.")
-          } else {
-            setFavoriteIds((prev) => new Set([...prev, action.propertyId]))
-            toast.error("Failed to remove from favorites. Please try again.")
-          }
-          
-          // Remove from queue
-          setSyncQueue((prev) => prev.filter((a) => a !== action))
-        }
+      if (error) {
+        // Rollback on error
+        setFavoriteIds(prev => new Set([...prev, propertyId]))
+        console.error('Error removing favorite:', error)
+        toast.error("Failed to remove from favorites")
+        return false
       }
+
+      toast.success("Removed from favorites")
+      return true
+    } catch (error) {
+      // Rollback on error
+      setFavoriteIds(prev => new Set([...prev, propertyId]))
+      console.error('Error removing favorite:', error)
+      toast.error("Failed to remove from favorites")
+      return false
     }
-
-    // Re-add failed actions for retry
-    if (failedActions.length > 0) {
-      setSyncQueue((prev) => [...prev.filter((a) => !queue.includes(a)), ...failedActions])
-    }
-
-    // Update cache with current state
-    saveToCache(Array.from(favoriteIds), favoriteRecords)
-
-    setIsSyncing(false)
-  }
+  }, [user])
 
   const isFavorite = useCallback(
     (id: string) => favoriteIds.has(id),
@@ -281,10 +157,8 @@ export function FavoritesProvider({ children }: { children: React.ReactNode }) {
     <FavoritesContext.Provider
       value={{
         favoriteIds,
-        favoriteRecords,
         count: favoriteIds.size,
         isLoading,
-        isSyncing,
         isFavorite,
         addFavorite,
         removeFavorite,

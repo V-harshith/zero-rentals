@@ -7,7 +7,7 @@ import Link from "next/link"
 import { Card, CardContent, CardFooter } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { MapPin, Bed, Users, Star, Heart, Eye } from "lucide-react"
+import { MapPin, Bed, Users, Star, Heart, Eye, Loader2 } from "lucide-react"
 import type { Property } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/lib/auth-context"
@@ -23,9 +23,10 @@ interface OptimizedPropertyCardProps {
 
 export function OptimizedPropertyCard({ property, index = 0, priority = false }: OptimizedPropertyCardProps) {
     const { user } = useAuth()
-    const { isFavorite, addFavorite, removeFavorite } = useFavorites()
+    const { isFavorite, addFavorite, removeFavorite, isLoading: isFavoritesLoading } = useFavorites()
     const router = useRouter()
     const [imageLoaded, setImageLoaded] = useState(false)
+    const [isProcessing, setIsProcessing] = useState(false)
 
     const mainImage = property.images[0] || "/placeholder-property.jpg"
     const isPropertyFavorite = isFavorite(property.id)
@@ -87,7 +88,7 @@ export function OptimizedPropertyCard({ property, index = 0, priority = false }:
                         <motion.button
                             whileHover={{ scale: 1.1 }}
                             whileTap={{ scale: 0.9 }}
-                            onClick={(e) => {
+                            onClick={async (e) => {
                                 e.preventDefault()
 
                                 // Check if user is logged in
@@ -97,21 +98,32 @@ export function OptimizedPropertyCard({ property, index = 0, priority = false }:
                                     return
                                 }
 
+                                if (isProcessing || isFavoritesLoading) return
+
+                                setIsProcessing(true)
+
                                 // Use favorites context
                                 if (isPropertyFavorite) {
-                                    removeFavorite(property.id)
+                                    await removeFavorite(property.id)
                                 } else {
-                                    addFavorite(property.id)
+                                    await addFavorite(property.id)
                                 }
+
+                                setIsProcessing(false)
                             }}
-                            className="absolute top-3 right-3 p-2 rounded-full bg-white/90 backdrop-blur-sm hover:bg-white transition-colors"
+                            disabled={isProcessing || isFavoritesLoading}
+                            className="absolute top-3 right-3 p-2 rounded-full bg-white/90 backdrop-blur-sm hover:bg-white transition-colors disabled:opacity-70"
                         >
-                            <Heart
-                                className={cn(
-                                    "h-5 w-5 transition-colors",
-                                    isPropertyFavorite ? "fill-red-500 text-red-500" : "text-gray-600"
-                                )}
-                            />
+                            {isProcessing ? (
+                                <Loader2 className="h-5 w-5 animate-spin text-gray-600" />
+                            ) : (
+                                <Heart
+                                    className={cn(
+                                        "h-5 w-5 transition-colors",
+                                        isPropertyFavorite ? "fill-red-500 text-red-500" : "text-gray-600"
+                                    )}
+                                />
+                            )}
                         </motion.button>
                     )}
 

@@ -15,6 +15,8 @@ import { toast } from "sonner"
 import Link from "next/link"
 import { useCsrf } from "@/lib/csrf-context"
 
+const STORAGE_KEY = 'adminAllPropertiesTab_state'
+
 export function AllPropertiesTab() {
     const [properties, setProperties] = useState<Property[]>([])
     const [loading, setLoading] = useState(true)
@@ -27,6 +29,24 @@ export function AllPropertiesTab() {
     const [bulkDeleting, setBulkDeleting] = useState(false)
     const { csrfToken, isLoading: isCsrfLoading } = useCsrf()
     const ITEMS_PER_PAGE = 20
+
+    // Restore state from sessionStorage on mount
+    useEffect(() => {
+        const saved = sessionStorage.getItem(STORAGE_KEY)
+        if (saved) {
+            try {
+                const { searchQuery: savedSearch, currentPage: savedPage, timestamp } = JSON.parse(saved)
+                // Check if saved within last 30 minutes
+                if (Date.now() - timestamp < 30 * 60 * 1000) {
+                    setSearchQuery(savedSearch || "")
+                    setCurrentPage(savedPage || 1)
+                }
+                sessionStorage.removeItem(STORAGE_KEY)
+            } catch {
+                // Invalid JSON, ignore
+            }
+        }
+    }, [])
 
     useEffect(() => {
         fetchProperties()
@@ -187,6 +207,15 @@ export function AllPropertiesTab() {
         p.location.area.toLowerCase().includes(searchQuery.toLowerCase()) ||
         p.location.city.toLowerCase().includes(searchQuery.toLowerCase())
     )
+
+    // Save state before navigating to property detail
+    const saveState = () => {
+        sessionStorage.setItem(STORAGE_KEY, JSON.stringify({
+            searchQuery,
+            currentPage,
+            timestamp: Date.now()
+        }))
+    }
 
     // Multi-select helpers
     const toggleSelect = (id: string) => {
@@ -377,12 +406,12 @@ export function AllPropertiesTab() {
                                         </TableCell>
                                         <TableCell>
                                             <div className="flex items-center gap-2">
-                                                <Link href={`/property/${property.id}`} target="_blank">
+                                                <Link href={`/property/${property.id}`} target="_blank" onClick={saveState}>
                                                     <Button size="sm" variant="ghost" title="View Property">
                                                         <ExternalLink className="h-4 w-4" />
                                                     </Button>
                                                 </Link>
-                                                <Link href={`/property/edit/${property.id}`}>
+                                                <Link href={`/property/edit/${property.id}`} onClick={saveState}>
                                                     <Button
                                                         size="sm"
                                                         variant="ghost"

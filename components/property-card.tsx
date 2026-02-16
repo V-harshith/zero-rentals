@@ -4,13 +4,14 @@ import { Property } from "@/lib/types"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { MapPin, Heart, Eye, Crown, TrendingUp } from "lucide-react"
+import { MapPin, Heart, Eye, Crown, TrendingUp, Loader2 } from "lucide-react"
 import Link from "next/link"
 import Image from "next/image"
 import { useAuth } from "@/lib/auth-context"
 import { useFavorites } from "@/lib/favorites-context"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
+import { useState } from "react"
 
 interface PropertyCardProps {
     property: Property
@@ -21,11 +22,12 @@ interface PropertyCardProps {
 export function PropertyCard({ property, showFavorite = true, priority = false }: PropertyCardProps) {
     const { user } = useAuth()
     const router = useRouter()
-    const { isFavorite, addFavorite, removeFavorite, isSyncing } = useFavorites()
-    
+    const { isFavorite, addFavorite, removeFavorite, isLoading: isFavoritesLoading } = useFavorites()
+    const [localLoading, setLocalLoading] = useState(false)
+
     const favorite = isFavorite(property.id)
 
-    const toggleFavorite = (e: React.MouseEvent) => {
+    const toggleFavorite = async (e: React.MouseEvent) => {
         e.preventDefault()
         e.stopPropagation()
 
@@ -36,17 +38,56 @@ export function PropertyCard({ property, showFavorite = true, priority = false }
             return
         }
 
-        if (favorite) {
-            removeFavorite(property.id)
-            toast.success("Removed from favorites")
-        } else {
-            addFavorite(property.id)
-            toast.success("Added to favorites")
+        // Don't allow toggling while already processing
+        if (localLoading) {
+            return
+        }
+
+        setLocalLoading(true)
+
+        try {
+            if (favorite) {
+                await removeFavorite(property.id)
+            } else {
+                await addFavorite(property.id)
+            }
+        } finally {
+            setLocalLoading(false)
+        }
+    }
+
+    const handleCardClick = (e: React.MouseEvent) => {
+        // Save current URL (with all search params) to sessionStorage before navigating
+        const currentUrl = window.location.pathname + window.location.search
+        if (currentUrl.startsWith('/search')) {
+            const searchParams = new URLSearchParams(window.location.search)
+            const filters: Record<string, unknown> = {
+                location: searchParams.get("location") || "",
+                propertyType: searchParams.get("type") || undefined,
+                roomType: searchParams.getAll("roomType").length > 0 ? searchParams.getAll("roomType")[0].split(",") : [],
+                minPrice: searchParams.get("minPrice") ? parseInt(searchParams.get("minPrice")!) : 0,
+                maxPrice: searchParams.get("maxPrice") ? parseInt(searchParams.get("maxPrice")!) : 50000,
+                amenities: searchParams.getAll("amenities").length > 0 ? searchParams.getAll("amenities")[0].split(",") : [],
+                sortBy: "date-desc",
+                gender: searchParams.get("gender") || undefined,
+                preferredTenant: searchParams.get("preferredTenant") || undefined,
+                lookingFor: searchParams.get("lookingFor") || undefined,
+                useUserLocation: searchParams.get("useUserLocation") === "true",
+            }
+            const lat = searchParams.get("lat")
+            const lng = searchParams.get("lng")
+            if (lat && lng) {
+                filters.coordinates = { lat: parseFloat(lat), lng: parseFloat(lng) }
+            }
+            sessionStorage.setItem('savedSearchFilters', JSON.stringify({
+                filters,
+                timestamp: Date.now()
+            }))
         }
     }
 
     return (
-        <Link href={`/property/${property.id}`}>
+        <Link href={`/property/${property.id}`} onClick={handleCardClick}>
             <Card className="group hover:shadow-xl transition-all duration-300 hover:-translate-y-1 cursor-pointer h-full flex flex-col overflow-hidden">
                 <CardContent className="p-0 flex flex-col h-full">
                     {/* Image */}
@@ -99,14 +140,24 @@ export function PropertyCard({ property, showFavorite = true, priority = false }
                         {showFavorite && user?.role === 'tenant' && (
                             <button
                                 onClick={toggleFavorite}
-                                disabled={isSyncing}
-                                className="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/90 flex items-center justify-center hover:bg-white hover:scale-110 transition-all z-10 disabled:opacity-50"
+                                disabled={localLoading}
+                                className={`
+                                    absolute top-3 right-3 w-8 h-8 rounded-full flex items-center justify-center
+                                    transition-all z-10
+                                    bg-white/90 hover:bg-white hover:scale-110
+                                    ${localLoading ? 'opacity-70 cursor-not-allowed' : ''}
+                                `}
                                 aria-label={favorite ? "Remove from favorites" : "Add to favorites"}
+                                title={favorite ? "Remove from favorites" : "Add to favorites"}
                             >
-                                <Heart
-                                    className={`h-4 w-4 transition-all ${favorite ? "fill-red-500 text-red-500" : "text-gray-600"
-                                        }`}
-                                />
+                                {localLoading ? (
+                                    <Loader2 className="h-4 w-4 animate-spin text-gray-600" />
+                                ) : (
+                                    <Heart
+                                        className={`h-4 w-4 transition-all ${favorite ? "fill-red-500 text-red-500" : "text-gray-600"
+                                            }`}
+                                    />
+                                )}
                             </button>
                         )}
 

@@ -1,6 +1,20 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
+// Simple in-memory cache for session validation to reduce concurrent refreshes
+// Note: This is per-instance cache (works best with sticky sessions)
+const sessionCache = new Map<string, { user: any; timestamp: number }>()
+const SESSION_CACHE_TTL = 5000 // 5 seconds - short cache to balance performance vs freshness
+
+// Helper to get session key from request cookies
+function getSessionKey(request: NextRequest): string | null {
+  const accessToken = request.cookies.get('sb-access-token')?.value
+  const refreshToken = request.cookies.get('sb-refresh-token')?.value
+  if (!accessToken) return null
+  // Use a hash of the access token as the cache key
+  return `${accessToken.slice(0, 16)}:${accessToken.slice(-16)}`
+}
+
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({
     request: {
@@ -51,24 +65,56 @@ export async function updateSession(request: NextRequest) {
   // CRITICAL: This refreshes the session if expired
   // It will automatically update cookies via the handlers above
   let user = null
-  try {
-    const { data: { user: supabaseUser }, error } = await supabase.auth.getUser()
-    if (error) {
-      // If error is "Invalid Refresh Token", we treat user as null (logged out)
-      // This happens when the session on server is revoked but client has old cookie
-      // We don't throw, just let them be unauthenticated
-      if (error.message?.includes('Refresh Token Not Found') || error.message?.includes('Invalid Refresh Token')) {
-        console.warn(`[MIDDLEWARE] Invalid refresh token, treating as logged out: ${error.message}`)
-      } else {
-         console.error(`[MIDDLEWARE] Error fetching user:`, error)
+
+  // Check cache first to reduce concurrent session refreshes
+  const cacheKey = getSessionKey(request)
+  const now = Date.now()
+  const cached = cacheKey ? sessionCache.get(cacheKey) : null
+
+  if (cached && (now - cached.timestamp) < SESSION_CACHE_TTL) {
+    // Use cached session - reduces load on Supabase and prevents race conditions
+    user = cached.user
+    console.log(`[MIDDLEWARE] Using cached session for user: ${user ? 'authenticated' : 'unauthenticated'}`)
+  } else {
+    // No cache or cache expired - fetch fresh session
+    try {
+      const { data: { user: supabaseUser }, error } = await supabase.auth.getUser()
+      if (error) {
+        // If error is "Invalid Refresh Token", we treat user as null (logged out)
+        // This happens when the session on server is revoked but client has old cookie
+        // We don't throw, just let them be unauthenticated
+        if (error.message?.includes('Refresh Token Not Found') || error.message?.includes('Invalid Refresh Token')) {
+          console.warn(`[MIDDLEWARE] Invalid refresh token, treating as logged out: ${error.message}`)
+        } else if (error.message?.includes('session') || error.status === 403) {
+          // Session-related errors - might be race condition, log but don't spam
+          console.warn(`[MIDDLEWARE] Session error (possible race condition): ${error.message}`)
+        } else {
+          console.error(`[MIDDLEWARE] Error fetching user:`, error)
+        }
       }
-    }
-    user = supabaseUser
-  } catch (err: any) {
-    if (err?.message?.includes('Refresh Token Not Found') || err?.message?.includes('Invalid Refresh Token')) {
+      user = supabaseUser
+
+      // Cache the result to prevent concurrent refreshes
+      if (cacheKey) {
+        sessionCache.set(cacheKey, { user, timestamp: now })
+        // Clean up old cache entries periodically (simple cleanup)
+        if (sessionCache.size > 1000) {
+          const cutoff = now - SESSION_CACHE_TTL
+          for (const [key, entry] of sessionCache.entries()) {
+            if (entry.timestamp < cutoff) {
+              sessionCache.delete(key)
+            }
+          }
+        }
+      }
+    } catch (err: any) {
+      if (err?.message?.includes('Refresh Token Not Found') || err?.message?.includes('Invalid Refresh Token')) {
         console.warn(`[MIDDLEWARE] Exception: Invalid refresh token, treating as logged out: ${err.message}`)
-    } else {
+      } else if (err?.message?.includes('session') || err?.status === 403) {
+        console.warn(`[MIDDLEWARE] Exception: Session error (possible race condition): ${err.message}`)
+      } else {
         console.error(`[MIDDLEWARE] Unexpected exception fetching user:`, err)
+      }
     }
   }
 

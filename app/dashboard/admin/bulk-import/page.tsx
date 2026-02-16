@@ -468,25 +468,6 @@ export default function BulkImportPage() {
                                         )}
                                     </CardContent>
                                 </Card>
-
-                                {/* Cancel Button */}
-                                <div className="flex justify-center">
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => {
-                                            if (confirm("Cancel this import? All progress will be lost.")) {
-                                                setJobId(null)
-                                                setJob(null)
-                                                setCurrentStep("excel")
-                                                setCompletedSteps(new Set())
-                                            }
-                                        }}
-                                        className="text-muted-foreground"
-                                    >
-                                        Cancel Import
-                                    </Button>
-                                </div>
                             </div>
                         )}
                     </TabsContent>

@@ -148,17 +148,39 @@ function applySorting(query: any, sortBy?: string) {
 }
 
 function filterByPriceRange(properties: Property[], filters: SearchFilters): Property[] {
-  let filtered = properties
+  // Skip filtering if no price constraints are set (or defaults are used)
+  const hasMinPrice = filters.minPrice !== undefined && filters.minPrice > 0
+  const hasMaxPrice = filters.maxPrice !== undefined && filters.maxPrice < 50000
 
-  if (filters.minPrice !== undefined) {
-    filtered = filtered.filter(p => p.price >= filters.minPrice!)
+  if (!hasMinPrice && !hasMaxPrice) {
+    return properties
   }
 
-  if (filters.maxPrice !== undefined) {
-    filtered = filtered.filter(p => p.price <= filters.maxPrice!)
-  }
+  return properties.filter(p => {
+    // Get all available room prices for this property
+    const roomPrices = [
+      p.roomPrices?.['1rk'],
+      p.roomPrices?.single,
+      p.roomPrices?.double,
+      p.roomPrices?.triple,
+      p.roomPrices?.four,
+      p.price // Also include the computed minimum price as fallback
+    ].filter((price): price is number => price !== undefined && price > 0)
 
-  return filtered
+    // If no prices available, exclude the property when filtering by price
+    if (roomPrices.length === 0) {
+      return false
+    }
+
+    // Check if ANY room price falls within the specified range
+    // This ensures properties are shown if they have at least one room type
+    // that matches the user's budget
+    return roomPrices.some(price => {
+      const aboveMin = !hasMinPrice || price >= filters.minPrice!
+      const belowMax = !hasMaxPrice || price <= filters.maxPrice!
+      return aboveMin && belowMax
+    })
+  })
 }
 
 async function incrementPropertyViews(id: string, currentViews: number) {
@@ -873,14 +895,9 @@ export async function getTenantStats(userId: string): Promise<{
 }
 
 // ============================================================================
-// FAVORITES (Re-exported from favorites.service.ts)
+// FAVORITES (Now handled directly in favorites-context.tsx via Supabase)
 // ============================================================================
 
-export {
-  getFavorites,
-  addFavorite,
-  removeFavorite,
-  checkIsFavorite,
-  addToFavorites,
-  removeFromFavorites
-} from './services/favorites.service'
+// Favorites functionality has been moved to the client-side context
+// All favorites operations now use Supabase directly from the browser
+// See: lib/favorites-context.tsx

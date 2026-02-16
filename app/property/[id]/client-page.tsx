@@ -22,6 +22,7 @@ import {
     AlertTriangle,
     Clock,
     XCircle,
+    CheckCircle,
     ChevronLeft,
     ChevronRight,
     Building2,
@@ -61,10 +62,44 @@ export default function PropertyClientPage({ id, initialProperty }: { id: string
     const [similarProperties, setSimilarProperties] = useState<Property[]>([])
     const [whatsappEnabled, setWhatsappEnabled] = useState(false)
     const [selectedImageIndex, setSelectedImageIndex] = useState(0)
+    const [backToSearchUrl, setBackToSearchUrl] = useState("/search")
 
     // Hide public UI while checking if user is an admin to prevent flicker
     const showHeaderFooter = !authLoading && !isAdmin
 
+    // Build back to search URL with saved filters from sessionStorage
+    useEffect(() => {
+        const savedFiltersRaw = sessionStorage.getItem('savedSearchFilters')
+        if (savedFiltersRaw) {
+            try {
+                const { filters, timestamp } = JSON.parse(savedFiltersRaw)
+                // Check if saved within last 30 minutes
+                if (Date.now() - timestamp < 30 * 60 * 1000) {
+                    const params = new URLSearchParams()
+                    if (filters.location) params.set("location", filters.location)
+                    if (filters.propertyType) params.set("type", filters.propertyType)
+                    if (filters.roomType?.length) params.set("roomType", filters.roomType.join(","))
+                    if (filters.amenities?.length) params.set("amenities", filters.amenities.join(","))
+                    if (filters.minPrice !== undefined && filters.minPrice > 0) params.set("minPrice", filters.minPrice.toString())
+                    if (filters.maxPrice !== undefined && filters.maxPrice < 50000) params.set("maxPrice", filters.maxPrice.toString())
+                    if (filters.gender) params.set("gender", filters.gender)
+                    if (filters.preferredTenant) params.set("preferredTenant", filters.preferredTenant)
+                    if (filters.lookingFor) params.set("lookingFor", filters.lookingFor)
+                    if (filters.useUserLocation) params.set("useUserLocation", "true")
+                    if (filters.coordinates) {
+                        params.set("lat", filters.coordinates.lat.toString())
+                        params.set("lng", filters.coordinates.lng.toString())
+                    }
+                    const queryString = params.toString()
+                    setBackToSearchUrl(queryString ? `/search?${queryString}` : "/search")
+                }
+                // Don't clear sessionStorage here - let the search page handle it
+            } catch {
+                // Invalid JSON, use default
+                setBackToSearchUrl("/search")
+            }
+        }
+    }, [])
 
     useEffect(() => {
         let isMounted = true
@@ -248,7 +283,7 @@ export default function PropertyClientPage({ id, initialProperty }: { id: string
                 <div className="border-b bg-background sticky top-16 z-30 backdrop-blur-sm bg-background/95">
                     <div className="container mx-auto px-4 py-4">
                         <div className="flex items-center justify-between">
-                            <Link href="/search" className="text-primary hover:underline flex items-center gap-2">
+                            <Link href={backToSearchUrl} className="text-primary hover:underline flex items-center gap-2">
                                 ← Back to Search
                             </Link>
 
