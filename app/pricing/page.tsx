@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useCallback } from "react"
 import Link from "next/link"
 import Image from "next/image"
 import { useRouter, useSearchParams } from "next/navigation"
@@ -10,6 +10,7 @@ import { Check, Star, Crown, Zap, ArrowLeft, Sparkles, Loader2 } from "lucide-re
 import { RazorpayCheckout } from "@/components/razorpay-checkout"
 import { useAuth } from "@/lib/auth-context"
 import { toast } from "sonner"
+import { supabase } from "@/lib/supabase"
 
 export default function PricingPage() {
   const router = useRouter()
@@ -17,13 +18,52 @@ export default function PricingPage() {
   const redirectTo = searchParams.get("redirect")
   const { user } = useAuth()
   const [creatingFree, setCreatingFree] = useState(false)
+  const [hasActivePlan, setHasActivePlan] = useState(false)
+  const [checkingPlan, setCheckingPlan] = useState(true)
 
   // Determine redirect path after plan selection
   const postPlanRedirect = redirectTo === "post-property" ? "/post-property" : undefined
 
+  // Check if user already has an active subscription
+  const checkExistingSubscription = useCallback(async () => {
+    if (!user) {
+      setCheckingPlan(false)
+      return
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('subscriptions')
+        .select('id, status, end_date')
+        .eq('user_id', user.id)
+        .eq('status', 'active')
+        .gt('end_date', new Date().toISOString())
+        .limit(1)
+        .maybeSingle()
+
+      if (error) {
+        console.error('Error checking subscription:', error)
+        return
+      }
+
+      setHasActivePlan(!!data)
+    } finally {
+      setCheckingPlan(false)
+    }
+  }, [user])
+
+  useEffect(() => {
+    checkExistingSubscription()
+  }, [checkExistingSubscription])
+
   const handleFreePlan = async () => {
     if (!user) {
       router.push("/login/owner")
+      return
+    }
+
+    // Prevent duplicate activation attempts
+    if (creatingFree || hasActivePlan) {
       return
     }
 
@@ -36,7 +76,10 @@ export default function PricingPage() {
         throw new Error(data.error || "Failed to activate free plan")
       }
 
-      toast.success("Free plan activated!")
+      // Update local state to prevent further activation attempts
+      setHasActivePlan(true)
+
+      toast.success(data.message || "Free plan activated!")
       router.push(postPlanRedirect || "/post-property")
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Something went wrong"
@@ -264,12 +307,22 @@ export default function PricingPage() {
                         className="w-full"
                         variant={plan.buttonVariant}
                         onClick={handleFreePlan}
-                        disabled={creatingFree}
+                        disabled={creatingFree || hasActivePlan || checkingPlan}
                       >
-                        {creatingFree ? (
+                        {checkingPlan ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Checking...
+                          </>
+                        ) : creatingFree ? (
                           <>
                             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                             Activating...
+                          </>
+                        ) : hasActivePlan ? (
+                          <>
+                            <Check className="mr-2 h-4 w-4" />
+                            Active Plan
                           </>
                         ) : (
                           plan.buttonText
