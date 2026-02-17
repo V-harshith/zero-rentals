@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 import type { Property, User, SearchFilters, Inquiry, Payment } from '@/lib/types'
 import { mapPropertyFromDB, mapPropertyToDB, type PropertyRow } from '@/lib/data-mappers'
 import { PropertySchema } from '@/lib/validation'
@@ -1111,7 +1112,9 @@ export async function setPropertyFeatured(
   adminId?: string
 ): Promise<FeaturedStatusResult> {
   try {
-    const { data, error } = await supabase.rpc('set_property_featured', {
+    // CRITICAL: Use supabaseAdmin (service role) for admin operations
+    // The browser client doesn't have sufficient permissions for this RPC
+    const { data, error } = await supabaseAdmin.rpc('set_property_featured', {
       p_property_id: propertyId,
       p_featured: featured,
       p_admin_id: adminId || null
