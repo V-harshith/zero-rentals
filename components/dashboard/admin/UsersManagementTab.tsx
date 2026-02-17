@@ -34,13 +34,15 @@ interface UsersManagementTabProps {
     loading: boolean
     onRefresh: () => void
     searchQuery?: string // Add this prop
+    currentAdminId?: string // Current logged-in admin's ID
 }
 
 export function UsersManagementTab({
     users,
     loading,
     onRefresh,
-    searchQuery = "" // Default to empty
+    searchQuery = "", // Default to empty
+    currentAdminId
 }: UsersManagementTabProps) {
     const [updatingUserId, setUpdatingUserId] = useState<string | null>(null)
     const [deletingUserId, setDeletingUserId] = useState<string | null>(null)
@@ -212,19 +214,21 @@ export function UsersManagementTab({
                                                     </Button>
                                                 )}
 
-                                                {/* Delete Button */}
-                                                <Button
-                                                    size="sm"
-                                                    variant="destructive"
-                                                    onClick={() => handleDeleteUser(user)}
-                                                    disabled={updatingUserId === user.id || deletingUserId === user.id}
-                                                >
-                                                    {deletingUserId === user.id ? (
-                                                        <Loader2 className="h-3 w-3 animate-spin" />
-                                                    ) : (
-                                                        <Trash2 className="h-3 w-3" />
-                                                    )}
-                                                </Button>
+                                                {/* Delete Button - Hidden for current admin */}
+                                                {currentAdminId !== user.id && (
+                                                    <Button
+                                                        size="sm"
+                                                        variant="destructive"
+                                                        onClick={() => handleDeleteUser(user)}
+                                                        disabled={updatingUserId === user.id || deletingUserId === user.id}
+                                                    >
+                                                        {deletingUserId === user.id ? (
+                                                            <Loader2 className="h-3 w-3 animate-spin" />
+                                                        ) : (
+                                                            <Trash2 className="h-3 w-3" />
+                                                        )}
+                                                    </Button>
+                                                )}
                                             </div>
                                         </TableCell>
                                     </TableRow>
@@ -296,19 +300,21 @@ export function UsersManagementTab({
                                         </Button>
                                     )}
 
-                                    {/* Delete */}
-                                    <Button
-                                        size="sm"
-                                        variant="destructive"
-                                        onClick={() => handleDeleteUser(user)}
-                                        disabled={updatingUserId === user.id || deletingUserId === user.id}
-                                    >
-                                        {deletingUserId === user.id ? (
-                                            <Loader2 className="h-3 w-3 animate-spin" />
-                                        ) : (
-                                            <Trash2 className="h-3 w-3" />
-                                        )}
-                                    </Button>
+                                    {/* Delete - Hidden for current admin */}
+                                    {currentAdminId !== user.id && (
+                                        <Button
+                                            size="sm"
+                                            variant="destructive"
+                                            onClick={() => handleDeleteUser(user)}
+                                            disabled={updatingUserId === user.id || deletingUserId === user.id}
+                                        >
+                                            {deletingUserId === user.id ? (
+                                                <Loader2 className="h-3 w-3 animate-spin" />
+                                            ) : (
+                                                <Trash2 className="h-3 w-3" />
+                                            )}
+                                        </Button>
+                                    )}
                                 </div>
                             </div>
                         ))

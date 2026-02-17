@@ -901,6 +901,7 @@ function AdminDashboard() {
               loading={loadingUsers}
               onRefresh={loadUsers}
               searchQuery={debouncedSearchQuery}
+              currentAdminId={user?.id}
             />
           </TabsContent>
 
