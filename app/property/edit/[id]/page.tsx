@@ -511,7 +511,7 @@ function EditPropertyPage() {
             if (!user?.id) {
                 throw new Error("You must be logged in to update properties")
             }
-            const { error } = await updateProperty(params.id as string, propertyUpdates, user.id)
+            const { error } = await updateProperty(params.id as string, propertyUpdates, user.id, isAdmin)
 
             if (error) {
                 throw new Error("Failed to update property")

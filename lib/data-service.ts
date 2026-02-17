@@ -602,11 +602,13 @@ export async function createProperty(
 export async function updateProperty(
   id: string,
   updates: Partial<Property> & { roomPrices?: Record<string, number> },
-  ownerId?: string
+  ownerId?: string,
+  isAdmin?: boolean
 ): Promise<{ data: Property | null; error: any }> {
   try {
     // CRITICAL: Verify ownership if ownerId is provided
-    if (ownerId) {
+    // Admins can bypass ownership check
+    if (ownerId && !isAdmin) {
       const { data: property, error: fetchError } = await supabase
         .from('properties')
         .select('owner_id')

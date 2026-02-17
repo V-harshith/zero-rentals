@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { supabase } from "@/lib/supabase"
 import { Loader2, UserPlus, Users, Search, Check } from "lucide-react"
+import { toast } from "sonner"
 import { GooglePlacesInput, type PlaceDetails } from "./GooglePlacesInput"
 import type { FormData } from "./types"
 
@@ -88,6 +89,7 @@ const BasicDetailsStepComponent = ({
 
             if (error) {
                 console.error("Owner search error:", error)
+                toast.error("Failed to search owners. Please try again.")
                 setSearchResults([])
             } else {
                 setSearchResults(data || [])
@@ -95,6 +97,7 @@ const BasicDetailsStepComponent = ({
             }
         } catch (err) {
             console.error("Owner search failed:", err)
+            toast.error("Failed to search owners. Please try again.")
             setSearchResults([])
         } finally {
             setIsSearching(false)

@@ -861,7 +861,8 @@ function PostPropertyPage() {
 
   const handleSubmit = async () => {
     // Strong submit lock using ref (prevents race conditions)
-    if (submitLockRef.current || isSubmitting) {
+    // Only use ref for synchronous check - React state is async and unreliable for this
+    if (submitLockRef.current) {
       console.log('Submit already in progress, ignoring duplicate')
       return
     }
@@ -928,15 +929,42 @@ function PostPropertyPage() {
       // If admin, handle owner assignment
       if (isAdmin) {
         if (ownerMode === 'existing' && selectedExistingOwner) {
-          // Use existing owner — no account creation needed
-          ownerId = selectedExistingOwner.id
-          ownerName = selectedExistingOwner.name
-          ownerContact = selectedExistingOwner.phone || selectedExistingOwner.email
+          // Verify the owner still exists in database (prevents race condition)
+          setUploadStatus("Verifying owner...")
+          const { data: existingOwner, error: ownerCheckError } = await supabase
+            .from('users')
+            .select('id, name, email, phone')
+            .eq('id', selectedExistingOwner.id)
+            .eq('role', 'owner')
+            .maybeSingle()
+
+          if (ownerCheckError || !existingOwner) {
+            throw new Error("Selected owner no longer exists. Please select a different owner.")
+          }
+
+          ownerId = existingOwner.id
+          ownerName = existingOwner.name
+          ownerContact = existingOwner.phone || existingOwner.email
           setUploadStatus("Creating property...")
         } else {
           // Create new owner account
           setUploadStatus("Creating owner account...")
-          
+
+          // Check if email already exists
+          const { data: existingUser, error: existingUserError } = await supabase
+            .from('users')
+            .select('id, email')
+            .eq('email', ownerDetails.email)
+            .maybeSingle()
+
+          if (existingUserError) {
+            console.error("Error checking existing user:", existingUserError)
+          }
+
+          if (existingUser) {
+            throw new Error(`An account with email ${ownerDetails.email} already exists. Please select this owner from the existing owners list.`)
+          }
+
           const { data: authData, error: authError } = await supabase.auth.signUp({
             email: ownerDetails.email,
             password: ownerDetails.password,
