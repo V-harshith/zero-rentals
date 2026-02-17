@@ -507,8 +507,11 @@ function EditPropertyPage() {
             }
             propertyUpdates.images = finalImages
 
-            // 5. Update DB
-            const { error } = await updateProperty(params.id as string, propertyUpdates)
+            // 5. Update DB with ownership verification
+            if (!user?.id) {
+                throw new Error("You must be logged in to update properties")
+            }
+            const { error } = await updateProperty(params.id as string, propertyUpdates, user.id)
 
             if (error) {
                 throw new Error("Failed to update property")
@@ -556,7 +559,11 @@ function EditPropertyPage() {
     }
 
     const handleDelete = async () => {
-        const { error } = await deleteProperty(params.id as string)
+        if (!user?.id) {
+            toast.error("You must be logged in to delete properties")
+            return
+        }
+        const { error } = await deleteProperty(params.id as string, user.id)
         if (error) {
             toast.error("Failed to delete property")
         } else {

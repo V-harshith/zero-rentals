@@ -11,6 +11,7 @@ import { ROUTES } from "@/lib/constants"
 import { toast } from "sonner"
 import { useState } from "react"
 import { deleteProperty } from "@/lib/data-service"
+import { useAuth } from "@/lib/auth-context"
 
 export interface PropertiesTabProps {
     properties: Property[]
@@ -22,15 +23,21 @@ export interface PropertiesTabProps {
 
 export function PropertiesTab({ properties, loading, onRefresh, hasAnalytics = false, isPremium = false }: PropertiesTabProps) {
     const [deletingId, setDeletingId] = useState<string | null>(null)
+    const { user } = useAuth()
 
     const handleDelete = async (id: string) => {
         if (!confirm("Are you sure you want to delete this property? This action cannot be undone.")) {
             return
         }
 
+        if (!user?.id) {
+            toast.error("You must be logged in to delete properties")
+            return
+        }
+
         setDeletingId(id)
         try {
-            const { error } = await deleteProperty(id)
+            const { error } = await deleteProperty(id, user.id)
             if (error) throw error
             toast.success("Property deleted successfully")
             onRefresh()
