@@ -8,7 +8,7 @@ export interface User {
     role: 'admin' | 'owner' | 'tenant';
     avatar_url: string | null;
     verified: boolean;
-    status: 'active' | 'inactive' | 'suspended';
+    // Note: status field removed - using verified boolean only
     city?: string;
     preferred_city?: string;
     preferred_area?: string;
@@ -47,30 +47,76 @@ export async function getAllUsers(): Promise<User[]> {
 }
 
 /**
- * Update user status (Admin only)
+ * Update user verification status (Admin only)
+ * Note: Using verified boolean instead of status enum
  */
-export async function updateUserStatus(userId: string, status: 'active' | 'suspended'): Promise<{ error: any }> {
-    const { error } = await supabase
-        .from('users')
-        .update({ status })
-        .eq('id', userId);
+export async function updateUserVerification(userId: string, verified: boolean, csrfToken?: string): Promise<{ error: any }> {
+    try {
+        const headers: Record<string, string> = {}
+        if (csrfToken) {
+            headers['x-csrf-token'] = csrfToken
+        }
 
-    return { error };
+        // Use the API endpoint with CSRF protection
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session) {
+            return { error: new Error('Authentication required') }
+        }
+
+        const response = await fetch(`/api/admin/users/${userId}/verify`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${session.access_token}`,
+                ...headers
+            },
+            body: JSON.stringify({ verified })
+        })
+
+        if (!response.ok) {
+            const data = await response.json()
+            return { error: new Error(data.error || 'Failed to update user') }
+        }
+
+        return { error: null }
+    } catch (error) {
+        return { error }
+    }
 }
 
 /**
- * Verify user (Admin only)
+ * Verify user (Admin only) - With CSRF protection
  */
-export async function verifyUser(userId: string): Promise<{ error: any }> {
-    const { error } = await supabase
-        .from('users')
-        .update({
-            verified: true,
-            email_verified_at: new Date().toISOString()
-        })
-        .eq('id', userId);
+export async function verifyUser(userId: string, csrfToken?: string): Promise<{ error: any }> {
+    try {
+        const headers: Record<string, string> = {
+            'Content-Type': 'application/json'
+        }
+        if (csrfToken) {
+            headers['x-csrf-token'] = csrfToken
+        }
 
-    return { error };
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session) {
+            return { error: new Error('Authentication required') }
+        }
+        headers['Authorization'] = `Bearer ${session.access_token}`
+
+        const response = await fetch(`/api/admin/users/${userId}/verify`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ verified: true })
+        })
+
+        if (!response.ok) {
+            const data = await response.json()
+            return { error: new Error(data.error || 'Failed to verify user') }
+        }
+
+        return { error: null }
+    } catch (error) {
+        return { error }
+    }
 }
 
 /**

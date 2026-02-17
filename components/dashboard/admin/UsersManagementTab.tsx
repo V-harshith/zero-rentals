@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useRef } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -26,7 +26,7 @@ import {
 import { Search, Loader2, CheckCircle, XCircle, Trash2 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
-import { updateUserStatus, verifyUser, type User } from "@/lib/user-service"
+import { verifyUser, type User } from "@/lib/user-service"
 import { useCsrf } from "@/lib/csrf-context"
 
 interface UsersManagementTabProps {
@@ -48,49 +48,45 @@ export function UsersManagementTab({
     const [showDeleteDialog, setShowDeleteDialog] = useState(false)
     const { csrfToken } = useCsrf()
 
-    // Filter users based on search query prop
-    const filteredUsers = users.filter(
-        (user) =>
-            user.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            user.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            user.role.toLowerCase().includes(searchQuery.toLowerCase())
-    )
-
-    const handleToggleStatus = async (userId: string, currentStatus: string) => {
-        setUpdatingUserId(userId)
-        try {
-            const newStatus: 'active' | 'suspended' = currentStatus === 'active' ? 'suspended' : 'active'
-            const { error } = await updateUserStatus(userId, newStatus)
-
-            if (error) {
-                toast.error('Failed to update user status')
-                return
-            }
-
-            toast.success(`User ${newStatus === 'active' ? 'activated' : 'suspended'}`)
-            onRefresh()
-        } catch (error) {
-            toast.error('Failed to update user status')
-        } finally {
-            setUpdatingUserId(null)
-        }
+    // Filter users based on search query prop - with XSS-safe sanitization
+    const sanitizeInput = (input: string): string => {
+        // Remove any HTML tags and limit length to prevent XSS
+        return input.replace(/[<>\"']/g, '').slice(0, 100).toLowerCase()
     }
 
+    const safeSearchQuery = sanitizeInput(searchQuery)
+    const filteredUsers = users.filter(
+        (user) =>
+            user.email.toLowerCase().includes(safeSearchQuery) ||
+            user.name.toLowerCase().includes(safeSearchQuery) ||
+            user.role.toLowerCase().includes(safeSearchQuery)
+    )
+
+    // Refs to track in-flight requests for deduplication
+    const verifyingRef = useRef<Set<string>>(new Set())
+    const deletingRef = useRef<Set<string>>(new Set())
+
     const handleVerifyUser = async (userId: string) => {
+        // Prevent duplicate requests
+        if (verifyingRef.current.has(userId)) return
+        verifyingRef.current.add(userId)
         setUpdatingUserId(userId)
+
         try {
-            const { error } = await verifyUser(userId)
+            const { error } = await verifyUser(userId, csrfToken || undefined)
 
             if (error) {
-                toast.error('Failed to verify user')
+                toast.error(error.message || 'Failed to verify user')
                 return
             }
 
+            // Only show success and refresh after confirmed API success
             toast.success('User verified successfully')
             onRefresh()
-        } catch (error) {
+        } catch {
             toast.error('Failed to verify user')
         } finally {
+            verifyingRef.current.delete(userId)
             setUpdatingUserId(null)
         }
     }
@@ -196,23 +192,6 @@ export function UsersManagementTab({
                                         </TableCell>
                                         <TableCell>
                                             <div className="flex items-center gap-2 flex-wrap">
-                                                {/* Status Toggle Button - More reliable than Switch */}
-                                                <Button
-                                                    size="sm"
-                                                    variant={user.status === 'active' ? 'default' : 'secondary'}
-                                                    onClick={() => handleToggleStatus(user.id, user.status)}
-                                                    disabled={updatingUserId === user.id || deletingUserId === user.id}
-                                                    className={user.status === 'active' ? 'bg-green-600 hover:bg-green-700' : ''}
-                                                >
-                                                    {updatingUserId === user.id ? (
-                                                        <Loader2 className="h-3 w-3 animate-spin" />
-                                                    ) : user.status === 'active' ? (
-                                                        'Active'
-                                                    ) : (
-                                                        'Suspended'
-                                                    )}
-                                                </Button>
-
                                                 {/* Verify Button */}
                                                 {!user.verified && (
                                                     <Button
@@ -273,7 +252,7 @@ export function UsersManagementTab({
                                     <Badge variant="outline" className="capitalize">{user.role}</Badge>
                                 </div>
 
-                                {/* Status Row */}
+                                {/* Verification Row */}
                                 <div className="flex items-center justify-between py-2 border-t border-b">
                                     <div className="flex items-center gap-2">
                                         <span className="text-sm text-muted-foreground">Status:</span>
@@ -288,32 +267,15 @@ export function UsersManagementTab({
                                         )}
                                     </div>
                                     <Badge
-                                        variant={user.status === 'active' ? 'default' : 'secondary'}
-                                        className={user.status === 'active' ? 'bg-green-600' : ''}
+                                        variant={user.verified ? 'default' : 'secondary'}
+                                        className={user.verified ? 'bg-green-600' : ''}
                                     >
-                                        {user.status}
+                                        {user.verified ? 'Verified' : 'Pending'}
                                     </Badge>
                                 </div>
 
                                 {/* Action Buttons */}
                                 <div className="flex flex-wrap gap-2">
-                                    {/* Activate/Suspend */}
-                                    <Button
-                                        size="sm"
-                                        variant={user.status === 'active' ? 'default' : 'secondary'}
-                                        onClick={() => handleToggleStatus(user.id, user.status)}
-                                        disabled={updatingUserId === user.id || deletingUserId === user.id}
-                                        className={`flex-1 ${user.status === 'active' ? 'bg-green-600 hover:bg-green-700' : ''}`}
-                                    >
-                                        {updatingUserId === user.id ? (
-                                            <Loader2 className="h-3 w-3 animate-spin" />
-                                        ) : user.status === 'active' ? (
-                                            'Suspend'
-                                        ) : (
-                                            'Activate'
-                                        )}
-                                    </Button>
-
                                     {/* Verify */}
                                     {!user.verified && (
                                         <Button

@@ -45,10 +45,10 @@ export async function GET(request: NextRequest) {
     )
     const offset = (page - 1) * pageSize
 
-    // Build base query
+    // Build base query - only select columns that exist in database
     let query = supabase
       .from('users')
-      .select('id, name, email, phone, role, status, verified, created_at, email_verified_at, subscription_plan', { count: 'exact' })
+      .select('id, name, email, phone, role, verified, created_at, email_verified_at, preferred_city, preferred_area', { count: 'exact' })
       .order('created_at', { ascending: false })
 
     if (role && role !== 'all') {
