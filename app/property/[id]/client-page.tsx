@@ -108,12 +108,36 @@ export default function PropertyClientPage({ id, initialProperty }: { id: string
         }
     }, [user, selectedImageIndex])
 
-    // Track property view on page load
+    // Track property view on page load - with client-side deduplication
     useEffect(() => {
-        let isMounted = true
-
         async function trackView() {
             try {
+                // Client-side deduplication: Check if we already viewed this property recently
+                const viewedKey = `viewed_${id}`
+                const lastViewed = sessionStorage.getItem(viewedKey)
+                const now = Date.now()
+
+                // If viewed within last 5 minutes, don't count again
+                if (lastViewed) {
+                    const timeSinceLastView = now - parseInt(lastViewed)
+                    if (timeSinceLastView < 5 * 60 * 1000) {
+                        return // Skip tracking - duplicate view within 5 minutes
+                    }
+                }
+
+                // Mark as viewed in sessionStorage
+                sessionStorage.setItem(viewedKey, now.toString())
+
+                // Also check localStorage for persistent deduplication (24 hours)
+                const persistentKey = `property_view_${id}_${new Date().toISOString().split('T')[0]}`
+                if (localStorage.getItem(persistentKey)) {
+                    // Already viewed today, but still call API for unique view tracking
+                    // The server will handle the final decision
+                } else {
+                    localStorage.setItem(persistentKey, '1')
+                    // Expire after 24 hours (done by date in key)
+                }
+
                 await fetch(`/api/properties/${id}/view`, { method: 'POST' })
             } catch {
                 // Silently fail - don't break UX if view tracking fails
@@ -121,10 +145,6 @@ export default function PropertyClientPage({ id, initialProperty }: { id: string
         }
 
         trackView()
-
-        return () => {
-            isMounted = false
-        }
     }, [id])
 
     useEffect(() => {

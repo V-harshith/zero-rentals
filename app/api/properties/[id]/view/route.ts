@@ -40,6 +40,18 @@ export async function POST(
         // Get current user if authenticated
         const { data: { user } } = await supabase.auth.getUser()
 
+        // Get property owner to prevent owner self-views
+        const { data: property } = await supabase
+            .from('properties')
+            .select('owner_id')
+            .eq('id', id)
+            .single()
+
+        // Don't count views from the owner
+        if (user && property?.owner_id === user.id) {
+            return NextResponse.json({ success: true, tracked: false, reason: 'owner_view' })
+        }
+
         // Generate session ID for anonymous tracking
         const sessionId = generateSessionId(request)
         const ipHash = hashIp(request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || '')
@@ -65,8 +77,8 @@ export async function POST(
 
         if (error) {
             console.error('View tracking error:', error)
-            // Fallback: simple increment if RPC fails
-            await supabase.rpc('increment_property_views', { property_id: id })
+            // Don't fallback to simple increment - fail silently to prevent abuse
+            return NextResponse.json({ success: true, tracked: false, error: 'tracking_failed' })
         }
 
         return NextResponse.json({
@@ -77,7 +89,7 @@ export async function POST(
     } catch (error: any) {
         console.error('Error tracking view:', error)
         // Don't fail the request - view tracking should be invisible to users
-        return NextResponse.json({ success: true, error: 'Tracking failed silently' })
+        return NextResponse.json({ success: true, tracked: false, error: 'tracking_failed' })
     }
 }
 
