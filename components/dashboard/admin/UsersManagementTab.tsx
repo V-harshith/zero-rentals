@@ -190,8 +190,8 @@ export function UsersManagementTab({
                                                 <XCircle className="h-4 w-4 text-red-500 mx-auto" />
                                             )}
                                         </TableCell>
-                                        <TableCell>
-                                            <div className="flex items-center gap-2 flex-wrap">
+                                        <TableCell className="text-right">
+                                            <div className="flex items-center justify-end gap-2 flex-wrap">
                                                 {/* Verify Button */}
                                                 {!user.verified && (
                                                     <Button

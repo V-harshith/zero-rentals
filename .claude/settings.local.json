@@ -25,7 +25,8 @@
       "mcp__plugin_claude-mem_mcp-search__save_memory",
       "Bash(npx knip:*)",
       "Bash(powershell:*)",
-      "Bash(dir:*)"
+      "Bash(dir:*)",
+      "Bash(python3 ~/.claude/skills/continuous-learning-v2/scripts/instinct-cli.py:*)"
     ]
   }
 }

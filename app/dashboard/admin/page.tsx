@@ -255,6 +255,34 @@ function AdminDashboard() {
         await loadPendingProperties(false, snapshotTimestamp)
         // Then load stats (less critical) with the same timestamp
         await loadTotalStats(snapshotTimestamp)
+
+        // Load tab-specific data based on initial active tab from URL
+        // This ensures data is loaded when user refreshes on a specific tab
+        if (activeTab === 'users' && !loadingTabsRef.current.has('users')) {
+          loadingTabsRef.current.add('users')
+          await loadUsers(false, snapshotTimestamp)
+          loadingTabsRef.current.delete('users')
+        }
+        if (activeTab === 'payments' && !loadingTabsRef.current.has('payments')) {
+          loadingTabsRef.current.add('payments')
+          await loadPayments(false, snapshotTimestamp)
+          loadingTabsRef.current.delete('payments')
+        }
+        if (activeTab === 'overview') {
+          // Load all data for overview tab
+          if (!loadingTabsRef.current.has('users') && !overviewLoadingRef.current.users) {
+            loadingTabsRef.current.add('users')
+            overviewLoadingRef.current.users = true
+            await loadUsers(false, snapshotTimestamp)
+            loadingTabsRef.current.delete('users')
+          }
+          if (!loadingTabsRef.current.has('payments') && !overviewLoadingRef.current.payments) {
+            loadingTabsRef.current.add('payments')
+            overviewLoadingRef.current.payments = true
+            await loadPayments(false, snapshotTimestamp)
+            loadingTabsRef.current.delete('payments')
+          }
+        }
       } catch {
         // Error handled silently - toast shown by individual loaders
       }
