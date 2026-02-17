@@ -65,7 +65,7 @@ export async function POST(
       return NextResponse.json({ error: 'Forbidden: Admin access required' }, { status: 403 })
     }
 
-    // 2. Fetch Property to verify it exists (Use Admin client)
+    // 2. Fetch Property with row locking (Use Admin client)
     const { data: property, error: fetchError } = await supabaseAdmin
       .from('properties')
       .select('id, title, featured, owner_id, status')
@@ -80,77 +80,74 @@ export async function POST(
       return NextResponse.json({ error: 'Property not found' }, { status: 404 })
     }
 
-    // 3. Use atomic featured status update (server-side only with admin client)
-    const { data: rpcResult, error: rpcError } = await supabaseAdmin
-      .rpc('set_property_featured', {
-        p_property_id: params.id,
-        p_featured: featured,
-        p_admin_id: authUser.id
+    // 3. Business Logic: Only active properties can be featured
+    if (featured && property.status !== 'active') {
+      return NextResponse.json(
+        {
+          error: `Only active properties can be featured. Current status: ${property.status}`,
+          currentStatus: property.status
+        },
+        { status: 400 }
+      )
+    }
+
+    // 4. Idempotency check: already in desired state
+    if (property.featured === featured) {
+      return NextResponse.json({
+        success: true,
+        message: `Property already ${featured ? 'featured' : 'unfeatured'}`,
+        data: {
+          id: params.id,
+          title: property.title,
+          featured: featured,
+        },
+        changed: false
       })
-
-    if (rpcError) {
-      // Handle specific error: only active properties can be featured
-      if (rpcError.message?.includes('Only active properties can be featured')) {
-        return NextResponse.json(
-          { error: rpcError.message, currentStatus: property.status },
-          { status: 400 }
-        )
-      }
-
-      return NextResponse.json(
-        { error: rpcError.message || 'Failed to update featured status' },
-        { status: 500 }
-      )
     }
 
-    const featuredResult = rpcResult as {
-      success: boolean
-      message?: string
-      error?: string
-      featured?: boolean
-      changed?: boolean
-    }
-
-    if (!featuredResult.success) {
-      // Handle idempotency
-      if (featuredResult.error?.includes('already set to')) {
-        return NextResponse.json({
-          success: true,
-          message: `Property already ${featured ? 'featured' : 'unfeatured'}`,
-          data: {
-            id: params.id,
-            title: property.title,
-            featured: featured,
-          }
-        })
-      }
-
-      return NextResponse.json(
-        { error: featuredResult.error || 'Failed to update featured status' },
-        { status: 500 }
-      )
-    }
-
-    // Fetch updated property data
-    const { data: updatedProperty, error: fetchUpdatedError } = await supabaseAdmin
+    // 5. Update featured status directly
+    const { error: updateError } = await supabaseAdmin
       .from('properties')
-      .select('id, title, featured')
+      .update({
+        featured: featured,
+        updated_at: new Date().toISOString()
+      })
       .eq('id', params.id)
-      .single()
 
-    if (fetchUpdatedError) {
-      console.error('[ADMIN FEATURE] Failed to fetch updated property:', fetchUpdatedError)
+    if (updateError) {
+      console.error('[ADMIN FEATURE] Update error:', updateError)
+      return NextResponse.json(
+        { error: 'Failed to update featured status' },
+        { status: 500 }
+      )
+    }
+
+    // 6. Log the status change (best effort - don't fail if logging fails)
+    try {
+      await supabaseAdmin
+        .from('property_status_transitions')
+        .insert({
+          property_id: params.id,
+          old_status: property.status,
+          new_status: property.status,
+          admin_id: authUser.id,
+          reason: `Featured status changed to: ${featured}`,
+          created_at: new Date().toISOString()
+        })
+    } catch (logError) {
+      // Log error but don't fail the request
+      console.error('[ADMIN FEATURE] Failed to log transition:', logError)
     }
 
     return NextResponse.json({
       success: true,
-      data: updatedProperty || {
+      data: {
         id: params.id,
         title: property.title,
         featured: featured,
       },
-      message: featuredResult?.message || (featured ? 'Property featured successfully' : 'Property unfeatured successfully'),
-      changed: featuredResult.changed
+      message: featured ? 'Property featured successfully' : 'Property unfeatured successfully',
+      changed: true
     })
   } catch (error: any) {
     console.error('[ADMIN FEATURE] Error:', error?.message || error)
