@@ -775,8 +775,8 @@ export default function PropertyClientPage({ id, initialProperty }: { id: string
 
                     {/* Sidebar */}
                     <div className="lg:col-span-1 space-y-6">
-                        {/* Owner Card */}
-                        <Card className="lg:sticky lg:top-24">
+                        {/* Owner Card - z-10 to stay above sticky navbars */}
+                        <Card className="lg:sticky lg:top-24 z-10">
                             <CardHeader>
                                 <CardTitle className="flex items-center gap-2">
                                     <Home className="h-5 w-5" />

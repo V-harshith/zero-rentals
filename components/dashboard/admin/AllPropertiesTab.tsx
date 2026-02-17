@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Search, Star, CheckCircle, XCircle, ExternalLink, Loader2, Trash2, Pencil } from "lucide-react"
+import { Search, Star, CheckCircle, XCircle, ExternalLink, Loader2, Trash2, Pencil, Eye } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { mapPropertyFromDB, type PropertyRow } from "@/lib/data-mappers"
 import { type Property } from "@/lib/types"
@@ -76,7 +76,7 @@ export function AllPropertiesTab() {
             // The browser/network will handle actual timeouts
             const { data, error, count } = await supabase
                 .from('properties')
-                .select('id, title, city, area, locality, owner_name, owner_contact, private_room_price, double_sharing_price, triple_sharing_price, four_sharing_price, room_type, property_type, featured, verified, status, created_at, images', { count: 'exact' })
+                .select('id, title, city, area, locality, owner_name, owner_contact, private_room_price, double_sharing_price, triple_sharing_price, four_sharing_price, room_type, property_type, featured, verified, status, created_at, images, views', { count: 'exact' })
                 .order('created_at', { ascending: false })
                 .range(from, to)
 
@@ -322,6 +322,7 @@ export function AllPropertiesTab() {
                                 <TableHead>Type</TableHead>
                                 <TableHead>Location</TableHead>
                                 <TableHead>Owner</TableHead>
+                                <TableHead>Views</TableHead>
                                 <TableHead>Featured</TableHead>
                                 <TableHead>Verified</TableHead>
                                 <TableHead>Actions</TableHead>
@@ -379,6 +380,12 @@ export function AllPropertiesTab() {
                                         <TableCell>
                                             <div className="text-sm">{property.owner.name}</div>
                                             <div className="text-xs text-muted-foreground">{property.owner.phone}</div>
+                                        </TableCell>
+                                        <TableCell>
+                                            <div className="flex items-center gap-1 text-sm">
+                                                <Eye className="h-3 w-3 text-muted-foreground" />
+                                                <span>{property.views || 0}</span>
+                                            </div>
                                         </TableCell>
                                         <TableCell>
                                             <Button
