@@ -101,6 +101,13 @@ export default function PropertyClientPage({ id, initialProperty }: { id: string
         }
     }, [])
 
+    // Security: Reset image index when user logs out (prevent browsing images)
+    useEffect(() => {
+        if (!user && selectedImageIndex !== 0) {
+            setSelectedImageIndex(0)
+        }
+    }, [user, selectedImageIndex])
+
     // Track property view on page load
     useEffect(() => {
         let isMounted = true
@@ -419,7 +426,7 @@ export default function PropertyClientPage({ id, initialProperty }: { id: string
                                 <div className="relative h-64 sm:h-80 md:h-96 bg-gray-200 rounded-t-lg flex items-center justify-center overflow-hidden group">
                                     {property.images && property.images.length > 0 ? (
                                         <Image
-                                            src={property.images[selectedImageIndex]}
+                                            src={property.images[!user ? 0 : selectedImageIndex]}
                                             alt={property.title}
                                             fill
                                             priority
@@ -435,8 +442,8 @@ export default function PropertyClientPage({ id, initialProperty }: { id: string
                                             <Badge className="bg-accent">Featured</Badge>
                                         )}
                                     </div>
-                                    {/* Image Navigation Arrows */}
-                                    {property.images && property.images.length > 1 && (
+                                    {/* Image Navigation Arrows - Only for logged in users */}
+                                    {user && property.images && property.images.length > 1 && (
                                         <>
                                             <button
                                                 onClick={() => setSelectedImageIndex(prev => prev === 0 ? property.images!.length - 1 : prev - 1)}
@@ -458,42 +465,40 @@ export default function PropertyClientPage({ id, initialProperty }: { id: string
                                             </div>
                                         </>
                                     )}
-                                </div>
-                                {/* Thumbnail images with teaser for non-logged-in users */}
-                                {property.images && property.images.length > 1 && (
-                                    <div className="relative">
-                                        {/* Show thumbnails for all users */}
-                                        <div className={`grid grid-cols-4 gap-2 p-4 ${!user ? 'blur-sm' : ''}`}>
-                                            {property.images.slice(0, 4).map((img, i) => (
-                                                <div
-                                                    key={i}
-                                                    onClick={() => user && setSelectedImageIndex(i)}
-                                                    className={`relative h-20 bg-gray-100 rounded overflow-hidden ${
-                                                        user ? 'cursor-pointer hover:opacity-75 transition-all' : 'cursor-not-allowed'
-                                                    } ${
-                                                        selectedImageIndex === i ? 'ring-2 ring-primary ring-offset-2' : ''
-                                                    }`}
-                                                >
-                                                    <Image
-                                                        src={img}
-                                                        alt={`Property ${i + 1}`}
-                                                        fill
-                                                        className="w-full h-full object-cover"
-                                                        sizes="(max-width: 768px) 25vw, 150px"
-                                                    />
-                                                </div>
-                                            ))}
+                                    {/* For non-logged in users - show locked indicator */}
+                                    {!user && property.images && property.images.length > 1 && (
+                                        <div className="absolute bottom-4 right-4 z-10 bg-black/60 text-white text-xs px-3 py-1 rounded-full">
+                                            1 / {property.images.length}
                                         </div>
-                                        {/* More images if available */}
+                                    )}
+                                </div>
+                                {/* Thumbnail images - only show for logged in users */}
+                                {user && property.images && property.images.length > 1 && (
+                                    <div className="grid grid-cols-4 gap-2 p-4">
+                                        {property.images.slice(0, 4).map((img, i) => (
+                                            <div
+                                                key={i}
+                                                onClick={() => setSelectedImageIndex(i)}
+                                                className={`relative h-20 bg-gray-100 rounded overflow-hidden cursor-pointer hover:opacity-75 transition-all ${
+                                                    selectedImageIndex === i ? 'ring-2 ring-primary ring-offset-2' : ''
+                                                }`}
+                                            >
+                                                <Image
+                                                    src={img}
+                                                    alt={`Property ${i + 1}`}
+                                                    fill
+                                                    className="w-full h-full object-cover"
+                                                    sizes="(max-width: 768px) 25vw, 150px"
+                                                />
+                                            </div>
+                                        ))}
                                         {property.images.length > 4 && (
-                                            <div className={`grid grid-cols-4 gap-2 p-4 pt-0 ${!user ? 'blur-sm' : ''}`}>
+                                            <div className="grid grid-cols-4 gap-2 p-4 pt-0">
                                                 {property.images.slice(4, 8).map((img, i) => (
                                                     <div
                                                         key={i + 4}
-                                                        onClick={() => user && setSelectedImageIndex(i + 4)}
-                                                        className={`relative h-20 bg-gray-100 rounded overflow-hidden ${
-                                                            user ? 'cursor-pointer hover:opacity-75 transition-all' : 'cursor-not-allowed'
-                                                        } ${
+                                                        onClick={() => setSelectedImageIndex(i + 4)}
+                                                        className={`relative h-20 bg-gray-100 rounded overflow-hidden cursor-pointer hover:opacity-75 transition-all ${
                                                             selectedImageIndex === i + 4 ? 'ring-2 ring-primary ring-offset-2' : ''
                                                         }`}
                                                     >
@@ -508,33 +513,26 @@ export default function PropertyClientPage({ id, initialProperty }: { id: string
                                                 ))}
                                             </div>
                                         )}
-
-                                        {/* Blurred overlay for non-logged-in users */}
-                                        {!user && (
-                                            <div className="absolute inset-0 flex items-center justify-center bg-black/10 backdrop-blur-[2px]">
-                                                <div className="bg-white/95 rounded-xl p-6 shadow-2xl text-center max-w-xs mx-4">
-                                                    <div className="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-3">
-                                                        <svg className="w-6 h-6 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                                                        </svg>
-                                                    </div>
-                                                    <h4 className="font-semibold text-gray-900 mb-1">View All {property.images.length} Photos</h4>
-                                                    <p className="text-sm text-gray-500 mb-4">Login to see the complete photo gallery</p>
-                                                    <Button
-                                                        onClick={() => {
-                                                            // Trigger login modal
-                                                            const event = new CustomEvent('openLoginModal')
-                                                            window.dispatchEvent(event)
-                                                        }}
-                                                        className="w-full"
-                                                        size="sm"
-                                                    >
-                                                        Login to View
-                                                    </Button>
-                                                </div>
+                                    </div>
+                                )}
+                                {/* Login prompt for non-logged in users */}
+                                {!user && property.images && property.images.length > 1 && (
+                                    <div className="p-4 bg-gray-50 border-t">
+                                        <div className="flex items-center justify-between">
+                                            <div>
+                                                <p className="font-medium text-gray-900">+{property.images.length - 1} more photos</p>
+                                                <p className="text-sm text-gray-500">Login to view complete gallery</p>
                                             </div>
-                                        )}
+                                            <Button
+                                                onClick={() => {
+                                                    const event = new CustomEvent('openLoginModal')
+                                                    window.dispatchEvent(event)
+                                                }}
+                                                size="sm"
+                                            >
+                                                Login to View
+                                            </Button>
+                                        </div>
                                     </div>
                                 )}
                             </CardContent>
@@ -775,8 +773,8 @@ export default function PropertyClientPage({ id, initialProperty }: { id: string
 
                     {/* Sidebar */}
                     <div className="lg:col-span-1 space-y-6">
-                        {/* Owner Card - z-10 to stay above sticky navbars */}
-                        <Card className="lg:sticky lg:top-24 z-10">
+                        {/* Owner Card - Sticky with higher z-index and proper positioning */}
+                        <Card className="lg:sticky lg:top-28 z-40 shadow-lg">
                             <CardHeader>
                                 <CardTitle className="flex items-center gap-2">
                                     <Home className="h-5 w-5" />
