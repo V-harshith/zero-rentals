@@ -43,70 +43,88 @@ export async function POST() {
             return NextResponse.json({ error: 'Only owners can create subscriptions' }, { status: 403 })
         }
 
-        // 3. Check if an active subscription already exists (idempotent)
+        // 3. Check if ANY active subscription already exists (CRITICAL FIX)
+        // This prevents free plan from overwriting paid plans
         const { data: existingSub } = await supabaseAdmin
             .from('subscriptions')
-            .select('id, plan_name, status')
+            .select('id, plan_name, status, amount, end_date')
             .eq('user_id', user.id)
             .eq('status', 'active')
             .gt('end_date', new Date().toISOString())
+            .order('end_date', { ascending: false })
             .limit(1)
             .maybeSingle()
 
         if (existingSub) {
+            // If existing subscription is paid, don't allow free plan creation
+            if (existingSub.amount > 0) {
+                return NextResponse.json({
+                    success: true,
+                    message: 'You already have an active paid plan',
+                    plan: existingSub.plan_name,
+                    isPaid: true
+                })
+            }
+            // If it's already a free plan, return success
             return NextResponse.json({
                 success: true,
-                message: 'Subscription already exists',
+                message: 'Free subscription already active',
                 plan: existingSub.plan_name
             })
         }
 
-        // 4. Create free subscription (30 days) using upsert for idempotency
-        // This handles race conditions where multiple requests arrive simultaneously
+        // 4. Create free subscription using atomic database function
+        // This prevents race conditions and duplicate subscriptions
         const startDate = new Date()
         const endDate = new Date()
         endDate.setDate(endDate.getDate() + 30)
 
-        const { data: subscription, error: upsertError } = await supabaseAdmin
-            .from('subscriptions')
-            .upsert({
-                user_id: user.id,
-                plan_name: 'Free',
-                plan_duration: '30 days',
-                amount: 0,
-                status: 'active',
-                properties_limit: 1,
-                start_date: startDate.toISOString(),
-                end_date: endDate.toISOString(),
-            }, {
-                onConflict: 'user_id', // Assumes unique constraint on user_id for active subscriptions
-                ignoreDuplicates: false // Update if conflict
+        const { data: subscriptionResult, error: createError } = await supabaseAdmin
+            .rpc('get_or_create_subscription', {
+                p_user_id: user.id,
+                p_plan_name: 'Free',
+                p_plan_duration: '30 days',
+                p_amount: 0,
+                p_properties_limit: 1,
+                p_start_date: startDate.toISOString(),
+                p_end_date: endDate.toISOString()
             })
-            .select('id, plan_name')
-            .single()
 
-        if (upsertError) {
-            // Check if subscription was created by another concurrent request
+        if (createError) {
+            console.error('Free subscription creation error:', createError)
+            // Fallback: check if subscription exists (race condition handling)
             const { data: raceConditionSub } = await supabaseAdmin
                 .from('subscriptions')
-                .select('id, plan_name, status')
+                .select('id, plan_name, status, amount')
                 .eq('user_id', user.id)
                 .eq('status', 'active')
                 .gt('end_date', new Date().toISOString())
+                .order('end_date', { ascending: false })
                 .limit(1)
                 .maybeSingle()
 
             if (raceConditionSub) {
                 return NextResponse.json({
                     success: true,
-                    message: 'Subscription already exists',
-                    plan: raceConditionSub.plan_name
+                    message: raceConditionSub.amount > 0 ? 'Paid subscription active' : 'Subscription already exists',
+                    plan: raceConditionSub.plan_name,
+                    isPaid: raceConditionSub.amount > 0
                 })
             }
 
-            console.error('Free subscription creation error:', upsertError)
             return NextResponse.json({ error: 'Failed to create subscription' }, { status: 500 })
         }
+
+        // Parse the result
+        const result = subscriptionResult as { id: string; plan_name: string; is_new: boolean; isPaid?: boolean }
+
+        return NextResponse.json({
+            success: true,
+            message: result.is_new ? 'Free subscription created' : (result.isPaid ? 'Paid plan already active' : 'Subscription already exists'),
+            plan: result.plan_name,
+            subscriptionId: result.id,
+            isNew: result.is_new
+        })
 
         return NextResponse.json({
             success: true,
