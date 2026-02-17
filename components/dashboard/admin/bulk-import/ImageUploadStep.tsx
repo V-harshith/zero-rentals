@@ -221,8 +221,29 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
             })
 
             if (!res.ok) {
-                const errorData = await res.json()
-                throw new Error(errorData.error || "Failed to upload images")
+                // Handle non-JSON error responses (like HTML error pages)
+                const contentType = res.headers.get('content-type') || ''
+                let errorMessage = `Upload failed: ${res.status} ${res.statusText}`
+
+                if (contentType.includes('application/json')) {
+                    try {
+                        const errorData = await res.json()
+                        errorMessage = errorData.error || errorData.message || errorMessage
+                    } catch {
+                        // JSON parsing failed, use default message
+                    }
+                } else {
+                    // Non-JSON response (HTML error page)
+                    if (res.status === 413) {
+                        errorMessage = "File size too large. Maximum total upload is 10MB. Try selecting fewer images or a folder with smaller images."
+                    } else if (res.status === 429) {
+                        errorMessage = "Rate limit exceeded. Please wait a moment and try again."
+                    } else if (res.status >= 500) {
+                        errorMessage = "Server error. Please try again later or contact support."
+                    }
+                }
+
+                throw new Error(errorMessage)
             }
 
             // Handle streaming response
@@ -243,8 +264,9 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
                     for (const line of lines) {
                         if (!line.trim()) continue
 
+                        let data: any
                         try {
-                            const data = JSON.parse(line)
+                            data = JSON.parse(line)
                             console.log('[Upload] Received:', data)
 
                             if (data.error) {
@@ -303,15 +325,29 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
                                 setUploadComplete(true)
                                 setResult(data)
                             }
-                        } catch (e: any) {
-                            console.error("Parse error:", e)
+                        } catch (parseError: any) {
+                            // Only throw if it's a real error from the server, not a parse error from partial data
+                            if (parseError.message &&
+                                parseError.message !== 'Unexpected end of JSON input' &&
+                                !parseError.message.includes('JSON') &&
+                                !parseError.message.includes('Unexpected token')) {
+                                console.error('[Upload] Server error:', parseError)
+                                throw parseError
+                            }
+                            // Otherwise continue - this might be a partial line or incomplete JSON
+                            console.log('[Upload] Skipping incomplete/partial line:', line.substring(0, 50))
                         }
                     }
                 }
             }
         } catch (err: any) {
-            setError(err.message)
-            toast.error(err.message)
+            const errorMessage = err.message || "Image upload failed"
+            setError(errorMessage)
+            toast.error("Image Upload Failed", {
+                description: errorMessage,
+                duration: 8000,
+            })
+            console.error("[Upload] Error:", err)
         } finally {
             setUploading(false)
         }
@@ -363,6 +399,18 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
                 <p className="text-muted-foreground">
                     Select a folder containing property images organized by PSN subfolders
                 </p>
+                {/* Upload Limits Info */}
+                <div className="flex flex-wrap justify-center gap-2 mt-3">
+                    <Badge variant="outline" className="text-xs">
+                        Max {MAX_TOTAL_IMAGES} images total
+                    </Badge>
+                    <Badge variant="outline" className="text-xs">
+                        Max {MAX_IMAGES_PER_PSN} images per property
+                    </Badge>
+                    <Badge variant="outline" className="text-xs">
+                        Max 2MB per image
+                    </Badge>
+                </div>
             </div>
 
             {/* Folder Upload Area */}
@@ -471,9 +519,21 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
 
             {/* Error Display */}
             {error && (
-                <Alert variant="destructive">
-                    <AlertTriangle className="h-4 w-4" />
-                    <AlertDescription>{error}</AlertDescription>
+                <Alert variant="destructive" className="border-red-500 bg-red-50">
+                    <AlertTriangle className="h-5 w-5 text-red-600" />
+                    <AlertDescription className="ml-2">
+                        <div className="font-semibold text-red-800 mb-1">Upload Failed</div>
+                        <div className="text-red-700">{error}</div>
+                        <div className="mt-2 text-xs text-red-600">
+                            <strong>Troubleshooting:</strong>
+                            <ul className="list-disc list-inside mt-1 space-y-1">
+                                <li>Ensure total folder size is under 10MB</li>
+                                <li>Split large uploads into smaller batches</li>
+                                <li>Check your internet connection</li>
+                                <li>Try refreshing the page and starting over</li>
+                            </ul>
+                        </div>
+                    </AlertDescription>
                 </Alert>
             )}
 

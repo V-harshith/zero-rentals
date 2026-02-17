@@ -23,8 +23,8 @@ function extractPSNFromPath(filepath: string): string | null {
         const potentialPsn = parts[parts.length - 2] // Second to last is folder name
         console.log(`[PSN Extraction] Checking folder name: "${potentialPsn}"`)
 
-        // PSN should be numeric (digits only) - matches test expectations
-        if (/^\d+$/.test(potentialPsn)) {
+        // PSN should be numeric (digits only, max 10 digits) - strict validation for security
+        if (/^\d{1,10}$/.test(potentialPsn)) {
             console.log(`[PSN Extraction] SUCCESS - Extracted PSN "${potentialPsn}" from folder name`)
             return potentialPsn
         }
@@ -56,6 +56,36 @@ function extractPSNFromPath(filepath: string): string | null {
 
     console.log(`[PSN Extraction] FAILED - Could not extract PSN from path: "${filepath}"`)
     return null
+}
+
+// ============================================================================
+// Helper: Validate image file type using magic numbers (file signatures)
+// This is more secure than just checking MIME type which can be spoofed
+// ============================================================================
+async function validateImageFile(file: File): Promise<{ valid: boolean; error?: string }> {
+    // Read first 12 bytes to check magic numbers
+    const buffer = await file.slice(0, 12).arrayBuffer()
+    const bytes = new Uint8Array(buffer)
+
+    // Check magic numbers for common image formats
+    const isJPEG = bytes[0] === 0xFF && bytes[1] === 0xD8 && bytes[2] === 0xFF
+    const isPNG = bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47
+    const isGIF = bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x38
+    const isWebP = bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+                   bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50
+
+    if (!isJPEG && !isPNG && !isGIF && !isWebP) {
+        return { valid: false, error: `Invalid file format. Only JPEG, PNG, GIF, and WebP are allowed.` }
+    }
+
+    // Verify file extension matches content
+    const ext = file.name.split('.').pop()?.toLowerCase()
+    const validExts = ['jpg', 'jpeg', 'png', 'gif', 'webp']
+    if (!ext || !validExts.includes(ext)) {
+        return { valid: false, error: `Invalid file extension. Use: ${validExts.join(', ')}` }
+    }
+
+    return { valid: true }
 }
 
 // ============================================================================
@@ -158,29 +188,50 @@ export async function POST(
 
                 // Get all files from form data
                 console.log(`[Image Upload] Parsing form data entries...`)
+                const invalidFiles: string[] = []
+                const validationPromises: Promise<void>[] = []
+
                 for (const [key, value] of formData.entries()) {
                     console.log(`[Image Upload] Form entry: key="${key}", type="${value instanceof File ? 'File' : typeof value}"`)
                     if (value instanceof File) {
                         console.log(`[Image Upload] File details: name="${value.name}", type="${value.type}", size=${value.size}, webkitRelativePath="${(value as any).webkitRelativePath || 'N/A'}"`)
                         if (value.type.startsWith('image/')) {
-                            files.push(value)
+                            // Validate file using magic numbers (async)
+                            validationPromises.push(
+                                validateImageFile(value).then(result => {
+                                    if (result.valid) {
+                                        files.push(value)
+                                    } else {
+                                        invalidFiles.push(`${value.name}: ${result.error}`)
+                                        console.log(`[Image Upload] SKIPPED - ${result.error}`)
+                                    }
+                                })
+                            )
                         } else {
+                            invalidFiles.push(`${value.name}: Not an image file`)
                             console.log(`[Image Upload] SKIPPED - Not an image file`)
                         }
                     }
                 }
 
-                console.log(`[Image Upload] Total image files found: ${files.length}`)
+                // Wait for all validations to complete
+                await Promise.all(validationPromises)
+
+                console.log(`[Image Upload] Total valid image files: ${files.length}, Invalid: ${invalidFiles.length}`)
 
                 if (files.length === 0) {
-                    send({ error: "No image files found" })
+                    send({
+                        error: "No valid image files found",
+                        invalid_files: invalidFiles.slice(0, 20),
+                        total_invalid: invalidFiles.length
+                    })
                     controller.close()
                     return
                 }
 
                 // Validate file count
                 if (files.length > 500) {
-                    send({ error: "Too many images. Maximum is 500 images per import" })
+                    send({ error: `Too many images. Maximum is 500 images per import. You have ${files.length} valid images.` })
                     controller.close()
                     return
                 }
@@ -200,7 +251,7 @@ export async function POST(
                 // Categorize images by PSN
                 const imagesByPSN: Record<string, any[]> = {}
                 const orphanedImages: any[] = []
-                const invalidFiles: string[] = []
+                const unmatchedFiles: string[] = []
 
                 console.log(`[Image Upload] Starting PSN extraction for ${files.length} files...`)
 
@@ -212,7 +263,7 @@ export async function POST(
 
                     if (!psn) {
                         console.log(`[Image Upload] No PSN extracted for file "${file.name}" - marking as invalid`)
-                        invalidFiles.push(file.name)
+                        unmatchedFiles.push(file.name)
                         continue
                     }
 
@@ -238,8 +289,8 @@ export async function POST(
                     matchedPSNs: Object.keys(imagesByPSN),
                     matchedCount: Object.values(imagesByPSN).flat().length,
                     orphanedCount: orphanedImages.length,
-                    invalidCount: invalidFiles.length,
-                    invalidFiles: invalidFiles.slice(0, 10) // First 10 invalid files
+                    invalidCount: unmatchedFiles.length,
+                    invalidFiles: unmatchedFiles.slice(0, 10) // First 10 invalid files
                 })
 
                 // Check for PSNs with too many images (generate warnings)
@@ -273,7 +324,7 @@ export async function POST(
 
                 // Upload images to storage
                 const uploadedImages: Record<string, any[]> = {}
-                const totalImages = files.length - invalidFiles.length - orphanedImages.length
+                const totalImages = files.length - unmatchedFiles.length - orphanedImages.length
                 let processedCount = 0
                 let failedCount = 0
                 const failedUploads: string[] = []
@@ -448,7 +499,8 @@ export async function POST(
                     matched_psns: Object.keys(uploadedImages).length,
                     unmatched_psns: expectedPSNs.filter(psn => !uploadedImages[psn]),
                     failed_files: failedUploads,
-                    invalid_files: invalidFiles,
+                    invalid_files: [...invalidFiles, ...unmatchedFiles].slice(0, 20),
+                    validation_errors: invalidFiles.length > 0 ? invalidFiles.slice(0, 10) : undefined,
                     warnings: finalWarnings.length > 0 ? finalWarnings : undefined,
                 })
 

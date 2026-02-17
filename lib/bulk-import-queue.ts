@@ -174,6 +174,26 @@ export async function acquireProcessingLock(
  */
 export function releaseProcessingLock(jobId: string): void {
     processingLocks.delete(jobId)
+    // Also clean up any expired locks to prevent memory growth
+    cleanupExpiredLocks()
+}
+
+/**
+ * Clean up expired locks to prevent memory leaks
+ * Called automatically when releasing locks
+ */
+function cleanupExpiredLocks(): void {
+    const now = Date.now()
+    let cleaned = 0
+    for (const [jobId, timestamp] of processingLocks.entries()) {
+        if (now - timestamp > LOCK_TIMEOUT_MS) {
+            processingLocks.delete(jobId)
+            cleaned++
+        }
+    }
+    if (cleaned > 0) {
+        console.log(`[BulkImportQueue] Cleaned up ${cleaned} expired processing locks`)
+    }
 }
 
 /**

@@ -161,6 +161,18 @@ export function ExcelUploadStep({ jobId, onComplete, onCancel }: ExcelUploadStep
                 <p className="text-muted-foreground">
                     Upload your property data. Required columns: PSN, Property Name, Email, Owner Name, City, Area
                 </p>
+                {/* Upload Limits Info */}
+                <div className="flex flex-wrap justify-center gap-2 mt-3">
+                    <Badge variant="outline" className="text-xs">
+                        Max 500 images in next step
+                    </Badge>
+                    <Badge variant="outline" className="text-xs">
+                        Max 10 images per property
+                    </Badge>
+                    <Badge variant="outline" className="text-xs">
+                        Max 2MB per image
+                    </Badge>
+                </div>
             </div>
 
             {/* Download Template Button */}

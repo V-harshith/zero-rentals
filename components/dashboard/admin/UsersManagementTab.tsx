@@ -76,8 +76,17 @@ export function UsersManagementTab({
         return 'bg-green-100 text-green-700 border-green-200' // Free
     }
 
-    // Helper function to format days remaining
-    const getDaysRemaining = (endDate?: string) => {
+    // Helper to check if plan is a paid plan (not free)
+    const isPaidPlan = (planName?: string): boolean => {
+        if (!planName) return false
+        const plan = planName.toLowerCase()
+        return plan.includes('silver') || plan.includes('gold') || plan.includes('platinum') || plan.includes('elite')
+    }
+
+    // Helper function to format days remaining - only for paid plans
+    const getDaysRemaining = (endDate?: string, planName?: string) => {
+        // Don't show days remaining for free plans
+        if (!isPaidPlan(planName)) return null
         if (!endDate) return null
         const days = Math.ceil((new Date(endDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
         if (days < 0) return 'Expired'
@@ -209,7 +218,7 @@ export function UsersManagementTab({
                                             <Badge variant="outline" className="capitalize">{user.role}</Badge>
                                         </TableCell>
                                         <TableCell>
-                                            {user.subscription ? (
+                                            {user.subscription && isPaidPlan(user.subscription.plan_name) ? (
                                                 <div className="space-y-1">
                                                     <Badge
                                                         variant="outline"
@@ -219,7 +228,7 @@ export function UsersManagementTab({
                                                         {user.subscription.plan_name}
                                                     </Badge>
                                                     <div className="text-xs text-muted-foreground">
-                                                        {getDaysRemaining(user.subscription.end_date)}
+                                                        {getDaysRemaining(user.subscription.end_date, user.subscription.plan_name)}
                                                     </div>
                                                 </div>
                                             ) : (
@@ -302,7 +311,7 @@ export function UsersManagementTab({
                                 {/* Plan Row */}
                                 <div className="flex items-center justify-between py-2 border-t">
                                     <span className="text-sm text-muted-foreground">Plan:</span>
-                                    {user.subscription ? (
+                                    {user.subscription && isPaidPlan(user.subscription.plan_name) ? (
                                         <div className="text-right">
                                             <Badge
                                                 variant="outline"
@@ -312,7 +321,7 @@ export function UsersManagementTab({
                                                 {user.subscription.plan_name}
                                             </Badge>
                                             <div className="text-xs text-muted-foreground mt-1">
-                                                {getDaysRemaining(user.subscription.end_date)}
+                                                {getDaysRemaining(user.subscription.end_date, user.subscription.plan_name)}
                                             </div>
                                         </div>
                                     ) : (

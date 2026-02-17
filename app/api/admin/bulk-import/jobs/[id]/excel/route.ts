@@ -461,19 +461,17 @@ export async function POST(
                 total_properties: properties.length,
                 parsed_properties: properties,
                 new_owners: newOwners.map(o => {
-                    // Use AES-256-GCM encryption if configured, fallback to base64 for development
+                    // Require AES-256-GCM encryption for passwords
+                    if (!isEncryptionConfigured()) {
+                        throw new Error('CREDENTIALS_ENCRYPTION_KEY not configured. Password encryption is required for bulk import.')
+                    }
+
                     let encryptedPassword: string
                     try {
-                        if (isEncryptionConfigured()) {
-                            encryptedPassword = encrypt(o.password)
-                        } else {
-                            // Fallback for development (should use encryption in production)
-                            console.warn('CREDENTIALS_ENCRYPTION_KEY not set, using base64 fallback')
-                            encryptedPassword = Buffer.from(o.password).toString('base64')
-                        }
-                    } catch (e) {
-                        console.error('Encryption failed, using base64 fallback:', e)
-                        encryptedPassword = Buffer.from(o.password).toString('base64')
+                        encryptedPassword = encrypt(o.password)
+                    } catch (e: any) {
+                        console.error('Password encryption failed:', e)
+                        throw new Error(`Failed to encrypt password for ${o.email}: ${e.message}`)
                     }
 
                     return {
