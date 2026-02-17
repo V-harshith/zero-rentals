@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server"
 import { createClient } from "@/lib/supabase-server"
 import { supabaseAdmin } from "@/lib/supabase-admin"
+import { csrfProtection } from "@/lib/csrf-server"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -15,7 +16,15 @@ export async function POST(request: NextRequest) {
             }
 
             try {
-                // 1. AUTH CHECK
+                // 1. CSRF PROTECTION
+                const csrfCheck = await csrfProtection(request)
+                if (!csrfCheck.valid) {
+                    send({ error: csrfCheck.error || 'Invalid request' })
+                    controller.close()
+                    return
+                }
+
+                // 2. AUTH CHECK
                 const supabase = await createClient()
                 const { data: { user: authUser }, error: authError } = await supabase.auth.getUser()
 

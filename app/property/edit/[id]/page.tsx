@@ -9,7 +9,7 @@ import { Progress } from "@/components/ui/progress"
 import { ArrowLeft, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { useAuth } from "@/lib/auth-context"
-import { getPropertyById, updateProperty, deleteProperty } from "@/lib/data-service"
+import { getPropertyById, updateProperty, deleteProperty, deletePropertyImage } from "@/lib/data-service"
 import { uploadPropertyImages } from "@/lib/storage-service"
 import { DeletePropertyDialog } from "@/components/delete-property-dialog"
 import { withAuth } from "@/lib/with-auth"
@@ -118,7 +118,6 @@ function EditPropertyPage() {
 
             // User is returning to the tab
             if (newState === 'visible' && wasHidden) {
-                console.log('[Edit Property] User returned to tab, checking for saved data...')
                 // Check for saved data - this handles the case where browser unloaded the page
                 const hasSavedData = checkSavedData()
 
@@ -130,7 +129,6 @@ function EditPropertyPage() {
 
             // User is leaving the tab - save data immediately
             if (newState === 'hidden') {
-                console.log('[Edit Property] User leaving tab, saving form data...')
                 if (isDirty && user && params.id) {
                     const storageKey = getStorageKey()
                     const dataToSave = {
@@ -358,7 +356,19 @@ function EditPropertyPage() {
         }))
     }
 
-    const removeExistingImage = (index: number) => {
+    const removeExistingImage = async (index: number) => {
+        const imageUrl = existingImages[index]
+
+        // Delete from storage first
+        if (imageUrl) {
+            const { error } = await deletePropertyImage(imageUrl)
+            if (error) {
+                console.error('Failed to delete image from storage:', error)
+                toast.error('Failed to delete image from storage')
+                return
+            }
+        }
+
         setExistingImages(prev => prev.filter((_, i) => i !== index))
         setIsDirty(true) // Mark as dirty since images changed
     }

@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server"
 import { createClient } from "@/lib/supabase-server"
 import { supabaseAdmin } from "@/lib/supabase-admin"
+import { csrfProtection } from "@/lib/csrf-server"
 import crypto from "crypto"
 import { decrypt, decryptLegacy } from "@/lib/encryption"
 import {
@@ -553,6 +554,14 @@ export async function POST(
         async start(controller) {
             const send = (data: Record<string, unknown>) => {
                 controller.enqueue(encoder.encode(JSON.stringify(data) + '\n'))
+            }
+
+            // CSRF protection
+            const csrfCheck = await csrfProtection(request)
+            if (!csrfCheck.valid) {
+                send({ error: csrfCheck.error || 'Invalid request' })
+                controller.close()
+                return
             }
 
             // Initialize transaction context for atomic operations

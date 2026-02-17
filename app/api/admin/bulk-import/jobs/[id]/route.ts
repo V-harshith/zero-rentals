@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase-server"
 import { supabaseAdmin } from "@/lib/supabase-admin"
+import { csrfProtection } from "@/lib/csrf-server"
 
 // ============================================================================
 // GET /api/admin/bulk-import/jobs/[id]
@@ -68,12 +69,29 @@ export async function DELETE(
     try {
         const { id: jobId } = await params
 
+        // CSRF protection
+        const csrfCheck = await csrfProtection(request)
+        if (!csrfCheck.valid) {
+            return NextResponse.json({ error: csrfCheck.error || 'Invalid request' }, { status: 403 })
+        }
+
         // Auth check
         const supabase = await createClient()
         const { data: { user: authUser }, error: authError } = await supabase.auth.getUser()
 
         if (authError || !authUser) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+        }
+
+        // Admin role check
+        const { data: profile } = await supabaseAdmin
+            .from("users")
+            .select("role")
+            .eq("id", authUser.id)
+            .maybeSingle()
+
+        if (!profile || profile.role !== "admin") {
+            return NextResponse.json({ error: "Admin access required" }, { status: 403 })
         }
 
         // Get job

@@ -14,7 +14,7 @@ interface MediaStepProps {
     // Edit-mode props (optional)
     isEditMode?: boolean
     existingImages?: string[]
-    removeExistingImage?: (index: number) => void
+    removeExistingImage?: (index: number) => void | Promise<void>
     // Image processing props
     isProcessing?: boolean
     processingCount?: number
@@ -104,7 +104,12 @@ const MediaStepComponent = ({
                                     <img src={url} className="w-full h-full object-cover" alt="Property" />
                                     {removeExistingImage && (
                                         <button
-                                            onClick={() => removeExistingImage(i)}
+                                            onClick={async () => {
+                                                const result = removeExistingImage(i)
+                                                if (result instanceof Promise) {
+                                                    await result
+                                                }
+                                            }}
                                             className="absolute top-2 right-2 bg-black/60 text-white rounded-full p-1 opacity-100 transition-opacity hover:bg-black/80 touch-manipulation"
                                             aria-label={`Remove existing image ${i + 1}`}
                                         >
