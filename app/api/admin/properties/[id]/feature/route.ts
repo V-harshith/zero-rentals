@@ -3,7 +3,6 @@ import { createClient } from '@/lib/supabase-server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
 import { csrfProtection } from '@/lib/csrf-server'
 import { rateLimit } from '@/lib/rate-limit'
-import { setPropertyFeatured } from '@/lib/data-service'
 
 /**
  * POST /api/admin/properties/[id]/feature
@@ -81,18 +80,38 @@ export async function POST(
       return NextResponse.json({ error: 'Property not found' }, { status: 404 })
     }
 
-    // 3. Use atomic featured status update
-    const featuredResult = await setPropertyFeatured(params.id, featured, authUser.id)
+    // 3. Use atomic featured status update (server-side only with admin client)
+    const { data: rpcResult, error: rpcError } = await supabaseAdmin
+      .rpc('set_property_featured', {
+        p_property_id: params.id,
+        p_featured: featured,
+        p_admin_id: authUser.id
+      })
 
-    if (!featuredResult.success) {
+    if (rpcError) {
       // Handle specific error: only active properties can be featured
-      if (featuredResult.error?.includes('Only active properties can be featured')) {
+      if (rpcError.message?.includes('Only active properties can be featured')) {
         return NextResponse.json(
-          { error: featuredResult.error, currentStatus: property.status },
+          { error: rpcError.message, currentStatus: property.status },
           { status: 400 }
         )
       }
 
+      return NextResponse.json(
+        { error: rpcError.message || 'Failed to update featured status' },
+        { status: 500 }
+      )
+    }
+
+    const featuredResult = rpcResult as {
+      success: boolean
+      message?: string
+      error?: string
+      featured?: boolean
+      changed?: boolean
+    }
+
+    if (!featuredResult.success) {
       // Handle idempotency
       if (featuredResult.error?.includes('already set to')) {
         return NextResponse.json({
@@ -130,7 +149,7 @@ export async function POST(
         title: property.title,
         featured: featured,
       },
-      message: featuredResult.message || (featured ? 'Property featured successfully' : 'Property unfeatured successfully'),
+      message: featuredResult?.message || (featured ? 'Property featured successfully' : 'Property unfeatured successfully'),
       changed: featuredResult.changed
     })
   } catch (error: any) {
