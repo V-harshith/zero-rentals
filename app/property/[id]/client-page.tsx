@@ -101,6 +101,25 @@ export default function PropertyClientPage({ id, initialProperty }: { id: string
         }
     }, [])
 
+    // Track property view on page load
+    useEffect(() => {
+        let isMounted = true
+
+        async function trackView() {
+            try {
+                await fetch(`/api/properties/${id}/view`, { method: 'POST' })
+            } catch {
+                // Silently fail - don't break UX if view tracking fails
+            }
+        }
+
+        trackView()
+
+        return () => {
+            isMounted = false
+        }
+    }, [id])
+
     useEffect(() => {
         let isMounted = true
 
@@ -440,20 +459,18 @@ export default function PropertyClientPage({ id, initialProperty }: { id: string
                                         </>
                                     )}
                                 </div>
-                                {/* Thumbnail images - gated for non-logged-in users */}
+                                {/* Thumbnail images with teaser for non-logged-in users */}
                                 {property.images && property.images.length > 1 && (
-                                    <GatedContent
-                                        requireAuth={true}
-                                        message="Login to View All Photos"
-                                        description={`View all ${property.images.length} photos of this property`}
-                                        blurAmount="lg"
-                                    >
-                                        <div className="grid grid-cols-4 gap-2 p-4">
+                                    <div className="relative">
+                                        {/* Show thumbnails for all users */}
+                                        <div className={`grid grid-cols-4 gap-2 p-4 ${!user ? 'blur-sm' : ''}`}>
                                             {property.images.slice(0, 4).map((img, i) => (
-                                                <div 
-                                                    key={i} 
-                                                    onClick={() => setSelectedImageIndex(i)}
-                                                    className={`relative h-20 bg-gray-100 rounded cursor-pointer hover:opacity-75 transition-all overflow-hidden ${
+                                                <div
+                                                    key={i}
+                                                    onClick={() => user && setSelectedImageIndex(i)}
+                                                    className={`relative h-20 bg-gray-100 rounded overflow-hidden ${
+                                                        user ? 'cursor-pointer hover:opacity-75 transition-all' : 'cursor-not-allowed'
+                                                    } ${
                                                         selectedImageIndex === i ? 'ring-2 ring-primary ring-offset-2' : ''
                                                     }`}
                                                 >
@@ -469,12 +486,14 @@ export default function PropertyClientPage({ id, initialProperty }: { id: string
                                         </div>
                                         {/* More images if available */}
                                         {property.images.length > 4 && (
-                                            <div className="grid grid-cols-4 gap-2 p-4 pt-0">
-                                                {property.images.slice(4).map((img, i) => (
-                                                    <div 
-                                                        key={i + 4} 
-                                                        onClick={() => setSelectedImageIndex(i + 4)}
-                                                        className={`relative h-20 bg-gray-100 rounded cursor-pointer hover:opacity-75 transition-all overflow-hidden ${
+                                            <div className={`grid grid-cols-4 gap-2 p-4 pt-0 ${!user ? 'blur-sm' : ''}`}>
+                                                {property.images.slice(4, 8).map((img, i) => (
+                                                    <div
+                                                        key={i + 4}
+                                                        onClick={() => user && setSelectedImageIndex(i + 4)}
+                                                        className={`relative h-20 bg-gray-100 rounded overflow-hidden ${
+                                                            user ? 'cursor-pointer hover:opacity-75 transition-all' : 'cursor-not-allowed'
+                                                        } ${
                                                             selectedImageIndex === i + 4 ? 'ring-2 ring-primary ring-offset-2' : ''
                                                         }`}
                                                     >
@@ -489,7 +508,34 @@ export default function PropertyClientPage({ id, initialProperty }: { id: string
                                                 ))}
                                             </div>
                                         )}
-                                    </GatedContent>
+
+                                        {/* Blurred overlay for non-logged-in users */}
+                                        {!user && (
+                                            <div className="absolute inset-0 flex items-center justify-center bg-black/10 backdrop-blur-[2px]">
+                                                <div className="bg-white/95 rounded-xl p-6 shadow-2xl text-center max-w-xs mx-4">
+                                                    <div className="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-3">
+                                                        <svg className="w-6 h-6 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                                        </svg>
+                                                    </div>
+                                                    <h4 className="font-semibold text-gray-900 mb-1">View All {property.images.length} Photos</h4>
+                                                    <p className="text-sm text-gray-500 mb-4">Login to see the complete photo gallery</p>
+                                                    <Button
+                                                        onClick={() => {
+                                                            // Trigger login modal
+                                                            const event = new CustomEvent('openLoginModal')
+                                                            window.dispatchEvent(event)
+                                                        }}
+                                                        className="w-full"
+                                                        size="sm"
+                                                    >
+                                                        Login to View
+                                                    </Button>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
                                 )}
                             </CardContent>
                         </Card>
