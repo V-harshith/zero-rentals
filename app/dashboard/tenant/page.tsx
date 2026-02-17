@@ -11,6 +11,7 @@ import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { toast } from "sonner"
 import { getProperties } from "@/lib/data-service"
+import { handleDashboardError } from "@/lib/error-handler"
 import type { Property } from "@/lib/types"
 
 // Import modular components
@@ -71,8 +72,10 @@ function TenantDashboard() {
         if (isMounted.current) setLoading(true)
         const propertiesData = await getProperties()
         if (isMounted.current) setRecentProperties(propertiesData.slice(0, 6))
-      } catch {
-        if (isMounted.current) toast.error("Failed to load dashboard data")
+      } catch (error) {
+        if (isMounted.current) {
+          handleDashboardError(error, "Failed to load dashboard data")
+        }
       } finally {
         loadingPropertiesRef.current = false
         if (isMounted.current) setLoading(false)

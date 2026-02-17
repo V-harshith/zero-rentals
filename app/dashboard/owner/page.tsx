@@ -13,7 +13,7 @@ import { supabase } from "@/lib/supabase"
 import { mapPropertyFromDB, type PropertyRow } from "@/lib/data-mappers"
 import type { Property } from "@/lib/types"
 import { toast } from "sonner"
-import { handleError } from "@/lib/error-handler"
+import { handleError, handleDashboardError } from "@/lib/error-handler"
 import { getTierFeatures, type TierFeatures } from "@/lib/subscription-service"
 // Import new modular components
 import {
@@ -110,7 +110,11 @@ function OwnerDashboard() {
       // Stats are now calculated via useMemo
     } catch (error) {
       if (isMounted.current) {
-        handleError(error, "Failed to load dashboard data")
+        // Check for auth errors first, then fall back to generic handling
+        if (!handleDashboardError(error, "Failed to load dashboard data")) {
+          // Error was already handled by handleDashboardError
+          return
+        }
       }
     } finally {
       loadingPropertiesRef.current = false
@@ -144,6 +148,10 @@ function OwnerDashboard() {
       }
     } catch (error) {
       if (isMounted.current) {
+        // Check for auth errors first
+        if (handleDashboardError(error)) {
+          return
+        }
         console.error('Failed to check subscription:', error)
         toast.error('Unable to load subscription status. Please refresh.')
       }

@@ -1,6 +1,9 @@
 import { toast } from "sonner"
 import { ERROR_MESSAGES } from "@/lib/constants"
 
+// Track if we're already redirecting to prevent multiple redirects
+let isRedirecting = false
+
 export type AppError = {
     message: string
     code?: string
@@ -64,4 +67,76 @@ export async function withErrorHandling<T>(
         handleError(error, customMessage)
         return null
     }
+}
+
+/**
+ * Checks if an error is an authentication/session error
+ */
+export function isAuthError(error: unknown): boolean {
+    if (!error) return false
+
+    const errMessage = typeof error === 'string'
+        ? error
+        : (error instanceof Error || (error && typeof error === 'object' && 'message' in error))
+            ? String((error as { message?: string }).message)
+            : ''
+
+    const errCode = (error && typeof error === 'object' && 'code' in error)
+        ? String((error as { code?: string }).code)
+        : ''
+
+    return (
+        errMessage.includes('JWT') ||
+        errMessage.includes('session') ||
+        errMessage.includes('unauthorized') ||
+        errMessage.includes('Unauthorized') ||
+        errCode === '401' ||
+        errCode === '403' ||
+        errCode === 'P0001'
+    )
+}
+
+/**
+ * Handles authentication errors by showing a toast and redirecting to login.
+ * Returns true if an auth error was handled, false otherwise.
+ */
+export function handleAuthError(error: unknown, redirectPath: string = '/login'): boolean {
+    if (!isAuthError(error)) {
+        return false
+    }
+
+    if (isRedirecting) {
+        return true
+    }
+
+    isRedirecting = true
+    toast.error('Your session has expired. Please log in again.')
+
+    // Preserve current URL for post-login redirect
+    const currentPath = typeof window !== 'undefined' ? window.location.pathname : ''
+    const returnUrl = currentPath && currentPath !== redirectPath ? `?redirectTo=${encodeURIComponent(currentPath)}` : ''
+
+    // Delay redirect slightly to allow toast to show
+    setTimeout(() => {
+        if (typeof window !== 'undefined') {
+            window.location.href = `${redirectPath}${returnUrl}`
+        }
+    }, 1500)
+
+    return true
+}
+
+/**
+ * Enhanced error handler that checks for auth errors first, then falls back to generic handling.
+ * Use this for all API calls in dashboard pages.
+ */
+export function handleDashboardError(error: unknown, customMessage?: string): boolean {
+    // First check if it's an auth error
+    if (handleAuthError(error)) {
+        return true
+    }
+
+    // Otherwise, use generic error handling
+    handleError(error, customMessage)
+    return false
 }

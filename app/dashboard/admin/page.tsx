@@ -14,6 +14,7 @@ import React, { useEffect, useState, useCallback, useRef, Suspense } from "react
 import Link from "next/link"
 import { toast } from "sonner"
 import { getPendingProperties, getAllPayments, getTotalPropertyCount } from "@/lib/data-service"
+import { handleDashboardError } from "@/lib/error-handler"
 import { subscriptionManager } from "@/lib/supabase"
 import type { Property, Payment } from "@/lib/types"
 import { getAllUsers, type User as AdminUser } from "@/lib/user-service"
@@ -370,7 +371,9 @@ function AdminDashboard() {
         dataLoadedRef.current.pending = true
       }
     } catch (error) {
-      if (isMounted.current) toast.error("Failed to load pending properties")
+      if (isMounted.current) {
+        handleDashboardError(error, "Failed to load pending properties")
+      }
     } finally {
       loadingPendingRef.current = false
       if (isMounted.current) setLoadingPending(false)
@@ -387,8 +390,9 @@ function AdminDashboard() {
         setLastUpdated(prev => ({ ...prev, statsSnapshot: timestamp }))
         dataLoadedRef.current.totalStats = true
       }
-    } catch {
-      // Error loading stats - silently fail
+    } catch (error) {
+      // Error loading stats - check for auth errors, otherwise silently fail
+      handleDashboardError(error)
       dataLoadedRef.current.totalStats = true // Mark as loaded even on error to prevent infinite loading
     }
   }
@@ -436,7 +440,9 @@ function AdminDashboard() {
         dataLoadedRef.current.users = true
       }
     } catch (error) {
-      if (isMounted.current) toast.error("Failed to load users")
+      if (isMounted.current) {
+        handleDashboardError(error, "Failed to load users")
+      }
       dataLoadedRef.current.users = true // Mark as loaded even on error
     } finally {
       clearTimeout(timeoutId)
@@ -483,7 +489,9 @@ function AdminDashboard() {
         dataLoadedRef.current.payments = true
       }
     } catch (error) {
-      if (isMounted.current) toast.error("Failed to load payments")
+      if (isMounted.current) {
+        handleDashboardError(error, "Failed to load payments")
+      }
       dataLoadedRef.current.payments = true // Mark as loaded even on error
     } finally {
       clearTimeout(timeoutId)

@@ -319,7 +319,8 @@ export async function getProperties(): Promise<Property[]> {
     })
 
     return sortedProperties.map(mapPropertyFromDB)
-  } catch {
+  } catch (error) {
+    console.error('[DataService] getProperties failed:', error)
     return []
   }
 }
@@ -380,7 +381,8 @@ export async function getFeaturedProperties(limit = 6): Promise<Property[]> {
     })
 
     return sortedProperties.slice(0, limit).map(mapPropertyFromDB)
-  } catch {
+  } catch (error) {
+    console.error('[DataService] getFeaturedProperties failed:', error)
     return []
   }
 }
@@ -426,7 +428,8 @@ export async function getPropertyById(id: string): Promise<Property | null> {
     // Views should be tracked separately via a dedicated endpoint that checks user context
 
     return mapPropertyFromDB(data as PropertyRow)
-  } catch {
+  } catch (error) {
+    console.error('[DataService] getPropertyById failed:', error)
     return null
   }
 }
@@ -768,7 +771,7 @@ export async function deletePropertyImage(url: string): Promise<{ error: any }> 
   }
 }
 
-export async function getPendingProperties(): Promise<Property[]> {
+export async function getPendingProperties(limit: number = 100): Promise<Property[]> {
   try {
     const { data, error } = await supabase
       .from('properties')
@@ -778,10 +781,12 @@ export async function getPendingProperties(): Promise<Property[]> {
       `)
       .eq('status', 'pending')
       .order('created_at', { ascending: false })
+      .limit(limit)
 
     if (error) throw error
     return (data as PropertyRow[]).map(mapPropertyFromDB)
-  } catch {
+  } catch (error) {
+    console.error('getPendingProperties failed:', error)
     return []
   }
 }
@@ -860,7 +865,7 @@ export async function createInquiry(inquiry: {
   return { data, error }
 }
 
-export async function getInquiries(userId: string, role: 'owner' | 'tenant'): Promise<Inquiry[]> {
+export async function getInquiries(userId: string, role: 'owner' | 'tenant', limit: number = 100): Promise<Inquiry[]> {
   const column = role === 'owner' ? 'owner_id' : 'tenant_id'
 
   const { data, error } = await supabase
@@ -872,8 +877,10 @@ export async function getInquiries(userId: string, role: 'owner' | 'tenant'): Pr
       `)
     .eq(column, userId)
     .order('created_at', { ascending: false })
+    .limit(limit)
 
   if (error) {
+    console.error('getInquiries failed:', error)
     return []
   }
 
@@ -904,13 +911,14 @@ export async function updateInquiryStatus(id: string, status: 'pending' | 'respo
   return { error }
 }
 
-export async function getAllPayments(): Promise<Payment[]> {
+export async function getAllPayments(limit: number = 100): Promise<Payment[]> {
   try {
     // 1. Fetch raw payments (no join) to avoid schema cache issues
     const { data: paymentsData, error: paymentsError } = await supabase
       .from('payments')
       .select('*')
       .order('created_at', { ascending: false })
+      .limit(limit)
 
     if (paymentsError) {
       return []
@@ -954,22 +962,25 @@ export async function getAllPayments(): Promise<Payment[]> {
         email: usersMap[item.user_id].email
       } : undefined
     }))
-  } catch {
+  } catch (error) {
+    console.error('getAllPayments failed:', error)
     return []
   }
 }
 
-export async function getNotifications(userId: string): Promise<any[]> {
+export async function getNotifications(userId: string, limit: number = 100): Promise<any[]> {
   try {
     const { data, error } = await supabase
       .from('notifications')
       .select('*')
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
+      .limit(limit)
 
     if (error) throw error
     return data || []
-  } catch {
+  } catch (error) {
+    console.error('getNotifications failed:', error)
     return []
   }
 }
@@ -991,7 +1002,8 @@ export async function getTenantStats(userId: string): Promise<{
       activeInquiries: 0, // Feature not implemented (Direct Contact used)
       newNotifications: notificationsRes.count || 0
     }
-  } catch {
+  } catch (error) {
+    console.error('getTenantStats failed:', error)
     return {
       savedHomes: 0,
       activeInquiries: 0,

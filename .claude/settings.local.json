@@ -26,7 +26,11 @@
       "Bash(npx knip:*)",
       "Bash(powershell:*)",
       "Bash(dir:*)",
-      "Bash(python3 ~/.claude/skills/continuous-learning-v2/scripts/instinct-cli.py:*)"
+      "Bash(python3 ~/.claude/skills/continuous-learning-v2/scripts/instinct-cli.py:*)",
+      "Bash(test:*)",
+      "Bash(npx supabase login:*)",
+      "Bash(npx supabase:*)",
+      "Bash(npx eslint:*)"
     ]
   }
 }
