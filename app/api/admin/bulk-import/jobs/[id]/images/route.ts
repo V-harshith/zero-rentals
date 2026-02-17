@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase-server"
 import { supabaseAdmin } from "@/lib/supabase-admin"
+import { csrfProtection } from "@/lib/csrf-server"
 import { hasConcurrentProcessingJob } from "@/lib/bulk-import-queue"
 
 // ============================================================================
@@ -92,6 +93,14 @@ export async function POST(
             }
 
             try {
+                // CSRF protection
+                const csrfCheck = await csrfProtection(request)
+                if (!csrfCheck.valid) {
+                    send({ error: csrfCheck.error || 'CSRF token missing' })
+                    controller.close()
+                    return
+                }
+
                 // Auth check
                 const supabase = await createClient()
                 const { data: { user: authUser }, error: authError } = await supabase.auth.getUser()

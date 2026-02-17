@@ -15,6 +15,7 @@ import {
     ArrowRight,
 } from "lucide-react"
 import { toast } from "sonner"
+import { useSecureFetch } from "@/lib/csrf-context"
 
 interface ExcelUploadStepProps {
     jobId: string
@@ -29,6 +30,7 @@ export function ExcelUploadStep({ jobId, onComplete, onCancel }: ExcelUploadStep
     const [error, setError] = useState<string | null>(null)
     const [canProceed, setCanProceed] = useState(false)
     const fileInputRef = useRef<HTMLInputElement>(null)
+    const secureFetch = useSecureFetch()
 
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
         const selectedFile = e.target.files?.[0]
@@ -61,7 +63,7 @@ export function ExcelUploadStep({ jobId, onComplete, onCancel }: ExcelUploadStep
             const formData = new FormData()
             formData.append("file", file)
 
-            const res = await fetch(`/api/admin/bulk-import/jobs/${jobId}/excel`, {
+            const res = await secureFetch(`/api/admin/bulk-import/jobs/${jobId}/excel`, {
                 method: "POST",
                 body: formData,
             })

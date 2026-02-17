@@ -21,6 +21,13 @@ export interface User {
     account_holder_name?: string;
     preferences?: any;
     created_at: string;
+    // Subscription info
+    subscription?: {
+        plan_name: string;
+        status: string;
+        end_date: string;
+        amount: number;
+    } | null;
 }
 
 /**
@@ -28,6 +35,7 @@ export interface User {
  * @returns Promise resolving to array of users, or throws on error
  */
 export async function getAllUsers(): Promise<User[]> {
+    // Fetch users
     const { data, error } = await supabase
         .from('users')
         .select('*')
@@ -38,12 +46,43 @@ export async function getAllUsers(): Promise<User[]> {
         throw new Error(`Failed to fetch users: ${error.message}`);
     }
 
+    if (!data || data.length === 0) return [];
+
+    // Fetch active subscriptions for all users
+    const userIds = data.map(u => u.id);
+    const { data: subscriptions } = await supabase
+        .from('subscriptions')
+        .select('user_id, plan_name, status, end_date, amount')
+        .in('user_id', userIds)
+        .eq('status', 'active')
+        .gt('end_date', new Date().toISOString())
+        .order('end_date', { ascending: false });
+
+    // Create subscription map
+    const subscriptionMap = new Map();
+    subscriptions?.forEach(sub => {
+        // Only keep the first (most recent) subscription per user
+        if (!subscriptionMap.has(sub.user_id)) {
+            subscriptionMap.set(sub.user_id, sub);
+        }
+    });
+
     // Map database fields to User interface - compute verified from email_verified_at
-    return (data || []).map((user: any) => ({
-        ...user,
-        // A user is considered verified if either the verified flag is true OR email_verified_at is set
-        verified: user.verified === true || user.email_verified_at !== null
-    })) as User[];
+    return data.map((user: any) => {
+        const sub = subscriptionMap.get(user.id);
+        return {
+            ...user,
+            // A user is considered verified if either the verified flag is true OR email_verified_at is set
+            verified: user.verified === true || user.email_verified_at !== null,
+            // Include subscription info
+            subscription: sub ? {
+                plan_name: sub.plan_name,
+                status: sub.status,
+                end_date: sub.end_date,
+                amount: sub.amount
+            } : null
+        };
+    }) as User[];
 }
 
 /**

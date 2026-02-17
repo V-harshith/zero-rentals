@@ -915,14 +915,16 @@ export async function updateInquiryStatus(id: string, status: 'pending' | 'respo
 
 export async function getAllPayments(limit: number = 100): Promise<Payment[]> {
   try {
-    // 1. Fetch raw payments (no join) to avoid schema cache issues
+    // CRITICAL FIX: Query 'payment_logs' table (not 'payments' which doesn't exist)
+    // The webhook writes to 'payment_logs' - see app/api/webhooks/razorpay/route.ts
     const { data: paymentsData, error: paymentsError } = await supabase
-      .from('payments')
+      .from('payment_logs')
       .select('*')
       .order('created_at', { ascending: false })
       .limit(limit)
 
     if (paymentsError) {
+      console.error('Error fetching payments:', paymentsError)
       return []
     }
 
@@ -946,19 +948,20 @@ export async function getAllPayments(limit: number = 100): Promise<Payment[]> {
       }
     }
 
-    // 3. Merge data
+    // 3. Merge data - map payment_logs schema to Payment type
     return paymentsData.map((item: any) => ({
       id: item.id,
       userId: item.user_id,
       amount: item.amount,
-      currency: item.currency,
+      currency: item.currency || 'INR',
       status: item.status,
-      providerOrderId: item.provider_order_id,
-      providerPaymentId: item.provider_payment_id,
+      providerOrderId: item.transaction_id, // payment_logs uses transaction_id
+      providerPaymentId: item.payment_id,   // payment_logs uses payment_id
       plan_name: item.plan_name,
       payment_method: item.payment_method,
       metadata: item.metadata,
       createdAt: item.created_at,
+      created_at: item.created_at,
       user: usersMap[item.user_id] ? {
         name: usersMap[item.user_id].name,
         email: usersMap[item.user_id].email

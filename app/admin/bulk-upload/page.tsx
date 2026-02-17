@@ -8,9 +8,11 @@ import { Progress } from "@/components/ui/progress"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Upload, FileSpreadsheet, CheckCircle, XCircle, AlertTriangle } from "lucide-react"
 import { toast } from "sonner"
+import { useSecureFetch } from "@/lib/csrf-context"
 
 export default function BulkUploadPage() {
     const router = useRouter()
+    const secureFetch = useSecureFetch()
     const [file, setFile] = useState<File | null>(null)
     const [uploading, setUploading] = useState(false)
     const [progress, setProgress] = useState(0)
@@ -47,7 +49,7 @@ export default function BulkUploadPage() {
             const formData = new FormData()
             formData.append('file', file)
 
-            const response = await fetch('/api/admin/bulk-upload', {
+            const response = await secureFetch('/api/admin/bulk-upload', {
                 method: 'POST',
                 body: formData,
             })

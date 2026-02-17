@@ -18,6 +18,7 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 import imageCompression from "browser-image-compression"
+import { useSecureFetch } from "@/lib/csrf-context"
 
 interface ImageUploadStepProps {
     jobId: string
@@ -28,6 +29,7 @@ interface ImageUploadStepProps {
 }
 
 export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }: ImageUploadStepProps) {
+    const secureFetch = useSecureFetch()
     const [files, setFiles] = useState<File[]>([])
     const [compressedFiles, setCompressedFiles] = useState<File[]>([])
     const [uploading, setUploading] = useState(false)
@@ -213,7 +215,7 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
                 formData.append("images", file)
             })
 
-            const res = await fetch(`/api/admin/bulk-import/jobs/${jobId}/images`, {
+            const res = await secureFetch(`/api/admin/bulk-import/jobs/${jobId}/images`, {
                 method: "POST",
                 body: formData,
             })

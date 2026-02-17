@@ -94,6 +94,11 @@ export function useSecureFetch() {
       headers.set('x-csrf-token', csrfToken)
     }
 
+    // If body is FormData, let the browser set the Content-Type with boundary
+    if (options.body instanceof FormData) {
+      headers.delete('content-type')
+    }
+
     return fetch(url, {
       ...options,
       headers

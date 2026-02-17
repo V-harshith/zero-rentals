@@ -130,7 +130,14 @@ export function PaymentsTab({ payments, loading, onRefresh, lastUpdated }: Payme
                                             </Badge>
                                         </TableCell>
                                         <TableCell>
-                                            {payment.created_at ? new Date(payment.created_at).toLocaleDateString() : 'N/A'}
+                                            {payment.created_at ? (
+                                                <div>
+                                                    <div>{new Date(payment.created_at).toLocaleDateString()}</div>
+                                                    <div className="text-xs text-muted-foreground">
+                                                        {new Date(payment.created_at).toLocaleTimeString()}
+                                                    </div>
+                                                </div>
+                                            ) : 'N/A'}
                                         </TableCell>
                                     </TableRow>
                                 ))}

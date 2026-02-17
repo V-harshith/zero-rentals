@@ -13,6 +13,7 @@ export async function GET() {
             "City",                   // City (required)
             "Area",                   // Area/Locality (required)
             "Locality",               // Specific locality (optional)
+            "Property Type",          // Property type: PG, Co-living, or Rent (required)
             "PG's for",               // Target: Male/Female/Any (optional)
             "Property Name",          // Property name/title (required)
             "Owner Name",             // Owner full name (required)
@@ -37,6 +38,7 @@ export async function GET() {
             "City": "Bangalore",
             "Area": "Koramangala",
             "Locality": "5th Block",
+            "Property Type": "PG",
             "PG's for": "Gents/Male",
             "Property Name": "Sunrise PG for Gents",
             "Owner Name": "John Doe",
@@ -67,30 +69,36 @@ export async function GET() {
             ["2. City", "City name (e.g., Bangalore, Hyderabad) - REQUIRED"],
             ["3. Area", "Area/Locality name (e.g., Koramangala, Hitech City) - REQUIRED"],
             ["4. Locality", "Specific locality within the area"],
-            ["5. PG's for", "Target audience: Male, Female, Gents, Ladies, Boys, Girls, or Any"],
-            ["6. Property Name", "Name of the property as it will appear on the site - REQUIRED"],
-            ["7. Owner Name", "Full name of the property owner - REQUIRED"],
-            ["8. Owner Contact", "Phone number with country code (e.g., 9876543210) - REQUIRED"],
-            ["9. Landmark", "Nearby landmark for easy location"],
-            ["10. USP", "Unique selling points or special features"],
-            ["11. Facilities", "Comma-separated amenities list"],
-            ["12. Private Room", "Monthly rent for private room (numbers only)"],
-            ["13. Double Sharing", "Monthly rent for double sharing (numbers only)"],
-            ["14. Triple Sharing", "Monthly rent for triple sharing (numbers only)"],
-            ["15. Four Sharing", "Monthly rent for four sharing (numbers only)"],
-            ["16. Deposit", "Security deposit amount (numbers only)"],
-            ["17. Address", "Complete street address"],
-            ["18. PSN", "Unique Property Serial Number (e.g., PSN001, PSN002) - REQUIRED"],
-            ["19. Email", "Valid owner email address (required for account creation) - REQUIRED"],
-            ["20. 1RK", "Monthly rent for 1RK (numbers only)"],
+            ["5. Property Type", "Property type: PG, Co-living, or Rent - REQUIRED"],
+            ["6. PG's for", "Target audience: Male, Female, Gents, Ladies, Boys, Girls, or Any"],
+            ["7. Property Name", "Name of the property as it will appear on the site - REQUIRED"],
+            ["8. Owner Name", "Full name of the property owner - REQUIRED"],
+            ["9. Owner Contact", "Phone number with country code (e.g., 9876543210) - REQUIRED"],
+            ["10. Landmark", "Nearby landmark for easy location"],
+            ["11. USP", "Unique selling points or special features"],
+            ["12. Facilities", "Comma-separated amenities list"],
+            ["13. Private Room", "Monthly rent for private room (numbers only)"],
+            ["14. Double Sharing", "Monthly rent for double sharing (numbers only)"],
+            ["15. Triple Sharing", "Monthly rent for triple sharing (numbers only)"],
+            ["16. Four Sharing", "Monthly rent for four sharing (numbers only)"],
+            ["17. Deposit", "Security deposit amount (numbers only)"],
+            ["18. Address", "Complete street address"],
+            ["19. PSN", "Unique Property Serial Number (e.g., PSN001, PSN002) - REQUIRED"],
+            ["20. Email", "Valid owner email address (required for account creation) - REQUIRED"],
+            ["21. 1RK", "Monthly rent for 1RK (numbers only)"],
             [],
             ["REQUIRED COLUMNS (Must be filled):"],
-            ["• City, Area, Property Name, Owner Name, Owner Contact, PSN, Email"],
+            ["• City, Area, Property Type, Property Name, Owner Name, Owner Contact, PSN, Email"],
             [],
             ["OPTIONAL COLUMNS:"],
             ["• Country, Locality, PG's for, Landmark, USP, Facilities"],
             ["• Private Room, Double Sharing, Triple Sharing, Four Sharing, 1RK"],
             ["• Deposit, Address"],
+            [],
+            ["PROPERTY TYPE - Valid Values (exact spelling):"],
+            ["• PG", "Paying Guest accommodation"],
+            ["• Co-living", "Co-living space"],
+            ["• Rent", "Rental property / Apartment"],
             [],
             ["FACILITIES - Available Options (use comma-separated values):"],
             ["• WiFi / Wi-Fi / Internet", "• AC / Air Conditioning"],
@@ -133,6 +141,7 @@ export async function GET() {
             { wch: 15 },  // City
             { wch: 20 },  // Area
             { wch: 20 },  // Locality
+            { wch: 15 },  // Property Type
             { wch: 15 },  // PG's for
             { wch: 30 },  // Property Name
             { wch: 20 },  // Owner Name

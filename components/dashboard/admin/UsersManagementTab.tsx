@@ -23,7 +23,7 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { Search, Loader2, CheckCircle, XCircle, Trash2 } from "lucide-react"
+import { Search, Loader2, CheckCircle, XCircle, Trash2, Crown } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
 import { verifyUser, type User } from "@/lib/user-service"
@@ -61,8 +61,30 @@ export function UsersManagementTab({
         (user) =>
             user.email.toLowerCase().includes(safeSearchQuery) ||
             user.name.toLowerCase().includes(safeSearchQuery) ||
-            user.role.toLowerCase().includes(safeSearchQuery)
+            user.role.toLowerCase().includes(safeSearchQuery) ||
+            (user.subscription?.plan_name || '').toLowerCase().includes(safeSearchQuery)
     )
+
+    // Helper function to get plan badge color
+    const getPlanBadgeColor = (planName?: string) => {
+        if (!planName) return 'bg-gray-100 text-gray-600'
+        const plan = planName.toLowerCase()
+        if (plan.includes('elite')) return 'bg-purple-100 text-purple-700 border-purple-200'
+        if (plan.includes('platinum')) return 'bg-blue-100 text-blue-700 border-blue-200'
+        if (plan.includes('gold')) return 'bg-yellow-100 text-yellow-700 border-yellow-200'
+        if (plan.includes('silver')) return 'bg-gray-100 text-gray-700 border-gray-200'
+        return 'bg-green-100 text-green-700 border-green-200' // Free
+    }
+
+    // Helper function to format days remaining
+    const getDaysRemaining = (endDate?: string) => {
+        if (!endDate) return null
+        const days = Math.ceil((new Date(endDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+        if (days < 0) return 'Expired'
+        if (days === 0) return 'Expires today'
+        if (days === 1) return '1 day left'
+        return `${days} days left`
+    }
 
     // Refs to track in-flight requests for deduplication
     const verifyingRef = useRef<Set<string>>(new Set())
@@ -166,6 +188,7 @@ export function UsersManagementTab({
                                 <TableHead>Name</TableHead>
                                 <TableHead>Email</TableHead>
                                 <TableHead>Role</TableHead>
+                                <TableHead>Plan</TableHead>
                                 <TableHead className="text-center">Verified</TableHead>
                                 <TableHead className="text-right">Actions</TableHead>
                             </TableRow>
@@ -173,7 +196,7 @@ export function UsersManagementTab({
                         <TableBody>
                             {filteredUsers.length === 0 ? (
                                 <TableRow>
-                                    <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                                    <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
                                         No users found
                                     </TableCell>
                                 </TableRow>
@@ -184,6 +207,26 @@ export function UsersManagementTab({
                                         <TableCell className="text-sm">{user.email}</TableCell>
                                         <TableCell>
                                             <Badge variant="outline" className="capitalize">{user.role}</Badge>
+                                        </TableCell>
+                                        <TableCell>
+                                            {user.subscription ? (
+                                                <div className="space-y-1">
+                                                    <Badge
+                                                        variant="outline"
+                                                        className={`${getPlanBadgeColor(user.subscription.plan_name)} font-medium`}
+                                                    >
+                                                        <Crown className="h-3 w-3 mr-1" />
+                                                        {user.subscription.plan_name}
+                                                    </Badge>
+                                                    <div className="text-xs text-muted-foreground">
+                                                        {getDaysRemaining(user.subscription.end_date)}
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <Badge variant="outline" className="bg-gray-100 text-gray-600">
+                                                    Free
+                                                </Badge>
+                                            )}
                                         </TableCell>
                                         <TableCell className="text-center">
                                             {user.verified ? (
@@ -254,6 +297,29 @@ export function UsersManagementTab({
                                         <p className="text-sm text-muted-foreground">{user.email}</p>
                                     </div>
                                     <Badge variant="outline" className="capitalize">{user.role}</Badge>
+                                </div>
+
+                                {/* Plan Row */}
+                                <div className="flex items-center justify-between py-2 border-t">
+                                    <span className="text-sm text-muted-foreground">Plan:</span>
+                                    {user.subscription ? (
+                                        <div className="text-right">
+                                            <Badge
+                                                variant="outline"
+                                                className={`${getPlanBadgeColor(user.subscription.plan_name)} font-medium`}
+                                            >
+                                                <Crown className="h-3 w-3 mr-1" />
+                                                {user.subscription.plan_name}
+                                            </Badge>
+                                            <div className="text-xs text-muted-foreground mt-1">
+                                                {getDaysRemaining(user.subscription.end_date)}
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <Badge variant="outline" className="bg-gray-100 text-gray-600">
+                                            Free
+                                        </Badge>
+                                    )}
                                 </div>
 
                                 {/* Verification Row */}

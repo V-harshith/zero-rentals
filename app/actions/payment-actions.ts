@@ -185,19 +185,21 @@ export async function fulfillSubscriptionAction(data: {
             throw new Error("Invalid payment signature")
         }
 
-        // 2. Calculate End Date
-        const startDate = new Date()
-        const endDate = new Date()
+        // 2. Calculate End Date using UTC to avoid timezone issues
+        const now = new Date()
+        const startDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), now.getUTCHours(), now.getUTCMinutes(), now.getUTCSeconds()))
+        const endDate = new Date(startDate)
         if (data.planDuration.includes('month')) {
             const months = parseInt(data.planDuration)
-            endDate.setMonth(endDate.getMonth() + months)
+            endDate.setUTCMonth(endDate.getUTCMonth() + months)
         } else if (data.planDuration.includes('year')) {
-            endDate.setFullYear(endDate.getFullYear() + 1)
+            endDate.setUTCFullYear(endDate.getUTCFullYear() + 1)
         } else {
             // Default fallback based on common plans
-            if (data.planName === 'Silver') endDate.setMonth(endDate.getMonth() + 3)
-            else if (data.planName === 'Gold') endDate.setMonth(endDate.getMonth() + 6)
-            else if (data.planName === 'Platinum') endDate.setFullYear(endDate.getFullYear() + 1)
+            if (data.planName === 'Silver') endDate.setUTCMonth(endDate.getUTCMonth() + 1)
+            else if (data.planName === 'Gold') endDate.setUTCMonth(endDate.getUTCMonth() + 3)
+            else if (data.planName === 'Platinum') endDate.setUTCMonth(endDate.getUTCMonth() + 6)
+            else if (data.planName === 'Elite') endDate.setUTCFullYear(endDate.getUTCFullYear() + 1)
         }
 
         // 3. Map properties limit

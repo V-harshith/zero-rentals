@@ -12,6 +12,7 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 import Link from "next/link"
+import { useSecureFetch } from "@/lib/csrf-context"
 
 // ============================================================================
 // TYPES
@@ -46,6 +47,8 @@ interface UploadDetail {
 // COMPONENT
 // ============================================================================
 export function BulkUploadTab() {
+    const secureFetch = useSecureFetch()
+
     // Upload history
     const [history, setHistory] = useState<UploadHistoryItem[]>([])
     const [loadingHistory, setLoadingHistory] = useState(false)
@@ -57,7 +60,7 @@ export function BulkUploadTab() {
     const loadHistory = useCallback(async () => {
         setLoadingHistory(true)
         try {
-            const res = await fetch('/api/admin/bulk-upload/history')
+            const res = await secureFetch('/api/admin/bulk-upload/history')
             if (res.ok) {
                 const data = await res.json()
                 setHistory(data.uploads || [])
@@ -67,11 +70,11 @@ export function BulkUploadTab() {
         } finally {
             setLoadingHistory(false)
         }
-    }, [])
+    }, [secureFetch])
 
     useEffect(() => {
         loadHistory()
-    }, [loadHistory])
+    }, [])
 
     const toggleDetail = async (id: string) => {
         if (expandedId === id) {

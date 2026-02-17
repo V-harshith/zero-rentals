@@ -13,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Upload, Image as ImageIcon, CheckCircle, XCircle, AlertTriangle, FolderOpen, Play, Trash2, RefreshCw } from "lucide-react"
 import { toast } from "sonner"
 import imageCompression from "browser-image-compression"
+import { useSecureFetch } from "@/lib/csrf-context"
 
 interface StagedImage {
     id: string
@@ -35,6 +36,7 @@ interface StagingSummary {
 
 export default function BulkImageUploadPage() {
     const router = useRouter()
+    const secureFetch = useSecureFetch()
     const [images, setImages] = useState<File[]>([])
     const [idColumn, setIdColumn] = useState("PSN")
     const [uploading, setUploading] = useState(false)
@@ -64,7 +66,7 @@ export default function BulkImageUploadPage() {
     // Fetch staged images on mount and when tab changes
     const fetchStagedImages = useCallback(async () => {
         try {
-            const response = await fetch('/api/admin/bulk-image-upload?status=pending')
+            const response = await secureFetch('/api/admin/bulk-image-upload?status=pending')
             if (!response.ok) throw new Error('Failed to fetch staged images')
             const data = await response.json()
             setStagedImages(data.images || [])
@@ -149,7 +151,7 @@ export default function BulkImageUploadPage() {
             images.forEach(image => formData.append('images', image))
             formData.append('idColumn', idColumn)
 
-            const response = await fetch('/api/admin/bulk-image-upload', {
+            const response = await secureFetch('/api/admin/bulk-image-upload', {
                 method: 'POST',
                 body: formData,
             })
@@ -221,7 +223,7 @@ export default function BulkImageUploadPage() {
         setAssignmentResults(null)
 
         try {
-            const response = await fetch('/api/admin/bulk-image-upload/assign', {
+            const response = await secureFetch('/api/admin/bulk-image-upload/assign', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ idColumn: idColumn.toLowerCase() }),
@@ -288,7 +290,7 @@ export default function BulkImageUploadPage() {
         if (!confirm('Are you sure you want to clear all staged images?')) return
 
         try {
-            const response = await fetch('/api/admin/bulk-image-upload/clear', {
+            const response = await secureFetch('/api/admin/bulk-image-upload/clear', {
                 method: 'POST'
             })
 

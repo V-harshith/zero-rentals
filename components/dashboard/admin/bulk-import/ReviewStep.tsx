@@ -18,6 +18,7 @@ import {
     Images,
 } from "lucide-react"
 import { toast } from "sonner"
+import { useSecureFetch } from "@/lib/csrf-context"
 
 interface ReviewStepProps {
     jobId: string
@@ -28,6 +29,7 @@ interface ReviewStepProps {
 }
 
 export function ReviewStep({ jobId, previewData, onComplete, onBack, onCancel }: ReviewStepProps) {
+    const secureFetch = useSecureFetch()
     const [confirming, setConfirming] = useState(false)
     const [progress, setProgress] = useState(0)
     const [status, setStatus] = useState("")
@@ -83,7 +85,7 @@ export function ReviewStep({ jobId, previewData, onComplete, onBack, onCancel }:
         setProgress(0)
 
         try {
-            const res = await fetch(`/api/admin/bulk-import/jobs/${jobId}/confirm`, {
+            const res = await secureFetch(`/api/admin/bulk-import/jobs/${jobId}/confirm`, {
                 method: "POST",
             })
 

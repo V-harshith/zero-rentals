@@ -75,9 +75,11 @@ export async function POST() {
 
         // 4. Create free subscription using atomic database function
         // This prevents race conditions and duplicate subscriptions
-        const startDate = new Date()
-        const endDate = new Date()
-        endDate.setDate(endDate.getDate() + 30)
+        // Use UTC to avoid timezone issues
+        const now = new Date()
+        const startDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), now.getUTCHours(), now.getUTCMinutes(), now.getUTCSeconds()))
+        const endDate = new Date(startDate)
+        endDate.setUTCDate(endDate.getUTCDate() + 30)
 
         const { data: subscriptionResult, error: createError } = await supabaseAdmin
             .rpc('get_or_create_subscription', {

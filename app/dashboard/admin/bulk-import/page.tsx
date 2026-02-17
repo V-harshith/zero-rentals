@@ -31,6 +31,7 @@ import { ImageUploadStep } from "@/components/dashboard/admin/bulk-import/ImageU
 import { ReviewStep } from "@/components/dashboard/admin/bulk-import/ReviewStep"
 import { ResultsStep } from "@/components/dashboard/admin/bulk-import/ResultsStep"
 import { StepIndicator } from "@/components/dashboard/admin/bulk-import/StepIndicator"
+import { useSecureFetch } from "@/lib/csrf-context"
 
 // ============================================================================
 // Types
@@ -56,6 +57,7 @@ interface ImportJob {
 // ============================================================================
 export default function BulkImportPage() {
     const router = useRouter()
+    const secureFetch = useSecureFetch()
 
     // Step state
     const [currentStep, setCurrentStep] = useState<ImportStep>("excel")
@@ -85,7 +87,7 @@ export default function BulkImportPage() {
     const loadRecentJobs = async () => {
         setLoadingHistory(true)
         try {
-            const res = await fetch("/api/admin/bulk-import/jobs")
+            const res = await secureFetch("/api/admin/bulk-import/jobs")
             if (res.ok) {
                 const data = await res.json()
                 setRecentJobs(data.jobs || [])
@@ -101,7 +103,7 @@ export default function BulkImportPage() {
     const createJob = async () => {
         setIsCreatingJob(true)
         try {
-            const res = await fetch("/api/admin/bulk-import/jobs", { method: "POST" })
+            const res = await secureFetch("/api/admin/bulk-import/jobs", { method: "POST" })
             if (!res.ok) {
                 const error = await res.json()
                 throw new Error(error.error || "Failed to create job")
@@ -134,7 +136,7 @@ export default function BulkImportPage() {
             const controller = new AbortController()
             const timeoutId = setTimeout(() => controller.abort(), 30000) // 30 second timeout
 
-            const res = await fetch(`/api/admin/bulk-import/jobs/${jobId}/preview`, {
+            const res = await secureFetch(`/api/admin/bulk-import/jobs/${jobId}/preview`, {
                 signal: controller.signal,
             })
             clearTimeout(timeoutId)
@@ -269,7 +271,7 @@ export default function BulkImportPage() {
         if (!confirm("Are you sure you want to delete this import job?")) return
 
         try {
-            const res = await fetch(`/api/admin/bulk-import/jobs/${jobIdToDelete}`, {
+            const res = await secureFetch(`/api/admin/bulk-import/jobs/${jobIdToDelete}`, {
                 method: "DELETE",
             })
             if (res.ok) {

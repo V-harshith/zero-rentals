@@ -142,19 +142,20 @@ export async function handleCancelledToRenewed(
             existingSub?.end_date || null
         )
 
-        // Calculate new dates
-        const startDate = new Date()
-        const endDate = new Date()
+        // Calculate new dates using UTC to avoid timezone issues
+        const now = new Date()
+        const startDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), now.getUTCHours(), now.getUTCMinutes(), now.getUTCSeconds()))
+        const endDate = new Date(startDate)
 
         const durationLower = planDetails.duration.toLowerCase()
         if (durationLower.includes('month')) {
             const months = parseInt(planDetails.duration.match(/\d+/)?.[0] || '1')
-            endDate.setMonth(endDate.getMonth() + months)
+            endDate.setUTCMonth(endDate.getUTCMonth() + months)
         } else if (durationLower.includes('year')) {
             const years = parseInt(planDetails.duration.match(/\d+/)?.[0] || '1')
-            endDate.setFullYear(endDate.getFullYear() + years)
+            endDate.setUTCFullYear(endDate.getUTCFullYear() + years)
         } else {
-            endDate.setMonth(endDate.getMonth() + 1) // Default 1 month
+            endDate.setUTCMonth(endDate.getUTCMonth() + 1) // Default 1 month
         }
 
         if (action.action === 'reactivate' && existingSub) {

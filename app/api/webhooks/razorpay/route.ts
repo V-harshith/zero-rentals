@@ -368,6 +368,8 @@ async function fulfillSubscription(
                 user_id: userId,
                 subscription_id: null, // Will update after subscription creation
                 amount: amount,
+                currency: 'INR',
+                plan_name: planName, // CRITICAL: Include plan name for admin dashboard
                 transaction_id: orderId,
                 status: 'processing', // Mark as processing until subscription is created
                 payment_gateway: 'razorpay',

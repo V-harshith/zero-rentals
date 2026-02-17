@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import * as XLSX from "xlsx"
 import { createClient } from "@/lib/supabase-server"
 import { supabaseAdmin } from "@/lib/supabase-admin"
+import { csrfProtection } from "@/lib/csrf-server"
 import crypto from "crypto"
 import { encrypt, isEncryptionConfigured } from "@/lib/encryption"
 import { hasConcurrentProcessingJob } from "@/lib/bulk-import-queue"
@@ -67,19 +68,22 @@ function mapAmenities(facilitiesString: string | null): string[] {
     return Array.from(mapped)
 }
 
-function getPropertyType(pgFor: string | null): 'PG' | 'Co-living' | 'Rent' {
-    if (!pgFor) return 'PG'
-    const lower = pgFor.toLowerCase()
-    if (lower.includes('co-living') || lower.includes('coliving')) return 'Co-living'
-    if (lower.includes('rent') || lower.includes('apartment')) return 'Rent'
+function getPropertyType(propertyType: string | null): 'PG' | 'Co-living' | 'Rent' {
+    if (!propertyType) return 'PG'
+    const lower = propertyType.toLowerCase().trim()
+    if (lower === 'co-living' || lower === 'coliving') return 'Co-living'
+    if (lower === 'rent' || lower === 'rental' || lower === 'apartment') return 'Rent'
+    if (lower === 'pg' || lower === 'p.g' || lower === 'paying guest') return 'PG'
     return 'PG'
 }
 
 function getPreferredTenant(pgFor: string | null): 'Male' | 'Female' | 'Any' {
     if (!pgFor) return 'Any'
-    const lower = pgFor.toLowerCase()
-    if (lower.includes('gent') || lower.includes('male') || lower.includes('boys')) return 'Male'
-    if (lower.includes('ladies') || lower.includes('female') || lower.includes('girls')) return 'Female'
+    const lower = pgFor.toLowerCase().trim()
+    // Male keywords: Male, Mens, Gents, Boys
+    if (lower.includes('male') || lower.includes('mens') || lower.includes('gent') || lower.includes('boys')) return 'Male'
+    // Female keywords: Female, Ladies, Girls
+    if (lower.includes('female') || lower.includes('ladies') || lower.includes('girls')) return 'Female'
     return 'Any'
 }
 
@@ -134,6 +138,7 @@ const COLUMN_NAMES = {
     LANDMARK: ['Landmark', 'landmark'],
     USP: ['USP', 'usp'],
     FACILITIES: ['Facilities', 'facilities'],
+    PROPERTY_TYPE: ['Property Type', 'Property_Type', 'property_type', 'Type', 'type'],
     PG_FOR: ["PG's for", "PG's For", "pg_for", "PGFor"],
     PRIVATE_ROOM: ['Private Room', 'private_room_price'],
     DOUBLE_SHARING: ['Double Sharing', 'double_sharing_price'],
@@ -155,6 +160,12 @@ export async function POST(
     try {
         const { id } = await params
         jobId = id
+
+        // CSRF protection
+        const csrfCheck = await csrfProtection(request)
+        if (!csrfCheck.valid) {
+            return NextResponse.json({ error: csrfCheck.error || 'Invalid request' }, { status: 403 })
+        }
 
         // Auth check
         const supabase = await createClient()
@@ -313,7 +324,8 @@ export async function POST(
                     continue
                 }
 
-                // Parse pricing - using getColumnValue for backward compatibility
+                // Parse property type and PG_FOR - using getColumnValue for backward compatibility
+                const propertyTypeValue = String(getColumnValue(row, COLUMN_NAMES.PROPERTY_TYPE) || '')
                 const pgFor = String(getColumnValue(row, COLUMN_NAMES.PG_FOR) || '')
                 const oneRkPrice = parsePrice(getColumnValue(row, COLUMN_NAMES.ONE_RK))
                 const privateRoomPrice = parsePrice(getColumnValue(row, COLUMN_NAMES.PRIVATE_ROOM))
@@ -340,11 +352,15 @@ export async function POST(
                 const fullAddress = `${propertyName}, ${area}, ${city}${landmark ? ', Near ' + landmark : ''}`
                 const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(fullAddress)}`
 
+                // Determine property type and preferred tenant
+                const determinedPropertyType = getPropertyType(propertyTypeValue)
+                const determinedPreferredTenant = getPreferredTenant(pgFor)
+
                 // Build property data - matches normal property posting structure
                 const propertyData = {
                     title: propertyName,
-                    description: usp || landmark || `${propertyName} - ${getPreferredTenant(pgFor)} ${getPropertyType(pgFor)}`,
-                    property_type: getPropertyType(pgFor),
+                    description: usp || landmark || `${propertyName} - ${determinedPreferredTenant} ${determinedPropertyType}`,
+                    property_type: determinedPropertyType,
                     room_type: determineRoomType(row),
 
                     city: city,
@@ -365,7 +381,7 @@ export async function POST(
                     deposit: deposit,
 
                     amenities: mapAmenities(facilities),
-                    preferred_tenant: getPreferredTenant(pgFor),
+                    preferred_tenant: determinedPreferredTenant,
                     usp: usp,
 
                     // Default values matching normal property post
