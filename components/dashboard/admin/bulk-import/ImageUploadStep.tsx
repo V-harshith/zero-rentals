@@ -235,7 +235,7 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
                 } else {
                     // Non-JSON response (HTML error page)
                     if (res.status === 413) {
-                        errorMessage = "File size too large. Maximum total upload is 10MB. Try selecting fewer images or a folder with smaller images."
+                        errorMessage = "File size too large. Maximum upload is 15MB (after compression). Try selecting fewer images or a folder with smaller images."
                     } else if (res.status === 429) {
                         errorMessage = "Rate limit exceeded. Please wait a moment and try again."
                     } else if (res.status >= 500) {

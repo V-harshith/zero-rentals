@@ -21,13 +21,20 @@ const nextConfig = {
   compress: true,
   // Enable React strict mode for better development
   reactStrictMode: true,
+  // API Routes Configuration
+  api: {
+    bodyParser: {
+      sizeLimit: '15mb',
+    },
+    responseLimit: '15mb',
+  },
   // Experimental features for better performance
   experimental: {
     optimizeCss: true,
     optimizePackageImports: ['lucide-react', '@radix-ui/react-icons'],
     // Increase body size limit for file uploads (prevents 413 Payload Too Large)
     serverActions: {
-      bodySizeLimit: '10mb',
+      bodySizeLimit: '15mb',
     },
   },
   // SECURITY: Add security headers

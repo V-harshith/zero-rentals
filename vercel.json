@@ -1,4 +1,18 @@
 {
+  "functions": {
+    "app/api/admin/bulk-import/jobs/[id]/images/route.ts": {
+      "maxDuration": 60,
+      "memory": 3008
+    },
+    "app/api/admin/bulk-import/jobs/[id]/excel/route.ts": {
+      "maxDuration": 30,
+      "memory": 1024
+    },
+    "app/api/admin/bulk-import/jobs/[id]/confirm/route.ts": {
+      "maxDuration": 60,
+      "memory": 3008
+    }
+  },
   "crons": [
     {
       "path": "/api/cron/check-property-expiry",
