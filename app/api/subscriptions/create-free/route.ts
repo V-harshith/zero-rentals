@@ -126,13 +126,6 @@ export async function POST() {
             isNew: result.is_new
         })
 
-        return NextResponse.json({
-            success: true,
-            message: 'Free subscription created',
-            plan: subscription.plan_name,
-            subscriptionId: subscription.id
-        })
-
     } catch (error) {
         console.error('Unexpected error creating free subscription:', error)
         return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
