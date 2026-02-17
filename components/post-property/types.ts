@@ -45,6 +45,11 @@ export interface FormData {
     // Edit mode fields
     existingImages?: string[]
     newImages?: File[]
+
+    // Legal Consents (required for new properties by owners)
+    consentPublished?: boolean
+    consentImages?: boolean
+    consentContact?: boolean
 }
 
 // ==========================================

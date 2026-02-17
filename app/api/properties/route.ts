@@ -274,11 +274,30 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // 🔒 CRITICAL: Validate legal consents for owners (not admins)
+    if (user.role === 'owner') {
+      if (!body.consent_published || !body.consent_images || !body.consent_contact) {
+        return NextResponse.json(
+          { error: 'All legal consents are required to post a property' },
+          { status: 400 }
+        )
+      }
+    }
+
+    // Prepare property data with consents (for owners) or defaults (for admins)
+    const propertyData = {
+      ...body,
+      consent_published: user.role === 'owner' ? body.consent_published : true,
+      consent_images: user.role === 'owner' ? body.consent_images : true,
+      consent_contact: user.role === 'owner' ? body.consent_contact : true,
+      consented_at: user.role === 'owner' ? new Date().toISOString() : null,
+    }
+
     const { data, error } = await supabase
       .from('properties')
       .insert([
         {
-          ...body,
+          ...propertyData,
           owner_id: user.id,
           owner_name: user.name,
           owner_contact: user.phone || user.email,

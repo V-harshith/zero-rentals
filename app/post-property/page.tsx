@@ -64,7 +64,11 @@ const INITIAL_DATA: FormData = {
   otherRules: "",
   directionsTip: "",
   furnishing: "" as "Fully Furnished" | "Semi Furnished" | "Unfurnished" | "",
-  images: []
+  images: [],
+  // Legal Consents (required for owners posting new properties)
+  consentPublished: false,
+  consentImages: false,
+  consentContact: false,
 }
 
 // Track loaded scripts for cleanup
@@ -805,7 +809,22 @@ function PostPropertyPage() {
         }
         return true
 
-      case 4: // PG Details
+      case 4: // PG Details / Rules
+        // Validate consents for owners posting new properties
+        if (!isAdmin && !isEditMode) {
+          if (!formData.consentPublished) {
+            toast.error("Please agree to the Property Listing Consent")
+            return false
+          }
+          if (!formData.consentImages) {
+            toast.error("Please agree to the Image Usage Authorization")
+            return false
+          }
+          if (!formData.consentContact) {
+            toast.error("Please agree to the Contact Permission")
+            return false
+          }
+        }
         return true
 
       case 5: // Images
@@ -1076,7 +1095,13 @@ function PostPropertyPage() {
           payment_plan: propertyPayment.plan
         } : {
           payment_status: 'included' // First property is included in plan
-        })
+        }),
+        // Legal consents (for owners posting new properties)
+        ...(!isAdmin && !isEditMode ? {
+          consent_published: formData.consentPublished,
+          consent_images: formData.consentImages,
+          consent_contact: formData.consentContact,
+        } : {})
       }
 
 
@@ -1518,7 +1543,12 @@ function PostPropertyPage() {
             )}
 
             {currentStep === 4 && (
-              <RulesStep formData={formData} setFormData={setFormData} />
+              <RulesStep
+                formData={formData}
+                setFormData={setFormData}
+                isAdmin={isAdmin}
+                isEditMode={isEditMode}
+              />
             )}
 
             {currentStep === 5 && (
