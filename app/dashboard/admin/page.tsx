@@ -807,18 +807,20 @@ function AdminDashboard() {
               </TabsTrigger>
             </TabsList>
 
-            {/* Search Bar */}
-            <div className="px-4 md:px-6 py-3 md:py-4 border-t md:border-t-0">
-              <div className="relative w-full md:max-w-md">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10 text-sm md:text-base"
-                />
+            {/* Search Bar - Only show on tabs that use it */}
+            {(activeTab === 'pending' || activeTab === 'users') && (
+              <div className="px-4 md:px-6 py-3 md:py-4 border-t md:border-t-0">
+                <div className="relative w-full md:max-w-md">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder={activeTab === 'pending' ? "Search pending properties..." : "Search users..."}
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-10 text-sm md:text-base"
+                  />
+                </div>
               </div>
-            </div>
+            )}
           </div>
 
           {/* Pending Approvals Tab */}
