@@ -331,14 +331,14 @@ export function AllPropertiesTab() {
                         <TableBody>
                             {loading ? (
                                 <TableRow>
-                                    <TableCell colSpan={8} className="h-32 text-center text-muted-foreground">
+                                    <TableCell colSpan={9} className="h-32 text-center text-muted-foreground">
                                         <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
                                         Loading properties...
                                     </TableCell>
                                 </TableRow>
                             ) : filteredProperties.length === 0 ? (
                                 <TableRow>
-                                    <TableCell colSpan={8} className="h-32 text-center text-muted-foreground">
+                                    <TableCell colSpan={9} className="h-32 text-center text-muted-foreground">
                                         No properties found
                                     </TableCell>
                                 </TableRow>
