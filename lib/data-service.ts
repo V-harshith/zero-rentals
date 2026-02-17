@@ -506,7 +506,10 @@ export async function createProperty(
   try {
     const parseResult = PropertySchema.safeParse(property)
     if (!parseResult.success) {
-      return { data: null, error: { message: "Validation Failed", details: parseResult.error.errors } }
+      // 🔥 CRITICAL FIX: Log validation errors for debugging
+      const errorMessages = parseResult.error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ')
+      console.error('Property validation failed:', errorMessages, 'Property data:', property)
+      return { data: null, error: { message: `Validation Failed: ${errorMessages}`, details: parseResult.error.errors } }
     }
 
     // Skip property limit checks for admin posts
