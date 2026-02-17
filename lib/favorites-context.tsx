@@ -78,6 +78,11 @@ export function FavoritesProvider({ children }: { children: React.ReactNode }) {
       return false
     }
 
+    // CRITICAL FIX: Check if already in favorites BEFORE anything else
+    if (favoriteIds.has(propertyId)) {
+      return true
+    }
+
     // Check if there's already an in-flight request for this property
     const existingRequest = inFlightRequests.current.get(`add-${propertyId}`)
     if (existingRequest) {

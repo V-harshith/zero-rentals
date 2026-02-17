@@ -2,6 +2,7 @@ import { NextRequest } from "next/server"
 import * as XLSX from "xlsx"
 import { createClient } from "@/lib/supabase-server"
 import { supabaseAdmin } from "@/lib/supabase-admin"
+import { csrfProtection } from "@/lib/csrf-server"
 import crypto from "crypto"
 
 export const runtime = "nodejs"
@@ -140,6 +141,15 @@ interface OwnerCredentials {
 // MAIN API HANDLER
 // ============================================================================
 export async function POST(request: NextRequest) {
+    // CSRF Protection - CRITICAL FIX
+    const csrfCheck = await csrfProtection(request)
+    if (!csrfCheck.valid) {
+        return new Response(
+            JSON.stringify({ error: csrfCheck.error || 'Invalid CSRF token' }),
+            { status: 403, headers: { 'Content-Type': 'application/json' } }
+        )
+    }
+
     const encoder = new TextEncoder()
 
     const stream = new ReadableStream({

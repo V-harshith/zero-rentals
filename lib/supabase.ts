@@ -53,7 +53,9 @@ interface ManagedSubscription<T extends TableRecord = TableRecord> {
 
 class SubscriptionManager {
   private subscriptions: Map<string, ManagedSubscription> = new Map()
+  private cleanupTimers: Map<string, NodeJS.Timeout> = new Map() // Track cleanup timers
   private static instance: SubscriptionManager | null = null
+  private static readonly CLEANUP_DELAY_MS = 5000 // 5 second grace period
 
   static getInstance(): SubscriptionManager {
     if (!SubscriptionManager.instance) {
@@ -148,7 +150,7 @@ class SubscriptionManager {
 
   /**
    * Unsubscribe a specific callback from a channel
-   * Only removes the channel when all callbacks are removed
+   * Only removes the channel when all callbacks are removed (with grace period)
    */
   private unsubscribe(channelName: string, callbackId: string): void {
     const managedSub = this.subscriptions.get(channelName)
@@ -157,10 +159,34 @@ class SubscriptionManager {
     // Remove specific callback
     managedSub.callbacks.delete(callbackId)
 
-    // Only remove channel when no more callbacks
+    // Only remove channel when no more callbacks (with grace period for rapid re-subscriptions)
     if (managedSub.callbacks.size === 0) {
-      this.removeChannel(channelName)
+      this.scheduleChannelCleanup(channelName)
     }
+  }
+
+  /**
+   * Schedule channel cleanup with grace period
+   * Prevents channel thrashing during rapid re-subscriptions
+   */
+  private scheduleChannelCleanup(channelName: string): void {
+    // Clear any existing cleanup timer
+    const existingTimer = this.cleanupTimers.get(channelName)
+    if (existingTimer) {
+      clearTimeout(existingTimer)
+    }
+
+    // Schedule new cleanup
+    const timer = setTimeout(() => {
+      const managedSub = this.subscriptions.get(channelName)
+      // Double-check no new callbacks were added during grace period
+      if (managedSub && managedSub.callbacks.size === 0) {
+        this.removeChannel(channelName)
+      }
+      this.cleanupTimers.delete(channelName)
+    }, SubscriptionManager.CLEANUP_DELAY_MS)
+
+    this.cleanupTimers.set(channelName, timer)
   }
 
   /**
@@ -200,6 +226,12 @@ class SubscriptionManager {
    * Cleanup all subscriptions - useful for logout/reset
    */
   cleanup(): void {
+    // Clear all pending cleanup timers
+    this.cleanupTimers.forEach((timer) => {
+      clearTimeout(timer)
+    })
+    this.cleanupTimers.clear()
+
     this.subscriptions.forEach((managedSub, channelName) => {
       try {
         supabase.removeChannel(managedSub.channel)

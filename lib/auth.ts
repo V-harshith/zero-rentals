@@ -518,14 +518,14 @@ export async function getCurrentUser() {
         // Handle profile fetch results
         if (profileError) {
           console.error('[AUTH] Error fetching user profile after retries:', profileError)
-          
-          // CRITICAL: Don't logout on database errors - return basic user info
-          // This prevents logout on temporary database issues
-          console.warn('[AUTH] Database error - using basic auth info to prevent logout')
+
+          // CRITICAL FIX: Never trust user_metadata for role - always default to tenant
+          // User metadata can be manipulated client-side, creating privilege escalation risk
+          console.warn('[AUTH] Database error - using basic auth info with safe defaults')
           return {
             ...user,
             name: user.user_metadata?.name || user.email?.split('@')[0] || 'User',
-            role: user.user_metadata?.role || 'tenant',
+            role: 'tenant', // SECURITY: Always default to tenant, never trust metadata
             verified: false,
             status: 'active'
           }
@@ -533,9 +533,10 @@ export async function getCurrentUser() {
 
         if (!userData) {
           console.log('[AUTH] No profile found, attempting auto-heal...')
-          
+
           // Auto-heal: Create missing profile
-          const roleFromMetadata = (user.user_metadata?.role as string) || 'tenant'
+          // SECURITY FIX: Never trust user_metadata for role - always default to tenant
+          const roleFromMetadata = 'tenant' // Never use user.user_metadata?.role
           const nameFromMetadata = (user.user_metadata?.name as string) || user.email!.split('@')[0]
 
           const { data: newUserData, error: insertError } = await supabase

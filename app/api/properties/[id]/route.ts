@@ -289,6 +289,12 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    // CSRF Protection - CRITICAL FIX
+    const csrfCheck = await csrfProtection(request)
+    if (!csrfCheck.valid) {
+      return NextResponse.json({ error: csrfCheck.error || 'Invalid CSRF token' }, { status: 403 })
+    }
+
     const { id } = await params
 
     // Validate UUID format

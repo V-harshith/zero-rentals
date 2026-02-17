@@ -96,18 +96,26 @@ function buildSearchQuery(filters: SearchFilters) {
   } else if (filters.location) {
     // INDUSTRY-STANDARD LOCATION SEARCH
     // Matches: City, Area, Locality, Pincode, Landmark
-    const cleanLoc = filters.location.trim().replace(/[%_]/g, '')
+    // SECURITY FIX: Sanitize input to prevent SQL injection
+    const cleanLoc = filters.location.trim()
+      .replace(/[%_]/g, '') // Remove wildcards
+      .replace(/[<>"'&]/g, '') // Remove HTML/JS special chars
+      .substring(0, 50) // Limit length
+
     if (cleanLoc) {
       // Check if input is a pincode (exactly 6 digits)
       const isPincode = /^\d{6}$/.test(cleanLoc)
-      
+
       if (isPincode) {
         // Exact pincode match for better accuracy
         query = query.eq('pincode', cleanLoc)
       } else {
         // Multi-field fuzzy search (case-insensitive)
-        // Searches across: city, area, locality, pincode (partial), landmark
-        query = query.or(`city.ilike.%${cleanLoc}%,area.ilike.%${cleanLoc}%,locality.ilike.%${cleanLoc}%,pincode.ilike.%${cleanLoc}%,landmark.ilike.%${cleanLoc}%`)
+        // SECURITY: Additional validation before building query
+        const sanitizedLoc = cleanLoc.replace(/[^a-zA-Z0-9\s\-,.]/g, '')
+        if (sanitizedLoc) {
+          query = query.or(`city.ilike.%${sanitizedLoc}%,area.ilike.%${sanitizedLoc}%,locality.ilike.%${sanitizedLoc}%,landmark.ilike.%${sanitizedLoc}%`)
+        }
       }
     }
     query = query.limit(50)
@@ -341,11 +349,12 @@ export async function getFeaturedProperties(limit = 6): Promise<Property[]> {
     })
 
     // Get all featured properties
+    // Note: We only filter by status='active' for moderation, not by availability
+    // Featured properties should appear regardless of availability (Available/Occupied/etc)
     const { data, error } = await supabase
       .from('properties')
       .select('*, owner:users!owner_id(name, email, phone, avatar_url, verified)')
       .eq('status', 'active')
-      .eq('availability', 'Available')
       .eq('featured', true)
       .order('created_at', { ascending: false })
       .limit(limit * 2) // Fetch more to allow for sorting
@@ -589,9 +598,27 @@ export async function createProperty(
 
 export async function updateProperty(
   id: string,
-  updates: Partial<Property> & { roomPrices?: Record<string, number> }
+  updates: Partial<Property> & { roomPrices?: Record<string, number> },
+  ownerId?: string
 ): Promise<{ data: Property | null; error: any }> {
   try {
+    // CRITICAL: Verify ownership if ownerId is provided
+    if (ownerId) {
+      const { data: property, error: fetchError } = await supabase
+        .from('properties')
+        .select('owner_id')
+        .eq('id', id)
+        .single()
+
+      if (fetchError || !property) {
+        return { data: null, error: { message: 'Property not found' } }
+      }
+
+      if (property.owner_id !== ownerId) {
+        return { data: null, error: { message: 'Unauthorized: You do not own this property' } }
+      }
+    }
+
     const PartialSchema = PropertySchema.partial()
     const parseResult = PartialSchema.safeParse(updates)
 
@@ -657,12 +684,22 @@ export async function updateProperty(
   }
 }
 
-export async function deleteProperty(id: string): Promise<{ error: any }> {
+export async function deleteProperty(id: string, ownerId?: string): Promise<{ error: any }> {
   try {
-    const { error } = await supabase
-      .from('properties')
-      .delete()
-      .eq('id', id)
+    // Build query with optional ownership check
+    let query = supabase.from('properties').delete().eq('id', id)
+
+    // CRITICAL: If ownerId provided, enforce ownership
+    if (ownerId) {
+      query = query.eq('owner_id', ownerId)
+    }
+
+    const { error, count } = await query
+
+    // If ownerId was provided and no rows deleted, it's unauthorized
+    if (ownerId && count === 0) {
+      return { error: { message: 'Unauthorized: Property not found or you do not own it' } }
+    }
 
     return { error }
   } catch (error) {
@@ -1097,49 +1134,41 @@ export async function transitionPropertyStatus(
 }
 
 /**
- * Sets the featured status of a property atomically
+ * Sets the featured status of a property atomically via REST API
  * Only active properties can be featured
  *
  * @param propertyId - The property UUID
  * @param featured - Whether to feature the property
- * @param adminId - Admin user ID (for audit trail)
  * @returns FeaturedStatusResult with success/failure details
  */
 export async function setPropertyFeatured(
   propertyId: string,
-  featured: boolean,
-  adminId?: string
+  featured: boolean
 ): Promise<FeaturedStatusResult> {
   try {
-    const { data, error } = await supabase.rpc('set_property_featured', {
-      p_property_id: propertyId,
-      p_featured: featured,
-      p_admin_id: adminId || null
+    const response = await fetch(`/api/admin/properties/${propertyId}/feature`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ featured }),
     })
 
-    if (error) {
+    const result = await response.json()
+
+    if (!response.ok) {
       return {
         success: false,
-        error: `Failed to update featured status: ${error.message}`,
+        error: result.error || `Failed to update featured status: ${response.statusText}`,
         propertyId
       }
-    }
-
-    const result = data as {
-      success: boolean
-      message?: string
-      error?: string
-      property_id?: string
-      featured?: boolean
-      changed?: boolean
     }
 
     return {
       success: result.success,
       message: result.message,
-      error: result.error,
-      propertyId: result.property_id || propertyId,
-      featured: result.featured,
+      propertyId: result.data?.id || propertyId,
+      featured: result.data?.featured,
       changed: result.changed
     }
   } catch (error: any) {
