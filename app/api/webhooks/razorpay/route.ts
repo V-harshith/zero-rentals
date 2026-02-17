@@ -358,21 +358,51 @@ async function fulfillSubscription(
     orderId: string
 ) {
     try {
-        // 🔥 CRITICAL FIX: Check idempotency FIRST with proper error handling
-        // Check both payment_logs and subscriptions to handle race conditions
-        const { data: existingPayment, error: checkError } = await supabaseAdmin
-            .from('payment_logs')
-            .select('id, status, subscription_id')
-            .eq('transaction_id', orderId)
-            .maybeSingle()
+        // 🔥 CRITICAL FIX: Use atomic UPSERT-FIRST pattern to prevent race conditions
+        // This ensures only one webhook can create a subscription per orderId
 
-        if (checkError) {
-            console.error('Error checking payment logs:', checkError)
-            throw checkError
+        // Step 1: Atomically insert payment log (this acts as a distributed lock)
+        const { error: insertError } = await supabaseAdmin
+            .from('payment_logs')
+            .insert({
+                user_id: userId,
+                subscription_id: null, // Will update after subscription creation
+                amount: amount,
+                transaction_id: orderId,
+                status: 'processing', // Mark as processing until subscription is created
+                payment_gateway: 'razorpay',
+                processed_at: new Date().toISOString()
+            })
+
+        // If insert failed due to unique constraint, another webhook already processed this
+        if (insertError) {
+            if (insertError.code === '23505') { // Unique violation
+                console.log('Payment already being processed by another webhook:', orderId)
+                return
+            }
+            console.error('Error creating payment log:', insertError)
+            throw insertError
         }
 
-        if (existingPayment?.status === 'success') {
-            console.log('Payment already processed (idempotency check):', orderId)
+        // Step 2: Check for existing active subscription (idempotency)
+        const { data: existingSub } = await supabaseAdmin
+            .from('subscriptions')
+            .select('id')
+            .eq('user_id', userId)
+            .eq('status', 'active')
+            .gt('end_date', new Date().toISOString())
+            .maybeSingle()
+
+        if (existingSub) {
+            console.log('User already has active subscription:', existingSub.id)
+            // Update payment log with existing subscription
+            await supabaseAdmin
+                .from('payment_logs')
+                .update({
+                    subscription_id: existingSub.id,
+                    status: 'success'
+                })
+                .eq('transaction_id', orderId)
             return
         }
 
@@ -387,7 +417,6 @@ async function fulfillSubscription(
         const propertiesLimit = limitMap[planName] || 1
 
         // 🔥 STATE MACHINE FIX: Use proper state machine for cancelled -> renewed transition
-        // This handles the case where a cancelled subscription is renewed before expiry
         const result = await handleCancelledToRenewed(userId, {
             planName,
             duration,
@@ -396,6 +425,11 @@ async function fulfillSubscription(
         })
 
         if (!result.success) {
+            // Mark payment as failed
+            await supabaseAdmin
+                .from('payment_logs')
+                .update({ status: 'failed' })
+                .eq('transaction_id', orderId)
             throw new Error(result.error || 'Failed to process subscription')
         }
 
@@ -420,24 +454,17 @@ async function fulfillSubscription(
                 .in('status', ['active', 'pending'])
         }
 
-        // Create payment log with upsert for idempotency
-        const { error: logError } = await supabaseAdmin
+        // Step 3: Update payment log with subscription ID and success status
+        const { error: updateError } = await supabaseAdmin
             .from('payment_logs')
-            .upsert({
-                user_id: userId,
+            .update({
                 subscription_id: subscription.id,
-                amount: amount,
-                transaction_id: orderId,
-                status: 'success',
-                payment_gateway: 'razorpay',
-                processed_at: new Date().toISOString()
-            }, {
-                onConflict: 'transaction_id',
-                ignoreDuplicates: true // Don't error if already exists
+                status: 'success'
             })
+            .eq('transaction_id', orderId)
 
-        if (logError) {
-            console.error('Error creating payment log:', logError)
+        if (updateError) {
+            console.error('Error updating payment log:', updateError)
             // Non-fatal: subscription was created successfully
         }
 

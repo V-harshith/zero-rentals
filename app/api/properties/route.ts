@@ -292,7 +292,16 @@ export async function POST(request: NextRequest) {
       .select()
       .single()
 
-    if (error) throw error
+    if (error) {
+      // Handle property limit exceeded error from database trigger
+      if (error.message?.includes('Property limit exceeded')) {
+        return NextResponse.json({
+          error: 'Property limit reached for your plan. Please upgrade to add more properties.',
+          code: 'PROPERTY_LIMIT_EXCEEDED'
+        }, { status: 403 })
+      }
+      throw error
+    }
 
     // Send email notification (server-side only)
     try {
