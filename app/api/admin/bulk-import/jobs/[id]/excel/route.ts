@@ -3,71 +3,17 @@ import * as XLSX from "xlsx"
 import { createClient } from "@/lib/supabase-server"
 import { supabaseAdmin } from "@/lib/supabase-admin"
 import { csrfProtection } from "@/lib/csrf-server"
-import crypto from "crypto"
 import { encrypt, isEncryptionConfigured } from "@/lib/encryption"
 import { hasConcurrentProcessingJob } from "@/lib/bulk-import-queue"
+import { mapAmenities } from "@/lib/bulk-import/amenity-mapper"
+import { getColumnValue, COLUMN_NAMES } from "@/lib/bulk-import/column-mapper"
+import { generatePassword } from "@/lib/bulk-import/password"
+import { logger } from "@/lib/bulk-import/logger"
+import { MAX_EXCEL_ROWS, MAX_EXCEL_FILE_SIZE } from "@/lib/bulk-import/constants"
 
 // ============================================================================
-// AMENITY MAPPING
+// Property Type Helper
 // ============================================================================
-const AMENITY_MAP: Record<string, string> = {
-    'wifi': 'WiFi',
-    'wi-fi': 'WiFi',
-    'internet': 'WiFi',
-    'food': 'Meals',
-    'meals': 'Meals',
-    'tiffin': 'Meals',
-    'house keeping': 'Cleaning',
-    'housekeeping': 'Cleaning',
-    'cleaning': 'Cleaning',
-    'washing machine': 'Laundry',
-    'laundry': 'Laundry',
-    'cctv': 'Security',
-    'security': 'Security',
-    'security guard': 'Security',
-    'ac': 'AC',
-    'air conditioning': 'AC',
-    'parking': 'Parking',
-    'bike parking': 'Parking',
-    'car parking': 'Parking',
-    'power backup': 'Power Backup',
-    'generator': 'Power Backup',
-    'inverter': 'Power Backup',
-    'water heater': 'Geyser',
-    'geyser': 'Geyser',
-    'hot water': 'Geyser',
-    'gym': 'Gym',
-    'tv': 'TV',
-    'television': 'TV',
-    'fridge': 'Fridge',
-    'refrigerator': 'Fridge',
-    'ro water': 'Water Purifier',
-    'water purifier': 'Water Purifier',
-    'ro': 'Water Purifier',
-}
-
-function mapAmenities(facilitiesString: string | null): string[] {
-    if (!facilitiesString) return []
-
-    const facilities = facilitiesString.toLowerCase().split(',').map(f => f.trim()).filter(Boolean)
-    const mapped = new Set<string>()
-
-    for (const facility of facilities) {
-        if (AMENITY_MAP[facility]) {
-            mapped.add(AMENITY_MAP[facility])
-            continue
-        }
-        for (const [key, value] of Object.entries(AMENITY_MAP)) {
-            if (facility.includes(key) || key.includes(facility)) {
-                mapped.add(value)
-                break
-            }
-        }
-    }
-
-    return Array.from(mapped)
-}
-
 function getPropertyType(propertyType: string | null): 'PG' | 'Co-living' | 'Rent' {
     if (!propertyType) return 'PG'
     const lower = propertyType.toLowerCase().trim()
@@ -120,52 +66,6 @@ function determineRoomType(row: Record<string, unknown>): string {
     if (parsePrice(getColumnValue(row, COLUMN_NAMES.TRIPLE_SHARING))) return 'Triple'
     if (parsePrice(getColumnValue(row, COLUMN_NAMES.FOUR_SHARING))) return 'Four Sharing'
     return 'Single'
-}
-
-function generatePassword(): string {
-    return crypto.randomBytes(8).toString('base64url').slice(0, 12) + '!A1'
-}
-
-// ============================================================================
-// COLUMN MAPPING - Support both old and new Excel formats
-// ============================================================================
-
-/**
- * Helper function to get values from multiple possible column names.
- * Returns the first non-empty value found, or undefined if none match.
- */
-function getColumnValue(row: Record<string, unknown>, possibleNames: string[]): unknown {
-    for (const name of possibleNames) {
-        if (row[name] !== undefined && row[name] !== null && row[name] !== '') {
-            return row[name]
-        }
-    }
-    return undefined
-}
-
-// Column name mappings for backward compatibility
-const COLUMN_NAMES = {
-    PSN: ['PSN', 'psn'],
-    PROPERTY_NAME: ['Property Name', 'title', 'property_name', 'name'],
-    EMAIL: ['Email', 'email', 'owner_email'],
-    OWNER_NAME: ['Owner Name', 'owner_name', 'ownerName'],
-    OWNER_CONTACT: ['Owner Contact', 'owner_contact', 'ownerContact', 'phone'],
-    CITY: ['City', 'city'],
-    AREA: ['Area', 'area', 'locality'],
-    ADDRESS: ['Address', 'address', 'street_address'],
-    COUNTRY: ['Country', 'country'],
-    LOCALITY: ['Locality', 'locality'],
-    LANDMARK: ['Landmark', 'landmark'],
-    USP: ['USP', 'usp'],
-    FACILITIES: ['Facilities', 'facilities'],
-    PROPERTY_TYPE: ['Property Type', 'Property_Type', 'property_type', 'Type', 'type'],
-    PG_FOR: ["PG's for", "PG's For", "pg_for", "PGFor"],
-    PRIVATE_ROOM: ['Private Room', 'private_room_price'],
-    DOUBLE_SHARING: ['Double Sharing', 'double_sharing_price'],
-    TRIPLE_SHARING: ['Triple Sharing', 'triple_sharing_price', 'TrippleSharing'],
-    FOUR_SHARING: ['Four Sharing', 'four_sharing_price'],
-    ONE_RK: ['1RK', 'one_rk_price'],
-    DEPOSIT: ['Deposit', 'deposit'],
 }
 
 // ============================================================================
@@ -239,8 +139,8 @@ export async function POST(
             )
         }
 
-        // Validate file size (max 10MB)
-        if (file.size > 10 * 1024 * 1024) {
+        // Validate file size
+        if (file.size > MAX_EXCEL_FILE_SIZE) {
             return NextResponse.json(
                 { error: "File too large. Maximum size is 10MB" },
                 { status: 400 }
@@ -268,7 +168,7 @@ export async function POST(
             return NextResponse.json({ error: "Excel file is empty" }, { status: 400 })
         }
 
-        if (rawData.length > 1000) {
+        if (rawData.length > MAX_EXCEL_ROWS) {
             return NextResponse.json(
                 { error: "Too many rows. Maximum is 1000 properties per import" },
                 { status: 400 }
@@ -276,9 +176,18 @@ export async function POST(
         }
 
         // Process and validate each row
-        const properties: any[] = []
+        const properties: Array<{
+            row_number: number
+            psn: string
+            property_name: string
+            owner_email: string
+            owner_name: string
+            owner_phone: string
+            property_data: Record<string, unknown>
+        }> = []
         const errors: string[] = []
         const ownerEmails = new Map<string, { name: string; phone: string; properties: string[] }>()
+        const psnSet = new Set<string>() // Track PSNs for O(1) duplicate check
 
         for (let i = 0; i < rawData.length; i++) {
             const row = rawData[i]
@@ -339,10 +248,11 @@ export async function POST(
                 }
 
                 // Check for duplicate PSN in this import
-                if (properties.some(p => p.psn === psn)) {
+                if (psnSet.has(psn)) {
                     errors.push(`Row ${rowNum}: Duplicate PSN "${psn}" in import file`)
                     continue
                 }
+                psnSet.add(psn)
 
                 // Parse property type and PG_FOR - using getColumnValue for backward compatibility
                 const propertyTypeValue = String(getColumnValue(row, COLUMN_NAMES.PROPERTY_TYPE) || '')
@@ -400,7 +310,7 @@ export async function POST(
                     four_sharing_price: fourSharingPrice,
                     deposit: deposit,
 
-                    amenities: mapAmenities(facilities),
+                    amenities: mapAmenities(facilities.split(',').map(f => f.trim()).filter(Boolean)),
                     preferred_tenant: determinedPreferredTenant,
                     usp: usp,
 
@@ -424,15 +334,17 @@ export async function POST(
                     parking: facilities.toLowerCase().includes('parking') ? 'Bike' : 'None',
                 }
 
-                // Track owner
-                if (!ownerEmails.has(ownerEmail)) {
+                // Track owner - single lookup with get
+                const existingOwner = ownerEmails.get(ownerEmail)
+                if (!existingOwner) {
                     ownerEmails.set(ownerEmail, {
                         name: ownerName,
                         phone: ownerPhone,
-                        properties: [],
+                        properties: [propertyName],
                     })
+                } else {
+                    existingOwner.properties.push(propertyName)
                 }
-                ownerEmails.get(ownerEmail)!.properties.push(propertyName)
 
                 properties.push({
                     row_number: rowNum,
@@ -443,23 +355,32 @@ export async function POST(
                     owner_phone: ownerPhone,
                     property_data: propertyData,
                 })
-            } catch (error: any) {
-                errors.push(`Row ${rowNum}: ${error.message}`)
+            } catch (error: unknown) {
+                const errorMessage = error instanceof Error ? error.message : String(error)
+                errors.push(`Row ${rowNum}: ${errorMessage}`)
             }
         }
 
-        // Check for existing owners in database
+        // Check for existing owners in database - batch query for performance
         const existingOwners: string[] = []
-        const newOwners: any[] = []
+        const newOwners: Array<{
+            email: string
+            name: string
+            phone: string
+            password: string
+            properties: string[]
+        }> = []
+
+        const allEmails = Array.from(ownerEmails.keys())
+        const { data: existingUsers } = await supabaseAdmin
+            .from("users")
+            .select("id, email")
+            .in("email", allEmails)
+
+        const existingEmailSet = new Set(existingUsers?.map(u => u.email) || [])
 
         for (const [email, info] of ownerEmails) {
-            const { data: existingUser } = await supabaseAdmin
-                .from("users")
-                .select("id, email")
-                .eq("email", email)
-                .maybeSingle()
-
-            if (existingUser) {
+            if (existingEmailSet.has(email)) {
                 existingOwners.push(email)
             } else {
                 newOwners.push({
@@ -489,9 +410,10 @@ export async function POST(
                     let encryptedPassword: string
                     try {
                         encryptedPassword = encrypt(o.password)
-                    } catch (e: any) {
-                        console.error('Password encryption failed:', e)
-                        throw new Error(`Failed to encrypt password for ${o.email}: ${e.message}`)
+                    } catch (e: unknown) {
+                        const errorMessage = e instanceof Error ? e.message : String(e)
+                        logger.error('Password encryption failed', { error: errorMessage })
+                        throw new Error(`Failed to encrypt password for ${o.email}: ${errorMessage}`)
                     }
 
                     return {
@@ -531,21 +453,22 @@ export async function POST(
             existing_owners: existingOwners.length,
             psn_list: properties.map(p => p.psn),
         })
-    } catch (error: any) {
-        console.error("Excel upload error:", error)
+    } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : String(error)
+        logger.error("Excel upload error", { error: errorMessage, jobId })
 
         // Update job with error
         await supabaseAdmin
             .from("bulk_import_jobs")
             .update({
                 status: "failed",
-                error_message: error.message,
-                error_details: { stack: error.stack },
+                error_message: errorMessage,
+                error_details: { stack: error instanceof Error ? error.stack : undefined },
             })
             .eq("id", jobId)
 
         return NextResponse.json(
-            { error: error.message || "Failed to process Excel file" },
+            { error: errorMessage || "Failed to process Excel file" },
             { status: 500 }
         )
     }

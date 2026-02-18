@@ -4,7 +4,6 @@ import { useState, useCallback, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Progress } from "@/components/ui/progress"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -79,10 +78,21 @@ export default function BulkImportPage() {
     const [loadingHistory, setLoadingHistory] = useState(false)
     const [expandedJobId, setExpandedJobId] = useState<string | null>(null)
 
+    // Pending step transition for race condition fix
+    const [pendingStepTransition, setPendingStepTransition] = useState<ImportStep | null>(null)
+
     // Load recent jobs on mount
     useEffect(() => {
         loadRecentJobs()
     }, [])
+
+    // Handle step transition when preview data is ready (race condition fix)
+    useEffect(() => {
+        if (pendingStepTransition === "review" && previewData && previewData.job_id === jobId) {
+            setCurrentStep("review")
+            setPendingStepTransition(null)
+        }
+    }, [pendingStepTransition, previewData, jobId])
 
     const loadRecentJobs = async () => {
         setLoadingHistory(true)
@@ -241,14 +251,15 @@ export default function BulkImportPage() {
         })
         setImageData(data)
         setCompletedSteps((prev) => new Set([...prev, "images"]))
-        // Load preview data first, then transition to review step
+        // Load preview data first - step transition happens via useEffect when data is ready
+        setPendingStepTransition("review")
         try {
             console.log("[Flow] Loading preview data...")
             await loadPreviewData()
-            console.log("[Flow] Preview data loaded, transitioning to review step")
-            setCurrentStep("review")
+            console.log("[Flow] Preview data loaded")
         } catch (error) {
             console.error("[Flow] Failed to load preview data:", error)
+            setPendingStepTransition(null)
             toast.error("Failed to load preview. Please try clicking 'Back' and then 'Next' again.")
         }
     }, [loadPreviewData, jobId])
@@ -512,12 +523,12 @@ export default function BulkImportPage() {
                                                     onClick={() =>
                                                         setExpandedJobId(expandedJobId === job.id ? null : job.id)
                                                     }
-                                                    className="w-full flex items-center justify-between p-3 text-left"
+                                                    className="w-full flex flex-col sm:flex-row sm:items-center justify-between p-3 text-left gap-2"
                                                 >
-                                                    <div className="flex items-center gap-3">
-                                                        <FileSpreadsheet className="h-5 w-5 text-muted-foreground" />
-                                                        <div>
-                                                            <p className="font-medium text-sm">
+                                                    <div className="flex items-center gap-3 min-w-0">
+                                                        <FileSpreadsheet className="h-5 w-5 text-muted-foreground shrink-0" />
+                                                        <div className="min-w-0">
+                                                            <p className="font-medium text-sm truncate">
                                                                 {job.excel_file_name || "Unnamed Import"}
                                                             </p>
                                                             <p className="text-xs text-muted-foreground">
@@ -525,7 +536,7 @@ export default function BulkImportPage() {
                                                             </p>
                                                         </div>
                                                     </div>
-                                                    <div className="flex items-center gap-3">
+                                                    <div className="flex items-center gap-2 sm:gap-3 shrink-0 justify-between sm:justify-end">
                                                         <div className="text-right text-xs">
                                                             <span className="text-green-600 font-medium">
                                                                 {job.processed_properties || 0}
@@ -538,34 +549,37 @@ export default function BulkImportPage() {
                                                                 </span>
                                                             )}
                                                         </div>
-                                                        <Badge
-                                                            variant={
-                                                                job.status === "completed"
-                                                                    ? "default"
-                                                                    : job.status === "failed"
-                                                                    ? "destructive"
-                                                                    : "secondary"
-                                                            }
-                                                        >
-                                                            {job.status}
-                                                        </Badge>
-                                                        {job.new_owners && job.new_owners.length > 0 && (
-                                                            <Badge variant="outline" className="text-xs">
-                                                                {job.new_owners.length} new owners
+                                                        <div className="flex items-center gap-1 sm:gap-2">
+                                                            <Badge
+                                                                variant={
+                                                                    job.status === "completed"
+                                                                        ? "default"
+                                                                        : job.status === "failed"
+                                                                        ? "destructive"
+                                                                        : "secondary"
+                                                                }
+                                                                className="text-xs"
+                                                            >
+                                                                {job.status}
                                                             </Badge>
-                                                        )}
-                                                        <ChevronDown
-                                                            className={`h-4 w-4 text-muted-foreground transition-transform ${
-                                                                expandedJobId === job.id ? "rotate-180" : ""
-                                                            }`}
-                                                        />
+                                                            {job.new_owners && job.new_owners.length > 0 && (
+                                                                <Badge variant="outline" className="text-xs hidden sm:inline-flex">
+                                                                    {job.new_owners.length} new
+                                                                </Badge>
+                                                            )}
+                                                            <ChevronDown
+                                                                className={`h-4 w-4 text-muted-foreground transition-transform shrink-0 ${
+                                                                    expandedJobId === job.id ? "rotate-180" : ""
+                                                                }`}
+                                                            />
+                                                        </div>
                                                     </div>
                                                 </button>
 
                                                 {/* Expanded Details */}
                                                 {expandedJobId === job.id && (
                                                     <div className="px-4 pb-4 border-t pt-3">
-                                                        <div className="grid grid-cols-4 gap-4 mb-4">
+                                                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
                                                             <div className="text-center p-2 bg-muted rounded">
                                                                 <p className="text-lg font-bold">
                                                                     {job.total_properties || 0}
@@ -593,21 +607,23 @@ export default function BulkImportPage() {
                                                         </div>
 
                                                         {/* Actions */}
-                                                        <div className="flex gap-2">
+                                                        <div className="flex flex-col sm:flex-row gap-2">
                                                             {job.new_owners && job.new_owners.length > 0 && (
                                                                 <Button
                                                                     size="sm"
                                                                     onClick={() => downloadCredentials(job.id)}
-                                                                    className="gap-1 bg-green-600 hover:bg-green-700 text-white"
+                                                                    className="gap-1 bg-green-600 hover:bg-green-700 text-white w-full sm:w-auto"
                                                                 >
                                                                     <Download className="h-3 w-3" />
-                                                                    Download Credentials
+                                                                    <span className="hidden sm:inline">Download Credentials</span>
+                                                                    <span className="sm:hidden">Download Creds</span>
                                                                 </Button>
                                                             )}
                                                             <Button
                                                                 size="sm"
                                                                 variant="destructive"
                                                                 onClick={() => handleDeleteJob(job.id)}
+                                                                className="w-full sm:w-auto"
                                                             >
                                                                 <Trash2 className="h-3 w-3 mr-1" />
                                                                 Delete
