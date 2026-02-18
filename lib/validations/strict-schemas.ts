@@ -36,6 +36,10 @@ import {
     NonNegativeInteger,
     UserIdSchema,
     PropertyIdSchema,
+    InquiryIdSchema,
+    MessageIdSchema,
+    SubscriptionIdSchema,
+    PaymentIdSchema,
     EmailSchema,
     PhoneNumberSchema,
     PincodeSchema,
@@ -361,7 +365,7 @@ export const InquiryCreateSchema = StrictInquirySchema.omit({
 // Message Schemas
 // ============================================================================
 
-export const StrictMessageSchema = z.object({
+const StrictMessageSchemaBase = z.object({
     id: z.string().uuid(),
     sender_id: UserIdSchema,
     receiver_id: UserIdSchema,
@@ -369,12 +373,14 @@ export const StrictMessageSchema = z.object({
     content: z.string().min(1).max(2000),
     read: z.boolean().default(false),
     created_at: ValidationUtils.timestamp(),
-}).strict().refine(
+}).strict()
+
+export const StrictMessageSchema = StrictMessageSchemaBase.refine(
     (data) => data.sender_id !== data.receiver_id,
     { message: 'Sender and receiver cannot be the same', path: ['receiver_id'] }
 )
 
-export const MessageCreateSchema = StrictMessageSchema.omit({
+export const MessageCreateSchema = StrictMessageSchemaBase.omit({
     id: true,
     created_at: true,
     read: true,
@@ -394,7 +400,7 @@ export const PlanDurationSchema = ValidationUtils.enum(
     'plan duration'
 )
 
-export const StrictSubscriptionSchema = z.object({
+const StrictSubscriptionSchemaBase = z.object({
     id: z.string().uuid(),
     user_id: UserIdSchema,
     plan_name: z.string().min(1).max(50),
@@ -405,12 +411,14 @@ export const StrictSubscriptionSchema = z.object({
     start_date: ValidationUtils.timestamp(),
     end_date: ValidationUtils.timestamp(),
     created_at: ValidationUtils.timestamp(),
-}).strict().refine(
+}).strict()
+
+export const StrictSubscriptionSchema = StrictSubscriptionSchemaBase.refine(
     (data) => new Date(data.end_date) > new Date(data.start_date),
     { message: 'End date must be after start date', path: ['end_date'] }
 )
 
-export const SubscriptionCreateSchema = StrictSubscriptionSchema.omit({
+export const SubscriptionCreateSchema = StrictSubscriptionSchemaBase.omit({
     id: true,
     created_at: true,
     status: true,
