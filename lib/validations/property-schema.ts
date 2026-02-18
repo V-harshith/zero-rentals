@@ -27,7 +27,7 @@ export const propertySchema = z.object({
   floor_number: z.number().optional(),
   total_floors: z.number().optional(),
   room_size: z.number().optional(),
-  preferred_tenant: z.enum(['Male', 'Female', 'Any', 'Gents', 'Ladies']).optional(),
+  preferred_tenant: z.enum(['Male', 'Female', 'Couple']).optional().nullable(),
   
   facilities: z.array(z.string()).optional(),
   amenities: z.array(z.string()).optional(),
