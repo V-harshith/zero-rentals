@@ -361,8 +361,8 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
                 batch.forEach((file, index) => {
                     const path = (file as any).webkitRelativePath || file.name
                     console.log(`[Upload DEBUG] Batch ${batchIndex + 1}: File ${index + 1}: name="${file.name}", webkitRelativePath="${(file as any).webkitRelativePath || 'N/A'}"`)
-                    formData.append("images", file)
-                    // CRITICAL FIX: Send path as separate field since webkitRelativePath is NOT transmitted via FormData
+                    // CRITICAL FIX: Use unique key for each file to guarantee correct path association
+                    formData.append(`image_${index}`, file)
                     formData.append(`path_${index}`, path)
                 })
 

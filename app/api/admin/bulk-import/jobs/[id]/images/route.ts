@@ -199,22 +199,23 @@ export async function POST(
                     }
                 }
 
-                // Get all files from form data
+                // Get all files from form data - PRESERVE INDEX ASSOCIATION
                 console.log(`[Image Upload] Parsing form data entries...`)
                 const invalidFiles: string[] = []
                 const validationPromises: Promise<void>[] = []
-                let fileIndex = 0
 
                 for (const [key, value] of formData.entries()) {
                     console.log(`[Image Upload] Form entry: key="${key}", type="${value instanceof File ? 'File' : typeof value}"`)
-                    if (value instanceof File && key === 'images') {
-                        console.log(`[Image Upload] File details: name="${value.name}", type="${value.type}", size=${value.size}, webkitRelativePath="${(value as any).webkitRelativePath || 'N/A'}"`)
+                    // CRITICAL FIX: Look for image_* keys to maintain index association with paths
+                    if (value instanceof File && key.startsWith('image_')) {
+                        const index = parseInt(key.replace('image_', ''))
+                        console.log(`[Image Upload] File details: name="${value.name}", type="${value.type}", size=${value.size}, index=${index}`)
                         if (value.type.startsWith('image/')) {
                             // Validate file using magic numbers (async)
                             validationPromises.push(
                                 validateImageFile(value).then(result => {
                                     if (result.valid) {
-                                        files.push(value)
+                                        files[index] = value  // Use index to maintain association with pathMap
                                     } else {
                                         invalidFiles.push(`${value.name}: ${result.error}`)
                                         console.log(`[Image Upload] SKIPPED - ${result.error}`)
@@ -231,9 +232,11 @@ export async function POST(
                 // Wait for all validations to complete
                 await Promise.all(validationPromises)
 
-                console.log(`[Image Upload] Total valid image files: ${files.length}, Invalid: ${invalidFiles.length}`)
+                // Filter out any empty slots from skipped invalid files
+                const validFiles = files.filter(f => f !== undefined)
+                console.log(`[Image Upload] Total valid image files: ${validFiles.length}, Invalid: ${invalidFiles.length}`)
 
-                if (files.length === 0) {
+                if (validFiles.length === 0) {
                     send({
                         error: "No valid image files found",
                         invalid_files: invalidFiles.slice(0, 20),
@@ -244,8 +247,8 @@ export async function POST(
                 }
 
                 // Validate file count
-                if (files.length > 500) {
-                    send({ error: `Too many images. Maximum is 500 images per import. You have ${files.length} valid images.` })
+                if (validFiles.length > 500) {
+                    send({ error: `Too many images. Maximum is 500 images per import. You have ${validFiles.length} valid images.` })
                     controller.close()
                     return
                 }
@@ -258,8 +261,8 @@ export async function POST(
                 console.log(`[Image Upload] Expected PSNs from Excel:`, expectedPSNs)
 
                 send({
-                    status: `Processing ${files.length} images...`,
-                    total: files.length,
+                    status: `Processing ${validFiles.length} images...`,
+                    total: validFiles.length,
                     expected_psns: expectedPSNs.length,
                 })
 
@@ -268,11 +271,14 @@ export async function POST(
                 const orphanedImages: any[] = []
                 const unmatchedFiles: string[] = []
 
-                console.log(`[Image Upload] Starting PSN extraction for ${files.length} files...`)
+                // CRITICAL: Use files array directly (sparse array), NOT filtered validFiles
+                // Filtering breaks index alignment with pathMap!
+                const validIndices = Object.keys(files).map(Number).filter(i => files[i] !== undefined)
+                console.log(`[Image Upload] Starting PSN extraction for ${validIndices.length} files...`, { validIndices })
 
-                for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
+                for (const fileIndex of validIndices) {
                     const file = files[fileIndex]
-                    // CRITICAL FIX: Use path from pathMap instead of webkitRelativePath (which is NOT transmitted)
+                    // CRITICAL FIX: Use path from pathMap with guaranteed index association
                     const relativePath = pathMap.get(fileIndex) || file.name
                     console.log(`[Image Upload] Processing file: "${file.name}", relativePath: "${relativePath}" (from pathMap: ${pathMap.has(fileIndex)})`)
                     const psn = extractPSNFromPath(relativePath)
@@ -344,7 +350,7 @@ export async function POST(
 
                 // Upload images to storage
                 const uploadedImages: Record<string, any[]> = {}
-                const totalImages = files.length - unmatchedFiles.length - orphanedImages.length
+                const totalImages = validIndices.length - unmatchedFiles.length - orphanedImages.length
                 let processedCount = 0
                 let failedCount = 0
                 const failedUploads: string[] = []
@@ -492,7 +498,7 @@ export async function POST(
                     admin_id: authUser.id,
                     action: "images_uploaded",
                     details: {
-                        total_files: files.length,
+                        total_files: validIndices.length,
                         valid_images: processedCount,
                         failed_uploads: failedCount,
                         orphaned_images: orphanedImages.length,
