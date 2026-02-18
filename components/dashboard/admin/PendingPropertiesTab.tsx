@@ -381,11 +381,11 @@ export function PendingPropertiesTab({
                                     </div>
 
                                     {/* Actions */}
-                                    <div className="flex items-center gap-2">
+                                    <div className="flex flex-wrap items-center gap-2 mt-4 md:mt-0 pt-4 md:pt-0 border-t md:border-t-0">
                                         <Button
                                             size="sm"
                                             variant="default"
-                                            className="gap-2"
+                                            className="gap-2 flex-1 md:flex-none justify-center"
                                             onClick={() => handleApprove(property.id)}
                                             disabled={isActionInProgress || isCsrfLoading}
                                         >
@@ -394,23 +394,24 @@ export function PendingPropertiesTab({
                                             ) : (
                                                 <CheckCircle className="h-4 w-4" />
                                             )}
-                                            Approve
+                                            <span className="hidden sm:inline">Approve</span>
+                                            <span className="sm:hidden">OK</span>
                                         </Button>
                                         <Button
                                             size="sm"
                                             variant="outline"
-                                            className="gap-2"
+                                            className="gap-2 flex-1 md:flex-none justify-center"
                                             asChild
                                         >
                                             <a href={`/property/${property.id}`} target="_blank" rel="noopener noreferrer">
                                                 <Eye className="h-4 w-4" />
-                                                View
+                                                <span className="hidden sm:inline">View</span>
                                             </a>
                                         </Button>
                                         <Button
                                             size="sm"
                                             variant="destructive"
-                                            className="gap-2"
+                                            className="gap-2 flex-1 md:flex-none justify-center"
                                             onClick={() => handleReject(property.id)}
                                             disabled={isActionInProgress || isCsrfLoading}
                                         >
@@ -419,7 +420,8 @@ export function PendingPropertiesTab({
                                             ) : (
                                                 <XCircle className="h-4 w-4" />
                                             )}
-                                            Reject
+                                            <span className="hidden sm:inline">Reject</span>
+                                            <span className="sm:hidden">No</span>
                                         </Button>
                                     </div>
                                 </div>
