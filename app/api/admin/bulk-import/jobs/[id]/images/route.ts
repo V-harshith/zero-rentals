@@ -12,35 +12,24 @@ import { hasConcurrentProcessingJob } from "@/lib/bulk-import-queue"
 // Expected format: "Harshth Prop Pics/1053/image.jpg" where 1053 is PSN
 // ============================================================================
 function extractPSNFromPath(filepath: string): string | null {
-    console.log(`[PSN Extraction] Processing path: "${filepath}"`)
-
     // Remove leading/trailing slashes and normalize
     const normalizedPath = filepath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
     const parts = normalizedPath.split('/')
-
-    console.log(`[PSN Extraction] Normalized path: "${normalizedPath}", Parts:`, parts)
 
     // Try folder name first (should be the first folder after root)
     // Format: "Harshth Prop Pics/1053/image.jpg" or "1053/image.jpg"
     if (parts.length >= 2) {
         const potentialPsn = parts[parts.length - 2] // Second to last is folder name
-        console.log(`[PSN Extraction] Checking folder name: "${potentialPsn}"`)
 
         // PSN should be numeric (digits only, max 10 digits) - strict validation for security
         if (/^\d{1,10}$/.test(potentialPsn)) {
-            console.log(`[PSN Extraction] SUCCESS - Extracted PSN "${potentialPsn}" from folder name`)
             return potentialPsn
         }
-        console.log(`[PSN Extraction] Folder name "${potentialPsn}" does not match numeric pattern`)
-    } else {
-        console.log(`[PSN Extraction] Path has less than 2 parts, cannot extract folder name`)
     }
 
     // Try filename patterns as fallback
     const filename = parts[parts.length - 1] || ''
     const nameWithoutExt = filename.replace(/\.[^/.]+$/, '')
-
-    console.log(`[PSN Extraction] Trying filename fallback: "${nameWithoutExt}"`)
 
     // Patterns: "155", "PSN-155", "155-1", "155_1"
     const patterns = [
@@ -52,12 +41,10 @@ function extractPSNFromPath(filepath: string): string | null {
     for (const pattern of patterns) {
         const match = nameWithoutExt.match(pattern)
         if (match) {
-            console.log(`[PSN Extraction] SUCCESS - Extracted PSN "${match[1]}" from filename`)
             return match[1]
         }
     }
 
-    console.log(`[PSN Extraction] FAILED - Could not extract PSN from path: "${filepath}"`)
     return null
 }
 
@@ -196,21 +183,17 @@ export async function POST(
                     if (key.startsWith('path_')) {
                         const index = parseInt(key.replace('path_', ''))
                         pathMap.set(index, value as string)
-                        console.log(`[Image Upload] Path map: index ${index} -> "${value}"`)
                     }
                 }
 
                 // Get all files from form data - PRESERVE INDEX ASSOCIATION
-                console.log(`[Image Upload] Parsing form data entries...`)
                 const invalidFiles: string[] = []
                 const validationPromises: Promise<void>[] = []
 
                 for (const [key, value] of formData.entries()) {
-                    console.log(`[Image Upload] Form entry: key="${key}", type="${value instanceof File ? 'File' : typeof value}"`)
                     // CRITICAL FIX: Look for image_* keys to maintain index association with paths
                     if (value instanceof File && key.startsWith('image_')) {
                         const index = parseInt(key.replace('image_', ''))
-                        console.log(`[Image Upload] File details: name="${value.name}", type="${value.type}", size=${value.size}, index=${index}`)
                         if (value.type.startsWith('image/')) {
                             // Validate file using magic numbers (async)
                             validationPromises.push(
@@ -219,13 +202,11 @@ export async function POST(
                                         files[index] = value  // Use index to maintain association with pathMap
                                     } else {
                                         invalidFiles.push(`${value.name}: ${result.error}`)
-                                        console.log(`[Image Upload] SKIPPED - ${result.error}`)
                                     }
                                 })
                             )
                         } else {
                             invalidFiles.push(`${value.name}: Not an image file`)
-                            console.log(`[Image Upload] SKIPPED - Not an image file`)
                         }
                     }
                 }
@@ -235,7 +216,6 @@ export async function POST(
 
                 // Filter out any empty slots from skipped invalid files
                 const validFiles = files.filter(f => f !== undefined)
-                console.log(`[Image Upload] Total valid image files: ${validFiles.length}, Invalid: ${invalidFiles.length}`)
 
                 if (validFiles.length === 0) {
                     send({
@@ -259,8 +239,6 @@ export async function POST(
                 // CRITICAL: Normalize PSN to string (Excel may parse as number)
                 const expectedPSNs = parsedProperties.map((p: any) => String(p.psn))
 
-                console.log(`[Image Upload] Expected PSNs from Excel:`, expectedPSNs)
-
                 send({
                     status: `Processing ${validFiles.length} images...`,
                     total: validFiles.length,
@@ -275,17 +253,14 @@ export async function POST(
                 // CRITICAL: Use files array directly (sparse array), NOT filtered validFiles
                 // Filtering breaks index alignment with pathMap!
                 const validIndices = Object.keys(files).map(Number).filter(i => files[i] !== undefined)
-                console.log(`[Image Upload] Starting PSN extraction for ${validIndices.length} files...`, { validIndices })
 
                 for (const fileIndex of validIndices) {
                     const file = files[fileIndex]
                     // CRITICAL FIX: Use path from pathMap with guaranteed index association
                     const relativePath = pathMap.get(fileIndex) || file.name
-                    console.log(`[Image Upload] Processing file: "${file.name}", relativePath: "${relativePath}" (from pathMap: ${pathMap.has(fileIndex)})`)
                     const psn = extractPSNFromPath(relativePath)
 
                     if (!psn) {
-                        console.log(`[Image Upload] No PSN extracted for file "${file.name}" - marking as invalid`)
                         unmatchedFiles.push(file.name)
                         continue
                     }
@@ -302,7 +277,6 @@ export async function POST(
                     const normalizedPsn = String(psn).trim()
                     const normalizedExpectedPSNs = expectedPSNs.map((p: string) => String(p).trim())
                     const isMatched = normalizedExpectedPSNs.includes(normalizedPsn)
-                    console.log(`[Image Upload] File "${file.name}" -> PSN "${normalizedPsn}", expected: ${isMatched} (in [${normalizedExpectedPSNs.join(', ')}])`)
 
                     if (isMatched) {
                         if (!imagesByPSN[normalizedPsn]) imagesByPSN[normalizedPsn] = []
@@ -311,14 +285,6 @@ export async function POST(
                         orphanedImages.push(imageInfo)
                     }
                 }
-
-                console.log(`[Image Upload] Categorization complete:`, {
-                    matchedPSNs: Object.keys(imagesByPSN),
-                    matchedCount: Object.values(imagesByPSN).flat().length,
-                    orphanedCount: orphanedImages.length,
-                    invalidCount: unmatchedFiles.length,
-                    invalidFiles: unmatchedFiles.slice(0, 10) // First 10 invalid files
-                })
 
                 // Check for PSNs with too many images (generate warnings)
                 const warnings: string[] = []
@@ -339,7 +305,6 @@ export async function POST(
                 })
 
                 // Verify supabaseAdmin is configured
-                console.log('[Upload] Checking Supabase admin configuration...')
                 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
                 if (!serviceKey) {
                     console.error('[Upload] CRITICAL: SUPABASE_SERVICE_ROLE_KEY not configured')
@@ -347,7 +312,6 @@ export async function POST(
                     controller.close()
                     return
                 }
-                console.log('[Upload] Supabase admin configured, service key present')
 
                 // Upload images to storage
                 const uploadedImages: Record<string, any[]> = {}
@@ -357,7 +321,6 @@ export async function POST(
                 const failedUploads: string[] = []
 
                 const psnList = Object.keys(imagesByPSN)
-                console.log(`[Upload] Starting upload for ${psnList.length} PSNs, ${totalImages} total images`)
 
                 for (let i = 0; i < psnList.length; i++) {
                     const psn = psnList[i]
@@ -373,8 +336,6 @@ export async function POST(
                             const uniqueFilename = `${timestamp}-${j}.jpg`
                             const storagePath = `staging/${jobId}/${psn}/${uniqueFilename}`
 
-                            console.log(`[Upload] Uploading to path: ${storagePath}, bucket: property-images, fileSize: ${img.file_size}`)
-
                             // Upload to Supabase Storage
                             // Note: Images are already compressed client-side (max 2MB)
                             const { data: uploadData, error: uploadError } = await supabaseAdmin
@@ -389,8 +350,6 @@ export async function POST(
                                 console.error(`[Upload] Upload error for ${img.filename}:`, uploadError)
                                 throw uploadError
                             }
-
-                            console.log(`[Upload] Successfully uploaded ${img.filename} to ${storagePath}`)
 
                             // Get public URL
                             const { data: publicUrl } = supabaseAdmin
@@ -499,7 +458,7 @@ export async function POST(
                 const newTotal = existingTotal + processedCount
 
                 // Update job with MERGED data (don't overwrite previous batches!)
-                await supabaseAdmin
+                const { error: updateError } = await supabaseAdmin
                     .from("bulk_import_jobs")
                     .update({
                         status: "images_uploaded",
@@ -510,10 +469,14 @@ export async function POST(
                         images_uploaded_at: new Date().toISOString(),
                     })
                     .eq("id", jobId)
+                    .select()
+
+                if (updateError) {
+                    console.error(`[Bulk Import] CRITICAL: Failed to update job with images_by_psn:`, updateError)
+                    throw new Error(`Failed to save image mappings: ${updateError.message}`)
+                }
 
                 // Log audit with cumulative counts
-                const existingMatchedPsnCount = Object.keys(existingImagesByPSN).length
-                const newMatchedPsnCount = Object.keys(imagesByPSNForDB).length
                 await supabaseAdmin.from("bulk_import_audit_log").insert({
                     job_id: jobId,
                     admin_id: authUser.id,
@@ -525,7 +488,7 @@ export async function POST(
                         batch_orphaned_images: orphanedImages.length,
                         batch_matched_psns: Object.keys(uploadedImages).length,
                         cumulative_total_images: newTotal,
-                        cumulative_matched_psns: newMatchedPsnCount,
+                        cumulative_matched_psns: Object.keys(imagesByPSNForDB).length,
                         cumulative_orphaned_images: mergedOrphaned.length,
                         is_batch: true,
                     },

@@ -301,6 +301,81 @@ async function createOwnerWithSubscriptionAtomically(
 }
 
 // ============================================================================
+// Helper: Move images from staging to permanent location
+// ============================================================================
+async function moveImagesToPermanent(
+    propertyImages: any[],
+    propertyId: string,
+    jobId: string,
+    psn: string
+): Promise<{ permanentUrls: string[]; errors: string[] }> {
+    const permanentUrls: string[] = []
+    const errors: string[] = []
+
+    for (let index = 0; index < propertyImages.length; index++) {
+        const image = propertyImages[index]
+        const stagingPath = image.storage_path as string
+
+        if (!stagingPath) {
+            console.error(`[Bulk Import] No storage_path for image in PSN ${psn}`)
+            errors.push(`Missing storage_path for image ${index}`)
+            // Fallback to staging URL if available
+            if (image.public_url) {
+                permanentUrls.push(image.public_url)
+            }
+            continue
+        }
+
+        // Validate staging path format
+        if (!stagingPath.startsWith('staging/')) {
+            // Already a permanent URL or different location, use as-is
+            permanentUrls.push(image.public_url)
+            continue
+        }
+
+        // Create permanent path: properties/{propertyId}/{index}.jpg
+        const extension = stagingPath.split('.').pop() || 'jpg'
+        const permanentPath = `properties/${propertyId}/${index}.${extension}`
+
+        try {
+            // Move the file from staging to permanent location
+            const { error: moveError } = await supabaseAdmin.storage
+                .from('property-images')
+                .move(stagingPath, permanentPath)
+
+            if (moveError) {
+                console.error(`[Bulk Import] Failed to move image ${stagingPath} to ${permanentPath}:`, moveError)
+                errors.push(`Failed to move image ${index}: ${moveError.message}`)
+                // Fallback to staging URL
+                permanentUrls.push(image.public_url)
+                continue
+            }
+
+            // Get the new public URL for the permanent location
+            const { data: publicUrlData } = supabaseAdmin.storage
+                .from('property-images')
+                .getPublicUrl(permanentPath)
+
+            if (publicUrlData?.publicUrl) {
+                permanentUrls.push(publicUrlData.publicUrl)
+            } else {
+                console.error(`[Bulk Import] Failed to get public URL for ${permanentPath}`)
+                errors.push(`Failed to get public URL for image ${index}`)
+                // Fallback to staging URL
+                permanentUrls.push(image.public_url)
+            }
+        } catch (error: any) {
+            console.error(`[Bulk Import] Exception moving image ${stagingPath}:`, error)
+            errors.push(`Exception moving image ${index}: ${error.message}`)
+            // Fallback to staging URL
+            permanentUrls.push(image.public_url)
+        }
+    }
+
+    return { permanentUrls, errors }
+}
+
+// ============================================================================
 // Helper: Atomic property creation
 // ============================================================================
 async function createPropertyAtomically(
@@ -346,17 +421,43 @@ async function createPropertyAtomically(
     try {
         // Get images for this property
         // CRITICAL: Normalize PSN to string for lookup (Excel may parse as number)
-        const psnKey = String(prop.psn)
-        const propertyImages = imagesByPSN[psnKey] || []
-        const imageUrls = propertyImages.map((img: any) => img.public_url)
+        // BUG FIX: Ensure consistent normalization with trim() to match images/route.ts
+        const psnKey = String(prop.psn).trim()
 
-        // Build property data
+        let propertyImages = imagesByPSN[psnKey] || []
+
+        // BUG FIX: Fallback to direct database query if images not found in job record
+        if (propertyImages.length === 0) {
+            const { data: stagedImages, error: stagedError } = await supabaseAdmin
+                .from('bulk_import_staged_images')
+                .select('*')
+                .eq('job_id', jobId)
+                .eq('extracted_psn', psnKey)
+                .eq('status', 'uploaded')
+
+            if (!stagedError && stagedImages && stagedImages.length > 0) {
+                propertyImages = stagedImages.map(img => ({
+                    filename: img.filename,
+                    storage_path: img.storage_path,
+                    public_url: supabaseAdmin.storage.from('property-images').getPublicUrl(img.storage_path).data.publicUrl,
+                }))
+            } else if (stagedError) {
+                console.error(`[Bulk Import] Error querying staged images:`, stagedError)
+            }
+        }
+
+        // BUG FIX: Log warning if property will be created without images
+        if (propertyImages.length === 0) {
+            console.error(`[Bulk Import] WARNING: Property PSN "${psnKey}" will be created with EMPTY images array!`)
+        }
+
+        // Build property data WITHOUT images first (to get property ID)
         const propertyData = {
             ...prop.property_data,
             owner_id: ownerId,
             owner_name: prop.owner_name,
             owner_contact: prop.owner_phone || prop.property_data?.owner_contact || '',
-            images: imageUrls,
+            images: [], // Will be updated after image move
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
             published_at: new Date().toISOString(),
@@ -367,7 +468,7 @@ async function createPropertyAtomically(
             bulk_import_psn: prop.psn,
         }
 
-        // Insert property
+        // Insert property without images first
         const { data: insertedProp, error: propError } = await supabaseAdmin
             .from('properties')
             .insert(propertyData)
@@ -384,13 +485,47 @@ async function createPropertyAtomically(
 
         const propertyId = insertedProp.id
 
-        // Update staged images to assigned (best effort)
+        // Move images to permanent location and get permanent URLs
+        let permanentImageUrls: string[] = []
+        let imageMoveErrors: string[] = []
+
         if (propertyImages.length > 0) {
-            await supabaseAdmin
+            const moveResult = await moveImagesToPermanent(propertyImages, propertyId, jobId, psnKey)
+            permanentImageUrls = moveResult.permanentUrls
+            imageMoveErrors = moveResult.errors
+
+            if (imageMoveErrors.length > 0) {
+                console.warn(`[Bulk Import] Some images failed to move for property ${propertyId}:`, imageMoveErrors)
+            }
+
+            // Update property with permanent image URLs
+            if (permanentImageUrls.length > 0) {
+                const { error: updateError } = await supabaseAdmin
+                    .from('properties')
+                    .update({ images: permanentImageUrls })
+                    .eq('id', propertyId)
+
+                if (updateError) {
+                    console.error(`[Bulk Import] Failed to update property ${propertyId} with permanent URLs:`, updateError)
+                    // Non-fatal: property exists but images may be staging URLs
+                }
+            }
+
+            // Update staged images to assigned with property_id reference
+            const { error: stagedUpdateError } = await supabaseAdmin
                 .from('bulk_import_staged_images')
-                .update({ status: 'assigned', processed_at: new Date().toISOString() })
+                .update({
+                    status: 'assigned',
+                    property_id: propertyId,
+                    processed_at: new Date().toISOString()
+                })
                 .eq('job_id', jobId)
                 .eq('extracted_psn', psnKey)
+
+            if (stagedUpdateError) {
+                console.error(`[Bulk Import] Failed to update staged images status for PSN ${psnKey}:`, stagedUpdateError)
+                // Non-fatal error
+            }
         }
 
         // Track in transaction context
@@ -414,6 +549,8 @@ async function createPropertyAtomically(
                 title: prop.property_name,
                 owner_id: ownerId,
                 image_count: propertyImages.length,
+                permanent_image_count: permanentImageUrls.length,
+                image_move_errors: imageMoveErrors.length > 0 ? imageMoveErrors : undefined,
                 transaction_id: tx.jobId,
             },
         })
@@ -444,7 +581,6 @@ export async function POST(
     if (simHeader && process.env.NODE_ENV !== 'production') {
         try {
             failureSimulation = JSON.parse(simHeader)
-            console.log('[Bulk Import] Failure simulation enabled:', failureSimulation)
         } catch (e) {
             console.error('[Bulk Import] Invalid failure simulation header:', e)
         }
@@ -588,11 +724,58 @@ export async function POST(
                 // Get parsed data
                 const properties = job.parsed_properties as any[] || []
                 const rawImagesByPSN = (job.images_by_psn as Record<string, any[]>) || {}
-                // CRITICAL FIX: Normalize all images_by_psn keys to strings (PostgreSQL JSONB may coerce numeric strings)
-                const imagesByPSN: Record<string, any[]> = {}
-                for (const [key, value] of Object.entries(rawImagesByPSN)) {
-                    imagesByPSN[String(key).trim()] = value
+
+                // ============================================================================
+                // EARLY VALIDATION: Verify images_by_psn exists and has data
+                // ============================================================================
+                let imagesByPSN: Record<string, any[]> = {}
+
+                // First, try to use images_by_psn from job data
+                if (rawImagesByPSN && Object.keys(rawImagesByPSN).length > 0) {
+                    // Normalize all keys to strings
+                    for (const [key, value] of Object.entries(rawImagesByPSN)) {
+                        imagesByPSN[String(key).trim()] = value
+                    }
+                } else {
+                    console.error('[Bulk Import] No images found in job.images_by_psn, attempting recovery from staged images...')
+
+                    // Try to recover by querying staged images table
+                    const { data: stagedImages, error: stagedError } = await supabaseAdmin
+                        .from("bulk_import_staged_images")
+                        .select("*")
+                        .eq("job_id", jobId)
+                        .eq("status", "uploaded")
+
+                    if (stagedError) {
+                        console.error('[Bulk Import] Failed to query staged images:', stagedError)
+                    } else if (stagedImages && stagedImages.length > 0) {
+                        // Rebuild imagesByPSN from staged images
+                        for (const img of stagedImages) {
+                            const psnKey = String(img.extracted_psn).trim()
+                            if (!imagesByPSN[psnKey]) imagesByPSN[psnKey] = []
+
+                            // Get public URL for the image
+                            const { data: publicUrl } = supabaseAdmin
+                                .storage
+                                .from("property-images")
+                                .getPublicUrl(img.storage_path)
+
+                            imagesByPSN[psnKey].push({
+                                filename: img.filename,
+                                storage_path: img.storage_path,
+                                public_url: publicUrl.publicUrl,
+                            })
+                        }
+                    } else {
+                        console.error('[Bulk Import] No staged images found for recovery')
+                    }
                 }
+
+                // Log warning if still no images
+                if (Object.keys(imagesByPSN).length === 0) {
+                    console.error('[Bulk Import] WARNING: No images available for any property! Properties will be created without images.')
+                }
+
                 const newOwnersFromExcel = job.new_owners as any[] || []
 
                 // Track results
@@ -666,7 +849,6 @@ export async function POST(
                             batchSubscriptionsCreated,
                             batchOwnersCreated
                         )
-                        console.log(`[Bulk Import] Batch rollback result:`, rollbackResult)
 
                         send({
                             status: `Critical error in owner batch ${batchIndex + 1}, rolling back...`,
@@ -846,7 +1028,6 @@ export async function POST(
                             [],
                             []
                         )
-                        console.log(`[Bulk Import] Batch rollback result:`, rollbackResult)
 
                         send({
                             status: `Critical error in property batch ${batchIndex + 1}, rolling back...`,
@@ -889,10 +1070,22 @@ export async function POST(
                     }
                 }
 
+                // ============================================================================
+                // FINAL VERIFICATION: Count properties with/without images
+                // ============================================================================
+                const propertiesWithImages = tx!.createdProperties.filter(r => {
+                    const psnKey = String(r.psn).trim()
+                    const imgs = imagesByPSN[psnKey] || []
+                    return imgs.length > 0
+                }).length
+                const propertiesWithoutImages = tx!.createdProperties.length - propertiesWithImages
+
                 send({
                     status: "Finalizing...",
                     progress: 80,
                     step: "finalizing",
+                    properties_with_images: propertiesWithImages,
+                    properties_without_images: propertiesWithoutImages,
                 })
 
                 // ============================================================================
