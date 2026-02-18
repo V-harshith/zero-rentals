@@ -128,12 +128,15 @@ function buildSearchQuery(filters: SearchFilters) {
     // A property should appear if it has a price set for ANY of the selected room types
     const roomTypeToPriceColumn: Record<string, string> = {
       'Private Room': 'private_room_price',
-      '1 RK': 'private_room_price',
+      '1 RK': 'one_rk_price',
       '1 BHK': 'private_room_price',
       'Single': 'private_room_price',
+      'Single Sharing': 'private_room_price',
       'Double': 'double_sharing_price',
+      'Double Sharing': 'double_sharing_price',
       '2 BHK': 'double_sharing_price',
       'Triple': 'triple_sharing_price',
+      'Triple Sharing': 'triple_sharing_price',
       '3 BHK': 'triple_sharing_price',
       'Four Sharing': 'four_sharing_price',
       '4 BHK': 'four_sharing_price'
@@ -160,14 +163,13 @@ function buildSearchQuery(filters: SearchFilters) {
 
   // Gender filter (preferredTenant) - Updated for Male/Female/Couple
   if (filters.gender) {
-    // Male or Female search should ALSO match Couple properties
+    // Male or Female search should ALSO match Couple properties AND properties with no preference (NULL)
     if (filters.gender === 'Male' || filters.gender === 'Female') {
-      query = query.or(`preferred_tenant.eq.${filters.gender},preferred_tenant.eq.Couple`)
+      query = query.or(`preferred_tenant.eq.${filters.gender},preferred_tenant.eq.Couple,preferred_tenant.is.null`)
     } else if (filters.gender === 'Couple') {
-      // Couple search only matches Couple properties
-      query = query.eq('preferred_tenant', 'Couple')
+      // Couple search matches Couple properties OR properties with no preference (NULL)
+      query = query.or(`preferred_tenant.eq.Couple,preferred_tenant.is.null`)
     }
-    // 'Any' doesn't need filtering
   }
 
   // Advanced preferred tenant filter

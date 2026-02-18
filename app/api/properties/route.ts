@@ -60,14 +60,18 @@ export async function GET(request: NextRequest) {
     if (roomType) {
       // Map room type to price column - property matches if it has a price for this room type
       // 1RK now has its own column separate from private_room_price (1BHK/Single)
+      // Support both "Single" and "Single Sharing" formats from QuickFilters
       const roomTypeToPriceColumn: Record<string, string> = {
         'Private Room': 'private_room_price',
         '1 RK': 'one_rk_price',
         '1 BHK': 'private_room_price',
         'Single': 'private_room_price',
+        'Single Sharing': 'private_room_price',
         'Double': 'double_sharing_price',
+        'Double Sharing': 'double_sharing_price',
         '2 BHK': 'double_sharing_price',
         'Triple': 'triple_sharing_price',
+        'Triple Sharing': 'triple_sharing_price',
         '3 BHK': 'triple_sharing_price',
         'Four Sharing': 'four_sharing_price',
         '4 BHK': 'four_sharing_price'
@@ -80,21 +84,21 @@ export async function GET(request: NextRequest) {
     }
 
     // Price filter: Property matches if at least one room type price falls within the range
-    // Include one_rk_price for 1RK properties
+    // Include one_rk_price and four_sharing_price for all price filters
     if (minPrice && maxPrice) {
       // Both min and max provided - check if any price falls within range
       query = query.or(
-        `and(one_rk_price.gte.${minPrice},one_rk_price.lte.${maxPrice}),and(private_room_price.gte.${minPrice},private_room_price.lte.${maxPrice}),and(double_sharing_price.gte.${minPrice},double_sharing_price.lte.${maxPrice}),and(triple_sharing_price.gte.${minPrice},triple_sharing_price.lte.${maxPrice})`
+        `and(one_rk_price.gte.${minPrice},one_rk_price.lte.${maxPrice}),and(private_room_price.gte.${minPrice},private_room_price.lte.${maxPrice}),and(double_sharing_price.gte.${minPrice},double_sharing_price.lte.${maxPrice}),and(triple_sharing_price.gte.${minPrice},triple_sharing_price.lte.${maxPrice}),and(four_sharing_price.gte.${minPrice},four_sharing_price.lte.${maxPrice})`
       )
     } else if (minPrice) {
       // Only min provided - any price >= minPrice
       query = query.or(
-        `one_rk_price.gte.${minPrice},private_room_price.gte.${minPrice},double_sharing_price.gte.${minPrice},triple_sharing_price.gte.${minPrice}`
+        `one_rk_price.gte.${minPrice},private_room_price.gte.${minPrice},double_sharing_price.gte.${minPrice},triple_sharing_price.gte.${minPrice},four_sharing_price.gte.${minPrice}`
       )
     } else if (maxPrice) {
       // Only max provided - any price <= maxPrice
       query = query.or(
-        `one_rk_price.lte.${maxPrice},private_room_price.lte.${maxPrice},double_sharing_price.lte.${maxPrice},triple_sharing_price.lte.${maxPrice}`
+        `one_rk_price.lte.${maxPrice},private_room_price.lte.${maxPrice},double_sharing_price.lte.${maxPrice},triple_sharing_price.lte.${maxPrice},four_sharing_price.lte.${maxPrice}`
       )
     }
 
