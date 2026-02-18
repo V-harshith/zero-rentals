@@ -352,18 +352,20 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
         let totalFailed = 0
 
         try {
+            let globalFileIndex = 0
             for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
                 const batch = batches[batchIndex]
                 setStatus(`Uploading batch ${batchIndex + 1} of ${batches.length} (${batch.length} files)...`)
 
                 const formData = new FormData()
 
-                batch.forEach((file, index) => {
+                batch.forEach((file, localIndex) => {
                     const path = (file as any).webkitRelativePath || file.name
-                    console.log(`[Upload DEBUG] Batch ${batchIndex + 1}: File ${index + 1}: name="${file.name}", webkitRelativePath="${(file as any).webkitRelativePath || 'N/A'}"`)
-                    // CRITICAL FIX: Use unique key for each file to guarantee correct path association
-                    formData.append(`image_${index}`, file)
-                    formData.append(`path_${index}`, path)
+                    console.log(`[Upload DEBUG] Batch ${batchIndex + 1}: File ${localIndex + 1}: name="${file.name}", webkitRelativePath="${(file as any).webkitRelativePath || 'N/A'}"`)
+                    // CRITICAL FIX: Use GLOBAL index across all batches to prevent index collision
+                    formData.append(`image_${globalFileIndex}`, file)
+                    formData.append(`path_${globalFileIndex}`, path)
+                    globalFileIndex++
                 })
 
                 const res = await secureFetch(`/api/admin/bulk-import/jobs/${jobId}/images`, {
