@@ -275,15 +275,15 @@ BEGIN
         v_failed_objects := v_failed_objects || 'idx_property_locks_property_id index, ';
     END IF;
 
-    -- idx_property_locks_active
+    -- idx_property_locks_expires_at (replaces the problematic idx_property_locks_active)
     v_total_checks := v_total_checks + 1;
-    SELECT COUNT(*) INTO v_count FROM pg_indexes WHERE indexname = 'idx_property_locks_active';
+    SELECT COUNT(*) INTO v_count FROM pg_indexes WHERE indexname = 'idx_property_locks_expires_at';
     IF v_count > 0 THEN
         v_passed_checks := v_passed_checks + 1;
-        RAISE NOTICE '[PASS] idx_property_locks_active index exists';
+        RAISE NOTICE '[PASS] idx_property_locks_expires_at index exists';
     ELSE
-        RAISE NOTICE '[FAIL] idx_property_locks_active index MISSING';
-        v_failed_objects := v_failed_objects || 'idx_property_locks_active index, ';
+        RAISE NOTICE '[FAIL] idx_property_locks_expires_at index MISSING';
+        v_failed_objects := v_failed_objects || 'idx_property_locks_expires_at index, ';
     END IF;
 
     -- idx_bulk_import_jobs_admin_status

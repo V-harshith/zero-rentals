@@ -1,13 +1,13 @@
 {
   "functions": {
     "app/api/admin/bulk-import/jobs/[id]/images/route.ts": {
-      "maxDuration": 60
+      "maxDuration": 10
     },
     "app/api/admin/bulk-import/jobs/[id]/excel/route.ts": {
-      "maxDuration": 30
+      "maxDuration": 10
     },
     "app/api/admin/bulk-import/jobs/[id]/confirm/route.ts": {
-      "maxDuration": 60
+      "maxDuration": 10
     }
   },
   "crons": [

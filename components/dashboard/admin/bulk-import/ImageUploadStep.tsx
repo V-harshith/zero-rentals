@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useCallback } from "react"
+import { useState, useRef, useCallback, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -14,7 +14,6 @@ import {
     ArrowLeft,
     ArrowRight,
     X,
-    ImageOff,
 } from "lucide-react"
 import { toast } from "sonner"
 import imageCompression from "browser-image-compression"
@@ -22,11 +21,37 @@ import { useSecureFetch } from "@/lib/csrf-context"
 
 interface ImageUploadStepProps {
     jobId: string
-    onComplete: (data: any) => void
+    onComplete: (data: ImageUploadResult) => void
     onBack: () => void
     onCancel?: () => void
     onSkip?: () => void
 }
+
+interface ImageUploadResult {
+    total_images: number
+    matched_psns: number
+    orphaned_images: number
+    failed_uploads: number
+    unmatched_psns?: string[]
+    completed: boolean
+    progress: number
+    status: string
+}
+
+interface CompressionOptions {
+    maxSizeMB: number
+    maxWidthOrHeight: number
+    useWebWorker: boolean
+    fileType?: string
+}
+
+// Maximum recommended images per PSN
+const MAX_IMAGES_PER_PSN = 10
+// Hard limit for total images
+const MAX_TOTAL_IMAGES = 500
+// Batch limits for Vercel free tier
+const MAX_BATCH_SIZE_MB = 3.0
+const MAX_FILES_PER_BATCH = 4
 
 export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }: ImageUploadStepProps) {
     const secureFetch = useSecureFetch()
@@ -36,23 +61,34 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
     const [compressing, setCompressing] = useState(false)
     const [progress, setProgress] = useState(0)
     const [status, setStatus] = useState("")
-    const [result, setResult] = useState<any>(null)
+    const [result, setResult] = useState<ImageUploadResult | null>(null)
     const [error, setError] = useState<string | null>(null)
     const [compressionStats, setCompressionStats] = useState<{ original: number; compressed: number } | null>(null)
     const [uploadComplete, setUploadComplete] = useState(false)
     const [warnings, setWarnings] = useState<string[]>([])
     const folderInputRef = useRef<HTMLInputElement>(null)
+    const abortControllerRef = useRef<AbortController | null>(null)
+    const objectUrlsRef = useRef<string[]>([])
+
+    // Cleanup object URLs on unmount
+    useEffect(() => {
+        return () => {
+            objectUrlsRef.current.forEach(url => URL.revokeObjectURL(url))
+            objectUrlsRef.current = []
+            if (abortControllerRef.current) {
+                abortControllerRef.current.abort()
+            }
+        }
+    }, [])
 
     // Fallback canvas-based compression when library fails
-    const fallbackCanvasCompression = async (file: File, options: any): Promise<Blob> => {
+    const fallbackCanvasCompression = async (file: File, options: CompressionOptions): Promise<Blob> => {
         return new Promise((resolve, reject) => {
-            console.log(`[Compression] Using fallback canvas compression for "${file.name}"`)
             const img = new Image()
             const url = URL.createObjectURL(file)
+            objectUrlsRef.current.push(url)
 
             img.onload = () => {
-                URL.revokeObjectURL(url)
-
                 // Calculate new dimensions
                 let { width, height } = img
                 const maxDim = options.maxWidthOrHeight || 1920
@@ -88,7 +124,6 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
                 canvas.toBlob(
                     (blob) => {
                         if (blob) {
-                            console.log(`[Compression] Canvas fallback: ${file.name} -> ${(blob.size / 1024 / 1024).toFixed(2)}MB`)
                             resolve(blob)
                         } else {
                             reject(new Error('Canvas toBlob failed'))
@@ -100,7 +135,6 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
             }
 
             img.onerror = () => {
-                URL.revokeObjectURL(url)
                 reject(new Error('Failed to load image for compression'))
             }
 
@@ -108,19 +142,12 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
         })
     }
 
-    // Maximum recommended images per PSN
-    const MAX_IMAGES_PER_PSN = 10
-    // Hard limit for total images
-    const MAX_TOTAL_IMAGES = 500
-
     // Compress images before upload (max 2MB target)
     // PRESERVES webkitRelativePath which is critical for PSN extraction
-    const compressImages = async (imageFiles: File[]): Promise<File[]> => {
+    const compressImages = useCallback(async (imageFiles: File[]): Promise<File[]> => {
         const compressed: File[] = []
         let originalSize = 0
         let compressedSize = 0
-        let compressedCount = 0
-        let skippedCount = 0
 
         for (let i = 0; i < imageFiles.length; i++) {
             const file = imageFiles[i]
@@ -130,31 +157,23 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
                 // Store the original webkitRelativePath before compression
                 const originalPath = file.webkitRelativePath
                 const fileSizeMB = file.size / 1024 / 1024
-                console.log(`[Compression] File ${i + 1}/${imageFiles.length}: "${file.name}", Size: ${fileSizeMB.toFixed(2)}MB`)
 
                 let processedFile: File
                 originalSize += file.size
 
                 // Always compress images, but with different targets based on original size
-                // This ensures consistent compression even for smaller files
-                const options = {
-                    maxSizeMB: fileSizeMB > 2 ? 2 : Math.max(0.5, fileSizeMB * 0.7), // Target 70% of original or 2MB max
+                const options: CompressionOptions = {
+                    maxSizeMB: fileSizeMB > 2 ? 2 : Math.max(0.5, fileSizeMB * 0.7),
                     maxWidthOrHeight: 1920,
                     useWebWorker: true,
                     fileType: 'image/jpeg',
-                    initialQuality: 0.8,
-                    alwaysKeepResolution: false,
-                    preserveExif: false, // Remove EXIF to save space
                 }
-
-                console.log(`[Compression] Starting compression for "${file.name}" with options:`, options)
 
                 // Compress all files, but be less aggressive on already-small files
                 let compressedBlob: Blob
                 try {
                     compressedBlob = await imageCompression(file, options)
-                } catch (compressionError: any) {
-                    console.error(`[Compression] Library failed for "${file.name}":`, compressionError)
+                } catch {
                     // Try fallback canvas compression
                     compressedBlob = await fallbackCanvasCompression(file, options)
                 }
@@ -165,17 +184,7 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
                     lastModified: file.lastModified,
                 })
 
-                const compressedSizeMB = compressedBlob.size / 1024 / 1024
                 compressedSize += compressedBlob.size
-
-                const savingsPercent = ((file.size - compressedBlob.size) / file.size * 100).toFixed(0)
-                console.log(`[Compression] "${file.name}": ${fileSizeMB.toFixed(2)}MB -> ${compressedSizeMB.toFixed(2)}MB (${savingsPercent}% saved)`)
-
-                if (compressedBlob.size < file.size * 0.95) {
-                    compressedCount++
-                } else {
-                    skippedCount++
-                }
 
                 // CRITICAL: Preserve webkitRelativePath for PSN extraction on server
                 if (originalPath) {
@@ -187,28 +196,13 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
                 }
 
                 compressed.push(processedFile)
-            } catch (err) {
-                console.error('[Compression] Failed for', file.name, err)
+            } catch {
                 // Use original file if compression fails
                 compressed.push(file)
                 originalSize += file.size
                 compressedSize += file.size
-                skippedCount++
             }
         }
-
-        const totalSavings = originalSize - compressedSize
-        const savingsPercent = originalSize > 0 ? (totalSavings / originalSize * 100).toFixed(1) : '0'
-
-        console.log(`[Compression] Complete:`, {
-            totalFiles: compressed.length,
-            compressed: compressedCount,
-            skipped: skippedCount,
-            originalSize: (originalSize / 1024 / 1024).toFixed(2) + 'MB',
-            compressedSize: (compressedSize / 1024 / 1024).toFixed(2) + 'MB',
-            savings: (totalSavings / 1024 / 1024).toFixed(2) + 'MB',
-            savingsPercent: savingsPercent + '%'
-        })
 
         setCompressionStats({
             original: originalSize / 1024 / 1024,
@@ -216,7 +210,7 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
         })
 
         return compressed
-    }
+    }, [])
 
     const handleFolderSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
         const selectedFiles = Array.from(e.target.files || [])
@@ -304,8 +298,8 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
         }
     }, [])
 
-    const MAX_BATCH_SIZE_MB = 3.5 // Stay under Vercel's 4.5MB limit
-    const MAX_FILES_PER_BATCH = 5 // Conservative limit
+    const MAX_BATCH_SIZE_MB = 3.0 // Stay safely under Vercel's 4.5MB limit (headers add overhead)
+    const MAX_FILES_PER_BATCH = 4 // Conservative limit for 10s timeout
 
     const createBatches = (files: File[]): File[][] => {
         const batches: File[][] = []
@@ -345,11 +339,13 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
 
         // Create batches to stay under Vercel's 4.5MB limit
         const batches = createBatches(filesToUpload)
-        console.log(`[Upload] Created ${batches.length} batches from ${filesToUpload.length} files`)
 
-        const allResults: any[] = []
+        const allResults: ImageUploadResult[] = []
         let totalUploaded = 0
         let totalFailed = 0
+
+        // Create new abort controller for this upload
+        abortControllerRef.current = new AbortController()
 
         try {
             let globalFileIndex = 0
@@ -359,10 +355,9 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
 
                 const formData = new FormData()
 
-                batch.forEach((file, localIndex) => {
-                    const path = (file as any).webkitRelativePath || file.name
-                    console.log(`[Upload DEBUG] Batch ${batchIndex + 1}: File ${localIndex + 1}: name="${file.name}", webkitRelativePath="${(file as any).webkitRelativePath || 'N/A'}"`)
-                    // CRITICAL FIX: Use GLOBAL index across all batches to prevent index collision
+                batch.forEach((file) => {
+                    const path = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name
+                    // Use GLOBAL index across all batches to prevent index collision
                     formData.append(`image_${globalFileIndex}`, file)
                     formData.append(`path_${globalFileIndex}`, path)
                     globalFileIndex++
@@ -371,6 +366,7 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
                 const res = await secureFetch(`/api/admin/bulk-import/jobs/${jobId}/images`, {
                     method: "POST",
                     body: formData,
+                    signal: abortControllerRef.current.signal,
                 })
 
                 if (!res.ok) {
@@ -396,7 +392,6 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
 
                     // If a batch fails, mark all files in that batch as failed
                     totalFailed += batch.length
-                    console.error(`[Upload] Batch ${batchIndex + 1} failed:`, errorMessage)
 
                     // Continue with next batch instead of failing completely
                     if (batchIndex < batches.length - 1) {
@@ -427,9 +422,9 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
                         for (const line of lines) {
                             if (!line.trim()) continue
 
-                            let data: any
+                            let data: { error?: string; progress?: number; status?: string; completed?: boolean; total_images?: number }
                             try {
-                                data = JSON.parse(line)
+                                data = JSON.parse(line) as { error?: string; progress?: number; status?: string; completed?: boolean; total_images?: number }
 
                                 if (data.error) {
                                     throw new Error(data.error)
@@ -447,13 +442,23 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
                                 }
 
                                 if (data.completed || data.progress === 100) {
-                                    allResults.push(data)
+                                    const result: ImageUploadResult = {
+                                        total_images: data.total_images || batch.length,
+                                        matched_psns: 0,
+                                        orphaned_images: 0,
+                                        failed_uploads: 0,
+                                        completed: true,
+                                        progress: 100,
+                                        status: data.status || "Images uploaded successfully"
+                                    }
+                                    allResults.push(result)
                                     totalUploaded += data.total_images || batch.length
                                 }
-                            } catch (parseError: any) {
-                                if (parseError.message &&
-                                    parseError.message !== 'Unexpected end of JSON input' &&
-                                    !parseError.message.includes('JSON')) {
+                            } catch (parseError: unknown) {
+                                const errorMessage = parseError instanceof Error ? parseError.message : String(parseError)
+                                if (errorMessage &&
+                                    errorMessage !== 'Unexpected end of JSON input' &&
+                                    !errorMessage.includes('JSON')) {
                                     throw parseError
                                 }
                             }
@@ -465,7 +470,7 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
             // All batches completed
             // Calculate PSN info from files (avoid stale closure)
             const uploadedPsnInfo = filesToUpload.reduce((acc, file) => {
-                const path = file.webkitRelativePath || file.name
+                const path = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name
                 const parts = path.split(/[/\\]/)
                 const psn = parts.length >= 2 ? parts[parts.length - 2] : null
                 if (psn && /^\d+$/.test(psn)) {
@@ -493,16 +498,21 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
                 toast.success(`Successfully uploaded ${totalUploaded} images`)
             }
 
-        } catch (err: any) {
-            const errorMessage = err.message || "Image upload failed"
-            setError(errorMessage)
-            toast.error("Image Upload Failed", {
-                description: errorMessage,
-                duration: 8000,
-            })
-            console.error("[Upload] Error:", err)
+        } catch (err: unknown) {
+            if (err instanceof Error && err.name === 'AbortError') {
+                setError("Upload cancelled")
+                toast.info("Upload cancelled")
+            } else {
+                const errorMessage = err instanceof Error ? err.message : "Image upload failed"
+                setError(errorMessage)
+                toast.error("Image Upload Failed", {
+                    description: errorMessage,
+                    duration: 8000,
+                })
+            }
         } finally {
             setUploading(false)
+            abortControllerRef.current = null
         }
     }
 
@@ -528,14 +538,13 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
     }
 
     // Extract PSN info from files for preview (matches server-side logic)
-    // Server uses: parts[parts.length - 2] (second-to-last path segment)
-    const psnInfo = files.reduce((acc, file) => {
-        const path = file.webkitRelativePath || file.name
+    // Use compressedFiles if available, otherwise use original files
+    const filesForPreview = compressedFiles.length > 0 ? compressedFiles : files
+    const psnInfo = filesForPreview.reduce((acc, file) => {
+        const path = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name
         const parts = path.split(/[/\\]/)
-        // Use second-to-last part (folder name containing images) - matches server
         const psn = parts.length >= 2 ? parts[parts.length - 2] : null
 
-        // PSN should be numeric (digits only) - matches server regex /^\d+$/
         if (psn && /^\d+$/.test(psn)) {
             acc[psn] = (acc[psn] || 0) + 1
         }
@@ -707,7 +716,7 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
                         )}
                     </div>
 
-                    <div className="grid grid-cols-4 gap-3">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                         <div className="bg-white p-3 rounded border text-center">
                             <p className="text-lg font-bold">{result.total_images}</p>
                             <p className="text-xs text-muted-foreground">Uploaded</p>
@@ -726,7 +735,7 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
                         </div>
                     </div>
 
-                    {result.unmatched_psns?.length > 0 && (
+                    {result.unmatched_psns && result.unmatched_psns.length > 0 && (
                         <div className="mt-3">
                             <p className="text-sm text-orange-700">
                                 ⚠ {result.unmatched_psns.length} properties have no images
@@ -749,8 +758,19 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
                 </div>
             )}
 
-            {/* Compression Progress */}
-            {compressing && (
+            {/* Upload/Compression Progress */}
+            {uploading && (
+                <div className="space-y-2 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                    <div className="flex justify-between text-sm">
+                        <span className="font-medium text-blue-800">{status}</span>
+                        <span className="text-blue-600">{progress}%</span>
+                    </div>
+                    <Progress value={progress} className="h-2" />
+                </div>
+            )}
+
+            {/* Compression-only indicator (when not yet uploading) */}
+            {compressing && !uploading && (
                 <div className="space-y-2 p-4 bg-blue-50 rounded-lg border border-blue-200">
                     <div className="flex items-center gap-2">
                         <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
@@ -765,23 +785,13 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
                 </div>
             )}
 
-            {/* Upload Progress */}
-            {(uploading || compressing) && (
-                <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                        <span>{status}</span>
-                        <span>{progress}%</span>
-                    </div>
-                    <Progress value={progress} />
-                </div>
-            )}
-
             {/* Action Buttons */}
-            <div className="flex flex-wrap gap-3">
+            <div className="flex flex-col sm:flex-row gap-3">
                 <Button
                     variant="outline"
                     onClick={onBack}
                     disabled={uploading || compressing}
+                    className="w-full sm:w-auto"
                 >
                     <ArrowLeft className="h-4 w-4 mr-2" />
                     Back
@@ -792,7 +802,7 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
                         variant="ghost"
                         onClick={onCancel}
                         disabled={uploading || compressing}
-                        className="text-muted-foreground"
+                        className="text-muted-foreground w-full sm:w-auto"
                     >
                         Cancel
                     </Button>
@@ -802,7 +812,7 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
                     <Button
                         onClick={handleUpload}
                         disabled={uploading || compressing || (compressedFiles.length === 0 && files.length === 0)}
-                        className="flex-1"
+                        className="flex-1 w-full sm:w-auto"
                     >
                         {compressing ? (
                             <>
@@ -826,7 +836,7 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
                 {uploadComplete && result && (
                     <Button
                         onClick={handleProceed}
-                        className="flex-1 gap-2"
+                        className="flex-1 gap-2 w-full sm:w-auto"
                     >
                         Next: Review Import
                         <ArrowRight className="h-4 w-4" />
@@ -838,7 +848,7 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
                         variant="outline"
                         onClick={onSkip}
                         disabled={uploading || compressing}
-                        className="flex-1"
+                        className="flex-1 w-full sm:w-auto"
                     >
                         Skip Images
                     </Button>

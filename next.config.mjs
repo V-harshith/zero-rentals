@@ -25,9 +25,9 @@ const nextConfig = {
   experimental: {
     optimizeCss: true,
     optimizePackageImports: ['lucide-react', '@radix-ui/react-icons'],
-    // Increase body size limit for file uploads (prevents 413 Payload Too Large)
+    // Body size limit for Vercel free tier (4.5MB max, using 4MB for safety)
     serverActions: {
-      bodySizeLimit: '15mb',
+      bodySizeLimit: '4mb',
     },
   },
   // SECURITY: Add security headers

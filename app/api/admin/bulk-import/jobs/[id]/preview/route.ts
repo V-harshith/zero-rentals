@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase-server"
 import { supabaseAdmin } from "@/lib/supabase-admin"
+import { logger } from "@/lib/bulk-import/logger"
 
 // ============================================================================
 // GET /api/admin/bulk-import/jobs/[id]/preview
@@ -12,14 +13,14 @@ export async function GET(
 ) {
     try {
         const { id: jobId } = await params
-        console.log(`[Preview API] Getting preview for job ${jobId}`)
+        logger.start('Getting preview for job', { jobId })
 
         // Auth check
         const supabase = await createClient()
         const { data: { user: authUser }, error: authError } = await supabase.auth.getUser()
 
         if (authError || !authUser) {
-            console.log(`[Preview API] Unauthorized request`)
+            logger.warn('Unauthorized preview request')
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
         }
 
@@ -32,29 +33,51 @@ export async function GET(
             .single()
 
         if (jobError || !job) {
-            console.log(`[Preview API] Job not found: ${jobId}`)
+            logger.warn('Job not found', { jobId, error: jobError?.message })
             return NextResponse.json({ error: "Job not found" }, { status: 404 })
         }
 
-        console.log(`[Preview API] Job found: ${job.id}, status: ${job.status}`)
+        logger.info('Job found', { jobId, status: job.status })
 
         // Parse data
-        const properties = (job.parsed_properties as any[]) || []
-        const rawImagesByPSN = (job.images_by_psn as Record<string, any[]>) || {}
-        const orphanedImages = (job.orphaned_images as any[]) || []
-        const newOwners = (job.new_owners as any[]) || []
+        const properties = (job.parsed_properties as Array<{
+            row_number: number
+            psn: string
+            property_name: string
+            owner_email: string
+            owner_name: string
+            property_data?: { city?: string; area?: string }
+        }>) || []
+        const rawImagesByPSN = (job.images_by_psn as Record<string, Array<{
+            filename?: string
+            storage_path?: string
+            public_url?: string
+        }>>) || {}
+        const orphanedImages = (job.orphaned_images as Array<{
+            filename?: string
+        }>) || []
+        const newOwners = (job.new_owners as Array<{
+            email: string
+            name: string
+            phone: string
+            properties?: string[]
+        }>) || []
 
         // CRITICAL FIX: Normalize all images_by_psn keys to strings (PostgreSQL JSONB may coerce numeric strings)
-        const imagesByPSN: Record<string, any[]> = {}
+        const imagesByPSN: Record<string, Array<{
+            filename?: string
+            storage_path?: string
+            public_url?: string
+        }>> = {}
         for (const [key, value] of Object.entries(rawImagesByPSN)) {
             imagesByPSN[String(key).trim()] = value
         }
 
-        console.log(`[Preview API] Data parsed:`, {
-            properties_count: properties.length,
-            images_by_psn_keys: Object.keys(imagesByPSN),
-            orphaned_count: orphanedImages.length,
-            new_owners_count: newOwners.length,
+        logger.info('Data parsed', {
+            propertiesCount: properties.length,
+            imagesByPSNKeys: Object.keys(imagesByPSN),
+            orphanedCount: orphanedImages.length,
+            newOwnersCount: newOwners.length,
         })
 
         // Build property preview
@@ -74,7 +97,7 @@ export async function GET(
                 owner_name: prop.owner_name,
                 is_new_owner: isNewOwner,
                 image_count: images.length,
-                images: images.map((img: any) => img.filename || img),
+                images: images.map((img) => img.filename || 'unknown'),
                 has_images: images.length > 0,
             }
         })
@@ -117,12 +140,13 @@ export async function GET(
             })),
         }
 
-        console.log(`[Preview API] Response prepared successfully`)
+        logger.complete('Preview response prepared', { jobId })
         return NextResponse.json(response)
-    } catch (error: any) {
-        console.error("[Preview API] Error:", error)
+    } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : String(error)
+        logger.error('Preview API error', { error: errorMessage })
         return NextResponse.json(
-            { error: error.message || "Failed to get preview" },
+            { error: errorMessage || "Failed to get preview" },
             { status: 500 }
         )
     }

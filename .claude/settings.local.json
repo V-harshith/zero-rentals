@@ -30,7 +30,17 @@
       "Bash(test:*)",
       "Bash(npx supabase login:*)",
       "Bash(npx supabase:*)",
-      "Bash(npx eslint:*)"
+      "Bash(npx eslint:*)",
+      "Bash(git show:*)",
+      "Bash(git diff:*)",
+      "Bash(xargs:*)",
+      "Bash(ls:*)",
+      "Bash(npm run test:*)",
+      "Bash(npm run test:unit:*)",
+      "Bash(awk:*)",
+      "Bash(git add:*)",
+      "Bash(env:*)",
+      "Bash(wc:*)"
     ]
   }
 }

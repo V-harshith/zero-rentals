@@ -379,14 +379,209 @@ END;
 $$;
 
 -- =============================================
--- FIX 9: Missing Indexes for Performance
+-- FIX 9: Property Status Transition Function
+-- =============================================
+-- Table for status transition audit log
+CREATE TABLE IF NOT EXISTS property_status_transitions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    property_id UUID NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
+    old_status TEXT NOT NULL,
+    new_status TEXT NOT NULL,
+    admin_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    reason TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_property_status_transitions_property_id
+    ON property_status_transitions(property_id);
+CREATE INDEX IF NOT EXISTS idx_property_status_transitions_created_at
+    ON property_status_transitions(created_at);
+
+ALTER TABLE property_status_transitions ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Admins can view all status transitions" ON property_status_transitions;
+CREATE POLICY "Admins can view all status transitions" ON property_status_transitions
+    FOR SELECT USING (
+        EXISTS (
+            SELECT 1 FROM users WHERE id = auth.uid() AND role = 'admin'
+        )
+    );
+
+DROP POLICY IF EXISTS "System can insert status transitions" ON property_status_transitions;
+CREATE POLICY "System can insert status transitions" ON property_status_transitions
+    FOR INSERT WITH CHECK (true);
+
+-- Main transition function
+CREATE OR REPLACE FUNCTION transition_property_status(
+    p_property_id UUID,
+    p_new_status TEXT,
+    p_admin_id UUID DEFAULT NULL,
+    p_reason TEXT DEFAULT NULL
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_current_record RECORD;
+    v_old_status TEXT;
+    v_transition_log_id UUID;
+    v_result JSONB;
+    v_valid_transition BOOLEAN := false;
+BEGIN
+    IF p_property_id IS NULL THEN
+        RETURN jsonb_build_object(
+            'success', false,
+            'error', 'Property ID is required'
+        );
+    END IF;
+
+    IF p_new_status IS NULL THEN
+        RETURN jsonb_build_object(
+            'success', false,
+            'error', 'New status is required'
+        );
+    END IF;
+
+    IF p_new_status NOT IN ('pending', 'active', 'rejected', 'inactive') THEN
+        RETURN jsonb_build_object(
+            'success', false,
+            'error', 'Invalid status value. Must be: pending, active, rejected, or inactive'
+        );
+    END IF;
+
+    SELECT id, status, owner_id, title
+    INTO v_current_record
+    FROM properties
+    WHERE id = p_property_id
+    FOR UPDATE;
+
+    IF v_current_record IS NULL THEN
+        RETURN jsonb_build_object(
+            'success', false,
+            'error', 'Property not found'
+        );
+    END IF;
+
+    v_old_status := v_current_record.status;
+
+    IF v_old_status = p_new_status THEN
+        RETURN jsonb_build_object(
+            'success', true,
+            'message', 'Property already has status: ' || p_new_status,
+            'property_id', p_property_id,
+            'status', p_new_status,
+            'changed', false
+        );
+    END IF;
+
+    CASE v_old_status
+        WHEN 'pending' THEN
+            IF p_new_status IN ('active', 'rejected') THEN
+                v_valid_transition := true;
+            END IF;
+        WHEN 'active' THEN
+            IF p_new_status IN ('inactive', 'rejected') THEN
+                v_valid_transition := true;
+            END IF;
+        WHEN 'inactive' THEN
+            IF p_new_status IN ('active', 'pending') THEN
+                v_valid_transition := true;
+            END IF;
+        WHEN 'rejected' THEN
+            IF p_new_status IN ('pending', 'active') THEN
+                v_valid_transition := true;
+            END IF;
+        ELSE
+            v_valid_transition := false;
+    END CASE;
+
+    IF NOT v_valid_transition THEN
+        RETURN jsonb_build_object(
+            'success', false,
+            'error', 'Invalid status transition: ' || v_old_status || ' -> ' || p_new_status,
+            'property_id', p_property_id,
+            'current_status', v_old_status,
+            'requested_status', p_new_status
+        );
+    END IF;
+
+    INSERT INTO property_status_transitions (
+        property_id,
+        old_status,
+        new_status,
+        admin_id,
+        reason,
+        created_at
+    ) VALUES (
+        p_property_id,
+        v_old_status,
+        p_new_status,
+        p_admin_id,
+        p_reason,
+        NOW()
+    )
+    RETURNING id INTO v_transition_log_id;
+
+    UPDATE properties
+    SET
+        status = p_new_status,
+        updated_at = NOW(),
+        published_at = CASE
+            WHEN p_new_status = 'active' AND published_at IS NULL THEN NOW()
+            ELSE published_at
+        END,
+        availability = CASE
+            WHEN p_new_status = 'active' THEN 'Available'
+            WHEN p_new_status = 'inactive' THEN 'Under Maintenance'
+            ELSE availability
+        END,
+        featured = CASE
+            WHEN p_new_status IN ('inactive', 'rejected') THEN false
+            ELSE featured
+        END
+    WHERE id = p_property_id;
+
+    v_result := jsonb_build_object(
+        'success', true,
+        'message', 'Status transition completed successfully',
+        'property_id', p_property_id,
+        'transition_id', v_transition_log_id,
+        'old_status', v_old_status,
+        'new_status', p_new_status,
+        'changed', true,
+        'owner_id', v_current_record.owner_id,
+        'property_title', v_current_record.title
+    );
+
+    RETURN v_result;
+
+EXCEPTION
+    WHEN OTHERS THEN
+        RAISE WARNING 'Status transition failed for property %: %', p_property_id, SQLERRM;
+
+        RETURN jsonb_build_object(
+            'success', false,
+            'error', 'Transaction failed: ' || SQLERRM,
+            'property_id', p_property_id,
+            'requested_status', p_new_status
+        );
+END;
+$$;
+
+-- Grant execute permission
+GRANT EXECUTE ON FUNCTION transition_property_status(UUID, TEXT, UUID, TEXT) TO authenticated;
+
+-- =============================================
+-- FIX 10: Missing Indexes for Performance
 -- =============================================
 CREATE INDEX IF NOT EXISTS idx_bulk_import_jobs_admin_status ON bulk_import_jobs(admin_id, status);
 CREATE INDEX IF NOT EXISTS idx_properties_psn ON properties(psn) WHERE psn IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_subscriptions_user_status ON subscriptions(user_id, status);
 
 -- =============================================
--- FIX 10: Properties Bulk Import Columns
+-- FIX 11: Properties Bulk Import Columns
 -- =============================================
 ALTER TABLE properties
     ADD COLUMN IF NOT EXISTS bulk_import_job_id UUID REFERENCES bulk_import_jobs(id) ON DELETE SET NULL,
@@ -397,7 +592,7 @@ CREATE INDEX IF NOT EXISTS idx_properties_bulk_import_job
     WHERE bulk_import_job_id IS NOT NULL;
 
 -- =============================================
--- FIX 11: Fix preferred_tenant constraint
+-- FIX 12: Fix preferred_tenant constraint
 -- =============================================
 -- Drop existing constraint if it doesn't allow NULL or has wrong values
 ALTER TABLE properties DROP CONSTRAINT IF EXISTS properties_preferred_tenant_check;
@@ -448,6 +643,12 @@ BEGIN
 
     SELECT COUNT(*) INTO v_count FROM pg_proc WHERE proname = 'rollback_bulk_import_properties';
     RAISE NOTICE 'rollback_bulk_import_properties function: %', CASE WHEN v_count > 0 THEN 'CREATED' ELSE 'FAILED' END;
+
+    SELECT COUNT(*) INTO v_count FROM pg_proc WHERE proname = 'transition_property_status';
+    RAISE NOTICE 'transition_property_status function: %', CASE WHEN v_count > 0 THEN 'CREATED' ELSE 'FAILED' END;
+
+    SELECT COUNT(*) INTO v_count FROM information_schema.tables WHERE table_name = 'property_status_transitions';
+    RAISE NOTICE 'property_status_transitions table: %', CASE WHEN v_count > 0 THEN 'CREATED' ELSE 'FAILED' END;
 
     RAISE NOTICE '=== ALL FIXES APPLIED ===';
     RAISE NOTICE 'You can now approve properties and use bulk import.';

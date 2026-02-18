@@ -197,7 +197,7 @@ export function ExcelUploadStep({ jobId, onComplete, onCancel }: ExcelUploadStep
             {/* File Upload Area */}
             {!file ? (
                 <div
-                    className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-primary hover:bg-primary/5 transition-colors cursor-pointer"
+                    className="border-2 border-dashed border-gray-300 rounded-lg p-6 sm:p-8 text-center hover:border-primary hover:bg-primary/5 transition-colors cursor-pointer"
                     onClick={() => fileInputRef.current?.click()}
                 >
                     <input
@@ -207,8 +207,8 @@ export function ExcelUploadStep({ jobId, onComplete, onCancel }: ExcelUploadStep
                         onChange={handleFileSelect}
                         className="hidden"
                     />
-                    <FileSpreadsheet className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-                    <p className="font-medium">Click to select Excel file</p>
+                    <FileSpreadsheet className="h-10 w-10 sm:h-12 sm:w-12 mx-auto mb-4 text-muted-foreground" />
+                    <p className="font-medium text-sm sm:text-base">Click to select Excel file</p>
                     <p className="text-sm text-muted-foreground mt-1">
                         or drag and drop here
                     </p>
@@ -217,21 +217,21 @@ export function ExcelUploadStep({ jobId, onComplete, onCancel }: ExcelUploadStep
                     </p>
                 </div>
             ) : (
-                <div className="border rounded-lg p-6 bg-muted/30">
-                    <div className="flex items-center justify-between">
+                <div className="border rounded-lg p-4 sm:p-6 bg-muted/30">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                         <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
+                            <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center shrink-0">
                                 <FileSpreadsheet className="h-5 w-5 text-green-600" />
                             </div>
-                            <div>
-                                <p className="font-medium">{file.name}</p>
+                            <div className="min-w-0">
+                                <p className="font-medium text-sm truncate">{file.name}</p>
                                 <p className="text-sm text-muted-foreground">
                                     {(file.size / 1024 / 1024).toFixed(2)} MB
                                 </p>
                             </div>
                         </div>
                         {!uploading && !result && (
-                            <Button variant="ghost" size="sm" onClick={clearFile}>
+                            <Button variant="ghost" size="sm" onClick={clearFile} className="self-end sm:self-auto">
                                 <X className="h-4 w-4" />
                             </Button>
                         )}
@@ -284,7 +284,7 @@ export function ExcelUploadStep({ jobId, onComplete, onCancel }: ExcelUploadStep
                         )}
                     </div>
 
-                    <div className="grid grid-cols-4 gap-3">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                         <div className="bg-white p-3 rounded border text-center">
                             <p className="text-lg font-bold">{result.total_rows}</p>
                             <p className="text-xs text-muted-foreground">Total Rows</p>
@@ -346,13 +346,13 @@ export function ExcelUploadStep({ jobId, onComplete, onCancel }: ExcelUploadStep
             )}
 
             {/* Navigation Buttons */}
-            <div className="flex gap-3">
+            <div className="flex flex-col sm:flex-row gap-3">
                 {onCancel && (
                     <Button
                         variant="outline"
                         onClick={onCancel}
                         disabled={uploading}
-                        className="flex-1"
+                        className="w-full sm:w-auto sm:flex-1"
                     >
                         Cancel Import
                     </Button>
@@ -361,7 +361,7 @@ export function ExcelUploadStep({ jobId, onComplete, onCancel }: ExcelUploadStep
                     <Button
                         onClick={handleProceed}
                         size="lg"
-                        className="flex-1 gap-2"
+                        className="w-full sm:w-auto sm:flex-1 gap-2"
                     >
                         Next: Upload Images
                         <ArrowRight className="h-4 w-4" />

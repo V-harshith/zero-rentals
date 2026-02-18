@@ -105,8 +105,8 @@ CREATE TABLE IF NOT EXISTS property_locks (
 CREATE INDEX IF NOT EXISTS idx_property_locks_property_id ON property_locks(property_id);
 CREATE INDEX IF NOT EXISTS idx_property_locks_admin_id ON property_locks(admin_id);
 CREATE INDEX IF NOT EXISTS idx_property_locks_expires_at ON property_locks(expires_at);
-CREATE INDEX IF NOT EXISTS idx_property_locks_active ON property_locks(property_id, lock_type, expires_at)
-    WHERE expires_at > NOW();
+-- Note: Index with NOW() predicate removed - PostgreSQL doesn't allow volatile functions in index predicates
+-- Active locks are filtered at query time using: WHERE expires_at > NOW()
 
 ALTER TABLE property_locks ENABLE ROW LEVEL SECURITY;
 
@@ -896,6 +896,8 @@ CREATE INDEX IF NOT EXISTS idx_payment_logs_order_id ON payment_logs(order_id);
 -- =============================================
 -- FIX 7: Rollback Function for Bulk Import
 -- =============================================
+DROP FUNCTION IF EXISTS rollback_bulk_import_properties(UUID);
+
 CREATE OR REPLACE FUNCTION rollback_bulk_import_properties(p_job_id UUID)
 RETURNS TABLE(deleted_property_id UUID, psn TEXT, success BOOLEAN, error_message TEXT)
 LANGUAGE plpgsql

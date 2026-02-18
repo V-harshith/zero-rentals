@@ -91,9 +91,9 @@ async function validateImageFile(file: File): Promise<{ valid: boolean; error?: 
 // Upload image folder
 // ============================================================================
 
-// Increase body size limit for image uploads (prevents 413 Payload Too Large)
+// Body size limit for Vercel free tier (4.5MB max, using 3.5MB for safety margin)
 export const bodyParser = {
-  sizeLimit: '10mb',
+  sizeLimit: '3.5mb',
 }
 
 // Maximum recommended images per PSN (warning threshold)

@@ -66,7 +66,7 @@ export function ResultsStep({ jobId, results, onStartOver }: ResultsStepProps) {
             </div>
 
             {/* Results Summary */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 <Card>
                     <CardContent className="pt-6 text-center">
                         <Building2 className="h-8 w-8 mx-auto mb-2 text-blue-500" />
@@ -114,9 +114,9 @@ export function ResultsStep({ jobId, results, onStartOver }: ResultsStepProps) {
 
             {/* Credentials Download */}
             {result.new_owners > 0 && (
-                <Alert className="bg-green-50 border-green-200">
-                    <Download className="h-4 w-4 text-green-600" />
-                    <AlertDescription className="flex items-center justify-between">
+                <Alert className="bg-green-50 border-green-200 p-4">
+                    <Download className="h-4 w-4 text-green-600 shrink-0 mt-0.5" />
+                    <AlertDescription className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                         <div>
                             <p className="font-semibold text-green-800">
                                 {result.new_owners} new owner account{result.new_owners > 1 ? "s" : ""} created
@@ -127,7 +127,7 @@ export function ResultsStep({ jobId, results, onStartOver }: ResultsStepProps) {
                         </div>
                         <Button
                             onClick={downloadCredentials}
-                            className="bg-green-600 hover:bg-green-700 text-white shrink-0"
+                            className="bg-green-600 hover:bg-green-700 text-white shrink-0 w-full sm:w-auto"
                         >
                             <Download className="h-4 w-4 mr-2" />
                             Download CSV
@@ -145,12 +145,12 @@ export function ResultsStep({ jobId, results, onStartOver }: ResultsStepProps) {
                     </h3>
                     <div className="space-y-2 max-h-48 overflow-y-auto">
                         {result.failed_items.map((item: any, i: number) => (
-                            <div key={i} className="flex items-center gap-2 text-sm">
-                                <Badge variant="outline" className="shrink-0">
+                            <div key={i} className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 text-sm">
+                                <Badge variant="outline" className="shrink-0 w-fit">
                                     {item.type}
                                 </Badge>
-                                <span className="font-medium">{item.psn || item.email}</span>
-                                <span className="text-red-600">{item.error}</span>
+                                <span className="font-medium truncate">{item.psn || item.email}</span>
+                                <span className="text-red-600 text-xs sm:text-sm">{item.error}</span>
                             </div>
                         ))}
                     </div>
