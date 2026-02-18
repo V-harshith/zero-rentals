@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -48,6 +48,47 @@ export function AllPropertiesTab() {
         }
     }, [])
 
+    // Ref to track mounted state for cleanup
+    const isMountedRef = useRef(true)
+
+    useEffect(() => {
+        isMountedRef.current = true
+        return () => {
+            isMountedRef.current = false
+        }
+    }, [])
+
+    const fetchProperties = useCallback(async () => {
+        try {
+            setLoading(true)
+            const from = (currentPage - 1) * ITEMS_PER_PAGE
+            const to = from + ITEMS_PER_PAGE - 1
+
+            const { data, error, count } = await supabase
+                .from('properties')
+                .select('id, title, city, area, locality, owner_name, owner_contact, private_room_price, double_sharing_price, triple_sharing_price, four_sharing_price, room_type, property_type, featured, verified, status, created_at, images, views', { count: 'exact' })
+                .order('created_at', { ascending: false })
+                .range(from, to)
+
+            if (!isMountedRef.current) return
+
+            if (error) {
+                throw error
+            }
+
+            setProperties((data || []).map((p: any) => mapPropertyFromDB(p as PropertyRow)))
+            setTotalCount(count || 0)
+        } catch {
+            if (isMountedRef.current) {
+                toast.error("Failed to load properties. Please try refreshing.")
+            }
+        } finally {
+            if (isMountedRef.current) {
+                setLoading(false)
+            }
+        }
+    }, [currentPage])
+
     useEffect(() => {
         fetchProperties()
 
@@ -64,34 +105,7 @@ export function AllPropertiesTab() {
         return () => {
             document.removeEventListener('visibilitychange', handleVisibilityChange)
         }
-    }, [currentPage])
-
-    const fetchProperties = async () => {
-        try {
-            setLoading(true)
-            const from = (currentPage - 1) * ITEMS_PER_PAGE
-            const to = from + ITEMS_PER_PAGE - 1
-
-            // Fetch properties with optimized query - removed timeout race condition
-            // The browser/network will handle actual timeouts
-            const { data, error, count } = await supabase
-                .from('properties')
-                .select('id, title, city, area, locality, owner_name, owner_contact, private_room_price, double_sharing_price, triple_sharing_price, four_sharing_price, room_type, property_type, featured, verified, status, created_at, images, views', { count: 'exact' })
-                .order('created_at', { ascending: false })
-                .range(from, to)
-
-            if (error) {
-                throw error
-            }
-
-            setProperties((data || []).map((p: any) => mapPropertyFromDB(p as PropertyRow)))
-            setTotalCount(count || 0)
-        } catch {
-            toast.error("Failed to load properties. Please try refreshing.")
-        } finally {
-            setLoading(false)
-        }
-    }
+    }, [fetchProperties])
 
     const toggleFeatured = async (id: string, current: boolean) => {
         // Check for CSRF token before making request
@@ -436,8 +450,8 @@ export function AllPropertiesTab() {
                                             <div className="text-xs text-muted-foreground">{property.location?.city || "Unknown City"}</div>
                                         </TableCell>
                                         <TableCell>
-                                            <div className="text-sm">{property.owner.name}</div>
-                                            <div className="text-xs text-muted-foreground">{property.owner.phone}</div>
+                                            <div className="text-sm">{property.owner?.name || 'Unknown'}</div>
+                                            <div className="text-xs text-muted-foreground">{property.owner?.phone || 'N/A'}</div>
                                         </TableCell>
                                         <TableCell>
                                             <div className="flex items-center gap-1 text-sm">
@@ -462,7 +476,7 @@ export function AllPropertiesTab() {
                                                 size="sm"
                                                 variant={property.verified ? "secondary" : "outline"}
                                                 className={property.verified ? "bg-blue-100 text-blue-700 hover:bg-blue-200 border-blue-200" : ""}
-                                                onClick={() => toggleVerified(property.id, property.verified || false)}
+                                                onClick={() => toggleVerified(property.id, property.verified ?? false)}
                                                 disabled={updatingId === property.id || isCsrfLoading}
                                                 title={property.verified ? "Click to unverify" : "Click to verify"}
                                             >

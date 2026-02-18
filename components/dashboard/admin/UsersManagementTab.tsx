@@ -23,7 +23,7 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { Search, Loader2, CheckCircle, XCircle, Trash2, Crown } from "lucide-react"
+import { Search, Loader2, CheckCircle, XCircle, Trash2, Crown, UserCheck, UserX } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
 import { verifyUser, type User } from "@/lib/user-service"
@@ -48,6 +48,9 @@ export function UsersManagementTab({
     const [deletingUserId, setDeletingUserId] = useState<string | null>(null)
     const [userToDelete, setUserToDelete] = useState<User | null>(null)
     const [showDeleteDialog, setShowDeleteDialog] = useState(false)
+    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+    const [bulkDeleting, setBulkDeleting] = useState(false)
+    const [bulkVerifying, setBulkVerifying] = useState(false)
     const { csrfToken } = useCsrf()
 
     // Filter users based on search query prop - with XSS-safe sanitization
@@ -98,6 +101,109 @@ export function UsersManagementTab({
     // Refs to track in-flight requests for deduplication
     const verifyingRef = useRef<Set<string>>(new Set())
     const deletingRef = useRef<Set<string>>(new Set())
+
+    // Multi-select helpers
+    const toggleSelect = (id: string) => {
+        setSelectedIds(prev => {
+            const next = new Set(prev)
+            if (next.has(id)) next.delete(id)
+            else next.add(id)
+            return next
+        })
+    }
+
+    const toggleSelectAll = () => {
+        if (selectedIds.size === filteredUsers.length) {
+            setSelectedIds(new Set())
+        } else {
+            setSelectedIds(new Set(filteredUsers.map(u => u.id)))
+        }
+    }
+
+    const bulkDelete = async () => {
+        if (selectedIds.size === 0) return
+
+        const count = selectedIds.size
+        // Get auth token first
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session) {
+            toast.error('Authentication required')
+            return
+        }
+
+        setBulkDeleting(true)
+        try {
+            const ids = Array.from(selectedIds)
+
+            // Call the admin API endpoint to bulk delete users
+            const response = await fetch('/api/admin/users/bulk-delete', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${session.access_token}`,
+                    ...(csrfToken ? { 'x-csrf-token': csrfToken } : {})
+                },
+                body: JSON.stringify({ ids }),
+            })
+
+            if (!response.ok) {
+                const data = await response.json()
+                throw new Error(data.error || 'Failed to delete users')
+            }
+
+            const result = await response.json()
+
+            // Immediate UI update
+            setSelectedIds(new Set())
+            toast.success(`${result.data?.deletedCount || count} user${count === 1 ? '' : 's'} deleted successfully`)
+            onRefresh()
+        } catch (error: any) {
+            toast.error(error.message || 'Failed to delete users')
+        } finally {
+            setBulkDeleting(false)
+        }
+    }
+
+    const bulkVerify = async (verified: boolean) => {
+        if (selectedIds.size === 0) return
+
+        const count = selectedIds.size
+
+        setBulkVerifying(true)
+        try {
+            const ids = Array.from(selectedIds)
+            let successCount = 0
+            let errorCount = 0
+
+            // Process users sequentially to avoid overwhelming the server
+            for (const userId of ids) {
+                try {
+                    const { error } = await verifyUser(userId, csrfToken || undefined)
+                    if (error) {
+                        errorCount++
+                    } else {
+                        successCount++
+                    }
+                } catch {
+                    errorCount++
+                }
+            }
+
+            if (successCount > 0) {
+                toast.success(`${successCount} user${successCount === 1 ? '' : 's'} verified successfully`)
+            }
+            if (errorCount > 0) {
+                toast.error(`Failed to verify ${errorCount} user${errorCount === 1 ? '' : 's'}`)
+            }
+
+            setSelectedIds(new Set())
+            onRefresh()
+        } catch (error: any) {
+            toast.error(error.message || 'Failed to verify users')
+        } finally {
+            setBulkVerifying(false)
+        }
+    }
 
     const handleVerifyUser = async (userId: string) => {
         // Prevent duplicate requests
@@ -181,7 +287,43 @@ export function UsersManagementTab({
     }
 
     return (
-        <>
+        <div className="space-y-4">
+            {/* Bulk Actions Bar */}
+            {selectedIds.size > 0 && (
+                <div className="flex items-center justify-between bg-primary/10 border border-primary/20 rounded-lg px-4 py-3">
+                    <span className="text-sm font-medium text-primary">
+                        {selectedIds.size} user{selectedIds.size === 1 ? '' : 's'} selected
+                    </span>
+                    <div className="flex items-center gap-2">
+                        <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => bulkVerify(true)}
+                            disabled={bulkVerifying || bulkDeleting}
+                            className="border-blue-500 text-blue-600 hover:bg-blue-50"
+                        >
+                            {bulkVerifying ? (
+                                <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Verifying...</>
+                            ) : (
+                                <><UserCheck className="h-4 w-4 mr-2" /> Verify Selected</>
+                            )}
+                        </Button>
+                        <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={bulkDelete}
+                            disabled={bulkDeleting || bulkVerifying}
+                        >
+                            {bulkDeleting ? (
+                                <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Deleting...</>
+                            ) : (
+                                <><Trash2 className="h-4 w-4 mr-2" /> Delete Selected ({selectedIds.size})</>
+                            )}
+                        </Button>
+                    </div>
+                </div>
+            )}
+
         <Card>
             <CardHeader>
                 <div className="flex items-center justify-between">
@@ -194,6 +336,14 @@ export function UsersManagementTab({
                     <Table>
                         <TableHeader>
                             <TableRow>
+                                <TableHead className="w-[40px]">
+                                    <input
+                                        type="checkbox"
+                                        className="h-4 w-4 rounded border-gray-300 cursor-pointer"
+                                        checked={filteredUsers.length > 0 && selectedIds.size === filteredUsers.length}
+                                        onChange={toggleSelectAll}
+                                    />
+                                </TableHead>
                                 <TableHead>Name</TableHead>
                                 <TableHead>Email</TableHead>
                                 <TableHead>Role</TableHead>
@@ -205,13 +355,21 @@ export function UsersManagementTab({
                         <TableBody>
                             {filteredUsers.length === 0 ? (
                                 <TableRow>
-                                    <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                                    <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
                                         No users found
                                     </TableCell>
                                 </TableRow>
                             ) : (
                                 filteredUsers.map((user) => (
-                                    <TableRow key={user.id}>
+                                    <TableRow key={user.id} className={selectedIds.has(user.id) ? 'bg-muted/50' : ''}>
+                                        <TableCell>
+                                            <input
+                                                type="checkbox"
+                                                className="h-4 w-4 rounded border-gray-300 cursor-pointer"
+                                                checked={selectedIds.has(user.id)}
+                                                onChange={() => toggleSelect(user.id)}
+                                            />
+                                        </TableCell>
                                         <TableCell className="font-medium">{user.name}</TableCell>
                                         <TableCell className="text-sm">{user.email}</TableCell>
                                         <TableCell>
@@ -298,12 +456,20 @@ export function UsersManagementTab({
                         </div>
                     ) : (
                         filteredUsers.map((user) => (
-                            <div key={user.id} className="border rounded-lg p-4 space-y-3 bg-card">
-                                {/* User Info Header */}
+                            <div key={user.id} className={`border rounded-lg p-4 space-y-3 bg-card ${selectedIds.has(user.id) ? 'bg-muted/50' : ''}`}>
+                                {/* User Info Header with Checkbox */}
                                 <div className="flex items-start justify-between">
-                                    <div>
-                                        <p className="font-medium">{user.name}</p>
-                                        <p className="text-sm text-muted-foreground">{user.email}</p>
+                                    <div className="flex items-start gap-3">
+                                        <input
+                                            type="checkbox"
+                                            className="h-4 w-4 rounded border-gray-300 cursor-pointer mt-1"
+                                            checked={selectedIds.has(user.id)}
+                                            onChange={() => toggleSelect(user.id)}
+                                        />
+                                        <div>
+                                            <p className="font-medium">{user.name}</p>
+                                            <p className="text-sm text-muted-foreground">{user.email}</p>
+                                        </div>
                                     </div>
                                     <Badge variant="outline" className="capitalize">{user.role}</Badge>
                                 </div>
@@ -437,6 +603,6 @@ export function UsersManagementTab({
                 </AlertDialogFooter>
             </AlertDialogContent>
         </AlertDialog>
-    </>
+    </div>
     )
 }
