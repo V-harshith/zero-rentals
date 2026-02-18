@@ -340,7 +340,7 @@ export function AllPropertiesTab() {
 
     return (
         <div className="space-y-4">
-            <div className="flex items-center gap-4">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-4">
                 <div className="relative flex-1">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
@@ -350,10 +350,15 @@ export function AllPropertiesTab() {
                         onChange={(e) => setSearchQuery(e.target.value)}
                     />
                 </div>
-                <div className="text-sm text-muted-foreground">
-                    {totalCount} total properties
+                <div className="flex items-center justify-between sm:justify-end gap-3">
+                    <div className="text-sm text-muted-foreground">
+                        {totalCount} total
+                    </div>
+                    <Button variant="outline" size="sm" onClick={fetchProperties} className="whitespace-nowrap">
+                        <span className="hidden sm:inline">Refresh</span>
+                        <span className="sm:hidden">Reload</span>
+                    </Button>
                 </div>
-                <Button variant="outline" onClick={fetchProperties}>Refresh</Button>
             </div>
 
             {/* Bulk Delete Action Bar */}
@@ -377,30 +382,33 @@ export function AllPropertiesTab() {
                 </div>
             )}
 
-            <Card>
-                <CardContent className="p-0">
-                    <Table>
-                        <TableHeader>
-                        <TableRow>
-                                <TableHead className="w-[40px]">
-                                    <input
-                                        type="checkbox"
-                                        className="h-4 w-4 rounded border-gray-300 cursor-pointer"
-                                        checked={filteredProperties.length > 0 && selectedIds.size === filteredProperties.length}
-                                        onChange={toggleSelectAll}
-                                    />
-                                </TableHead>
-                                <TableHead>Property</TableHead>
-                                <TableHead>Type</TableHead>
-                                <TableHead>Location</TableHead>
-                                <TableHead>Owner</TableHead>
-                                <TableHead>Views</TableHead>
-                                <TableHead>Featured</TableHead>
-                                <TableHead>Verified</TableHead>
-                                <TableHead>Actions</TableHead>
-                            </TableRow>
-                        </TableHeader>
-                        <TableBody>
+            {/* Desktop Table - Hidden on mobile */}
+            <div className="hidden md:block">
+                <Card>
+                    <CardContent className="p-0">
+                        <div className="overflow-x-auto">
+                            <Table>
+                                <TableHeader>
+                                    <TableRow>
+                                        <TableHead className="w-[40px]">
+                                            <input
+                                                type="checkbox"
+                                                className="h-4 w-4 rounded border-gray-300 cursor-pointer"
+                                                checked={filteredProperties.length > 0 && selectedIds.size === filteredProperties.length}
+                                                onChange={toggleSelectAll}
+                                            />
+                                        </TableHead>
+                                        <TableHead>Property</TableHead>
+                                        <TableHead>Type</TableHead>
+                                        <TableHead>Location</TableHead>
+                                        <TableHead>Owner</TableHead>
+                                        <TableHead>Views</TableHead>
+                                        <TableHead>Featured</TableHead>
+                                        <TableHead>Verified</TableHead>
+                                        <TableHead>Actions</TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
                             {loading ? (
                                 <TableRow>
                                     <TableCell colSpan={9} className="h-32 text-center text-muted-foreground">
@@ -521,25 +529,134 @@ export function AllPropertiesTab() {
                             )}
                         </TableBody>
                     </Table>
-                </CardContent>
-            </Card>
+                        </div>
+                    </CardContent>
+                </Card>
+            </div>
+
+            {/* Mobile Card View - Shown only on mobile */}
+            <div className="md:hidden space-y-3">
+                {loading ? (
+                    <Card className="p-8 text-center text-muted-foreground">
+                        <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
+                        Loading properties...
+                    </Card>
+                ) : filteredProperties.length === 0 ? (
+                    <Card className="p-8 text-center text-muted-foreground">
+                        No properties found
+                    </Card>
+                ) : (
+                    filteredProperties.map((property) => (
+                        <Card key={property.id} className={`p-4 ${selectedIds.has(property.id) ? 'bg-muted/50 border-primary' : ''}`}>
+                            <div className="flex items-start gap-3">
+                                <input
+                                    type="checkbox"
+                                    className="h-4 w-4 rounded border-gray-300 cursor-pointer mt-1"
+                                    checked={selectedIds.has(property.id)}
+                                    onChange={() => toggleSelect(property.id)}
+                                />
+                                <div className="flex-1 min-w-0">
+                                    <div className="flex items-start justify-between gap-2">
+                                        <div>
+                                            <h3 className="font-medium text-sm line-clamp-1">{property.title}</h3>
+                                            <p className="text-xs text-muted-foreground">₹{property.price.toLocaleString()} / mo</p>
+                                        </div>
+                                        <Select
+                                            value={property.propertyType}
+                                            onValueChange={(value) => changePropertyType(property.id, value as 'PG' | 'Co-living' | 'Rent')}
+                                            disabled={updatingId === property.id || isCsrfLoading}
+                                        >
+                                            <SelectTrigger className="w-[80px] h-7 text-xs">
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="PG">PG</SelectItem>
+                                                <SelectItem value="Rent">Rent</SelectItem>
+                                                <SelectItem value="Co-living">Co-living</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+
+                                    <div className="mt-2 text-xs text-muted-foreground">
+                                        <div>{property.location?.area || "Unknown Area"}, {property.location?.city || "Unknown City"}</div>
+                                        <div className="mt-1">Owner: {property.owner?.name || 'Unknown'}</div>
+                                    </div>
+
+                                    <div className="flex items-center justify-between mt-3 pt-3 border-t">
+                                        <div className="flex items-center gap-1">
+                                            <Eye className="h-3 w-3 text-muted-foreground" />
+                                            <span className="text-xs">{property.views || 0}</span>
+                                        </div>
+                                        <div className="flex items-center gap-1">
+                                            <Button
+                                                size="sm"
+                                                variant={property.featured ? "default" : "outline"}
+                                                className={`h-8 w-8 p-0 ${property.featured ? "bg-yellow-500 hover:bg-yellow-600 border-yellow-500" : ""}`}
+                                                onClick={() => toggleFeatured(property.id, property.featured)}
+                                                disabled={updatingId === property.id || isCsrfLoading}
+                                            >
+                                                <Star className={`h-3 w-3 ${property.featured ? "fill-white" : ""}`} />
+                                            </Button>
+                                            <Button
+                                                size="sm"
+                                                variant={property.verified ? "secondary" : "outline"}
+                                                className={`h-8 w-8 p-0 ${property.verified ? "bg-blue-100 text-blue-700 hover:bg-blue-200 border-blue-200" : ""}`}
+                                                onClick={() => toggleVerified(property.id, property.verified ?? false)}
+                                                disabled={updatingId === property.id || isCsrfLoading}
+                                            >
+                                                <CheckCircle className={`h-3 w-3 ${property.verified ? "text-blue-700" : ""}`} />
+                                            </Button>
+                                            <Link href={`/property/${property.id}`} target="_blank" onClick={saveState}>
+                                                <Button size="sm" variant="ghost" className="h-8 w-8 p-0">
+                                                    <ExternalLink className="h-3 w-3" />
+                                                </Button>
+                                            </Link>
+                                            <Link href={`/property/edit/${property.id}`} onClick={saveState}>
+                                                <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-blue-600">
+                                                    <Pencil className="h-3 w-3" />
+                                                </Button>
+                                            </Link>
+                                            <Button
+                                                size="sm"
+                                                variant="ghost"
+                                                className="h-8 w-8 p-0 text-destructive"
+                                                onClick={() => deleteProperty(property.id, property.title)}
+                                                disabled={deletingId === property.id || isCsrfLoading}
+                                            >
+                                                {deletingId === property.id ? (
+                                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                                ) : (
+                                                    <Trash2 className="h-3 w-3" />
+                                                )}
+                                            </Button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </Card>
+                    ))
+                )}
+            </div>
 
             {/* Pagination Controls */}
             {totalCount > ITEMS_PER_PAGE && (
-                <div className="flex items-center justify-between">
-                    <div className="text-sm text-muted-foreground">
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+                    <div className="text-sm text-muted-foreground order-2 sm:order-1">
                         Page {currentPage} of {Math.ceil(totalCount / ITEMS_PER_PAGE)}
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 order-1 sm:order-2">
                         <Button
                             variant="outline"
+                            size="sm"
                             onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                             disabled={currentPage === 1 || loading}
                         >
-                            Previous
+                            <span className="hidden sm:inline">Previous</span>
+                            <span className="sm:hidden">Prev</span>
                         </Button>
                         <Button
                             variant="outline"
+                            size="sm"
                             onClick={() => setCurrentPage(p => p + 1)}
                             disabled={currentPage >= Math.ceil(totalCount / ITEMS_PER_PAGE) || loading}
                         >
