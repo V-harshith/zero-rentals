@@ -316,22 +316,22 @@ export function UsersManagementTab({
         <div className="space-y-4">
             {/* Bulk Actions Bar */}
             {selectedIds.size > 0 && (
-                <div className="flex items-center justify-between bg-primary/10 border border-primary/20 rounded-lg px-4 py-3">
-                    <span className="text-sm font-medium text-primary">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between bg-primary/10 border border-primary/20 rounded-lg px-4 py-3 gap-3">
+                    <span className="text-sm font-medium text-primary text-center sm:text-left">
                         {selectedIds.size} user{selectedIds.size === 1 ? '' : 's'} selected
                     </span>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 justify-center sm:justify-end">
                         <Button
                             size="sm"
                             variant="outline"
                             onClick={() => bulkVerify(true)}
                             disabled={bulkVerifying || bulkDeleting}
-                            className="border-blue-500 text-blue-600 hover:bg-blue-50"
+                            className="border-blue-500 text-blue-600 hover:bg-blue-50 flex-1 sm:flex-none"
                         >
                             {bulkVerifying ? (
-                                <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Verifying...</>
+                                <><Loader2 className="h-4 w-4 animate-spin mr-2" /> <span className="hidden sm:inline">Verifying...</span><span className="sm:hidden">...</span></>
                             ) : (
-                                <><UserCheck className="h-4 w-4 mr-2" /> Verify Selected</>
+                                <><UserCheck className="h-4 w-4 mr-2" /> <span className="hidden sm:inline">Verify Selected</span><span className="sm:hidden">Verify</span></>
                             )}
                         </Button>
                         <Button
@@ -339,11 +339,12 @@ export function UsersManagementTab({
                             variant="destructive"
                             onClick={bulkDelete}
                             disabled={bulkDeleting || bulkVerifying || isCsrfLoading}
+                            className="flex-1 sm:flex-none"
                         >
                             {bulkDeleting ? (
-                                <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Deleting...</>
+                                <><Loader2 className="h-4 w-4 animate-spin mr-2" /> <span className="hidden sm:inline">Deleting...</span><span className="sm:hidden">...</span></>
                             ) : (
-                                <><Trash2 className="h-4 w-4 mr-2" /> Delete Selected ({selectedIds.size})</>
+                                <><Trash2 className="h-4 w-4 mr-2" /> <span className="hidden sm:inline">Delete</span><span className="sm:hidden">Del</span> ({selectedIds.size})</>
                             )}
                         </Button>
                     </div>
@@ -358,8 +359,8 @@ export function UsersManagementTab({
             </CardHeader>
             <CardContent>
                 {/* Desktop Table View */}
-                <div className="hidden md:block rounded-md border">
-                    <Table>
+                <div className="hidden md:block rounded-md border overflow-x-auto">
+                    <Table className="min-w-[700px]">
                         <TableHeader>
                             <TableRow>
                                 <TableHead className="w-[40px]">
@@ -477,76 +478,65 @@ export function UsersManagementTab({
                 {/* Mobile Card View */}
                 <div className="md:hidden space-y-3">
                     {filteredUsers.length === 0 ? (
-                        <div className="text-center py-8 text-muted-foreground border rounded-lg">
+                        <Card className="p-8 text-center text-muted-foreground">
                             No users found
-                        </div>
+                        </Card>
                     ) : (
                         filteredUsers.map((user) => (
-                            <div key={user.id} className={`border rounded-lg p-4 space-y-3 bg-card ${selectedIds.has(user.id) ? 'bg-muted/50' : ''}`}>
+                            <Card key={user.id} className={`p-4 ${selectedIds.has(user.id) ? 'bg-muted/50 border-primary' : ''}`}>
                                 {/* User Info Header with Checkbox */}
-                                <div className="flex items-start justify-between">
-                                    <div className="flex items-start gap-3">
-                                        <input
-                                            type="checkbox"
-                                            className="h-4 w-4 rounded border-gray-300 cursor-pointer mt-1"
-                                            checked={selectedIds.has(user.id)}
-                                            onChange={() => toggleSelect(user.id)}
-                                        />
-                                        <div>
-                                            <p className="font-medium">{user.name}</p>
-                                            <p className="text-sm text-muted-foreground">{user.email}</p>
-                                        </div>
+                                <div className="flex items-start gap-3">
+                                    <input
+                                        type="checkbox"
+                                        className="h-4 w-4 rounded border-gray-300 cursor-pointer mt-1"
+                                        checked={selectedIds.has(user.id)}
+                                        onChange={() => toggleSelect(user.id)}
+                                    />
+                                    <div className="flex-1 min-w-0">
+                                        <p className="font-medium text-sm truncate">{user.name}</p>
+                                        <p className="text-xs text-muted-foreground truncate">{user.email}</p>
                                     </div>
-                                    <Badge variant="outline" className="capitalize">{user.role}</Badge>
+                                    <Badge variant="outline" className="capitalize text-xs">
+                                        {user.role}
+                                    </Badge>
                                 </div>
 
-                                {/* Plan Row */}
-                                <div className="flex items-center justify-between py-2 border-t">
-                                    <span className="text-sm text-muted-foreground">Plan:</span>
+                                {/* Plan & Status Row */}
+                                <div className="flex items-center justify-between mt-3 pt-3 border-t">
                                     {user.subscription && isPaidPlan(user.subscription.plan_name) ? (
-                                        <div className="text-right">
+                                        <div className="flex items-center gap-1">
                                             <Badge
                                                 variant="outline"
-                                                className={`${getPlanBadgeColor(user.subscription.plan_name)} font-medium`}
+                                                className={`${getPlanBadgeColor(user.subscription.plan_name)} text-xs`}
                                             >
                                                 <Crown className="h-3 w-3 mr-1" />
                                                 {user.subscription.plan_name}
                                             </Badge>
-                                            <div className="text-xs text-muted-foreground mt-1">
+                                            <span className="text-xs text-muted-foreground">
                                                 {getDaysRemaining(user.subscription.end_date, user.subscription.plan_name)}
-                                            </div>
+                                            </span>
                                         </div>
                                     ) : (
-                                        <Badge variant="outline" className="bg-gray-100 text-gray-600">
+                                        <Badge variant="outline" className="bg-gray-100 text-gray-600 text-xs">
                                             Free
+                                        </Badge>
+                                    )}
+
+                                    {user.verified ? (
+                                        <Badge variant="default" className="bg-green-600 text-xs">
+                                            <CheckCircle className="h-3 w-3 mr-1" />
+                                            Verified
+                                        </Badge>
+                                    ) : (
+                                        <Badge variant="secondary" className="text-xs">
+                                            <XCircle className="h-3 w-3 mr-1" />
+                                            Pending
                                         </Badge>
                                     )}
                                 </div>
 
-                                {/* Verification Row */}
-                                <div className="flex items-center justify-between py-2 border-t border-b">
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-sm text-muted-foreground">Status:</span>
-                                        {user.verified ? (
-                                            <span className="flex items-center gap-1 text-sm text-green-600">
-                                                <CheckCircle className="h-3 w-3" /> Verified
-                                            </span>
-                                        ) : (
-                                            <span className="flex items-center gap-1 text-sm text-red-600">
-                                                <XCircle className="h-3 w-3" /> Unverified
-                                            </span>
-                                        )}
-                                    </div>
-                                    <Badge
-                                        variant={user.verified ? 'default' : 'secondary'}
-                                        className={user.verified ? 'bg-green-600' : ''}
-                                    >
-                                        {user.verified ? 'Verified' : 'Pending'}
-                                    </Badge>
-                                </div>
-
                                 {/* Action Buttons */}
-                                <div className="flex flex-wrap gap-2">
+                                <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t">
                                     {/* Verify */}
                                     {!user.verified && (
                                         <Button
@@ -574,16 +564,18 @@ export function UsersManagementTab({
                                             variant="destructive"
                                             onClick={() => handleDeleteUser(user)}
                                             disabled={updatingUserId === user.id || deletingUserId === user.id}
+                                            className="flex-1"
                                         >
                                             {deletingUserId === user.id ? (
-                                                <Loader2 className="h-3 w-3 animate-spin" />
+                                                <Loader2 className="h-3 w-3 animate-spin mr-1" />
                                             ) : (
-                                                <Trash2 className="h-3 w-3" />
+                                                <Trash2 className="h-3 w-3 mr-1" />
                                             )}
+                                            Delete
                                         </Button>
                                     )}
                                 </div>
-                            </div>
+                            </Card>
                         ))
                     )}
                 </div>
