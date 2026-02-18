@@ -145,9 +145,10 @@ export async function POST(
                 }
 
                 // Verify job exists and belongs to admin
+                // Also fetch existing images_by_psn to MERGE with new batch (not overwrite)
                 const { data: job } = await supabaseAdmin
                     .from("bulk_import_jobs")
-                    .select("id, status, parsed_properties, admin_id")
+                    .select("id, status, parsed_properties, admin_id, images_by_psn, orphaned_images, total_images")
                     .eq("id", jobId)
                     .single()
 
@@ -467,42 +468,66 @@ export async function POST(
                 }
 
                 // Prepare images_by_psn for job record
+                // CRITICAL: Merge with existing images from previous batches (don't overwrite!)
+                const existingImagesByPSN = (job.images_by_psn as Record<string, any[]>) || {}
                 const imagesByPSNForDB: Record<string, any[]> = {}
+
+                // First, copy existing images
+                for (const [psn, images] of Object.entries(existingImagesByPSN)) {
+                    imagesByPSNForDB[psn] = [...images] // Clone array
+                }
+
+                // Then, merge new images
                 for (const [psn, images] of Object.entries(uploadedImages)) {
-                    imagesByPSNForDB[psn] = images.map(img => ({
+                    if (!imagesByPSNForDB[psn]) imagesByPSNForDB[psn] = []
+                    imagesByPSNForDB[psn].push(...images.map(img => ({
                         filename: img.filename,
                         storage_path: img.storage_path,
                         public_url: img.public_url,
-                    }))
+                    })))
                 }
 
-                // Update job
+                // Merge orphaned images with existing
+                const existingOrphaned = (job.orphaned_images as any[]) || []
+                const mergedOrphaned = [...existingOrphaned, ...orphanedImages.map(img => ({
+                    filename: img.filename,
+                    extracted_psn: img.extracted_psn,
+                }))]
+
+                // Calculate total images across all batches
+                const existingTotal = job.total_images || 0
+                const newTotal = existingTotal + processedCount
+
+                // Update job with MERGED data (don't overwrite previous batches!)
                 await supabaseAdmin
                     .from("bulk_import_jobs")
                     .update({
                         status: "images_uploaded",
                         step: "review",
-                        total_images: processedCount,
+                        total_images: newTotal,
                         images_by_psn: imagesByPSNForDB,
-                        orphaned_images: orphanedImages.map(img => ({
-                            filename: img.filename,
-                            extracted_psn: img.extracted_psn,
-                        })),
+                        orphaned_images: mergedOrphaned,
                         images_uploaded_at: new Date().toISOString(),
                     })
                     .eq("id", jobId)
 
-                // Log audit
+                // Log audit with cumulative counts
+                const existingMatchedPsnCount = Object.keys(existingImagesByPSN).length
+                const newMatchedPsnCount = Object.keys(imagesByPSNForDB).length
                 await supabaseAdmin.from("bulk_import_audit_log").insert({
                     job_id: jobId,
                     admin_id: authUser.id,
                     action: "images_uploaded",
                     details: {
-                        total_files: validIndices.length,
-                        valid_images: processedCount,
-                        failed_uploads: failedCount,
-                        orphaned_images: orphanedImages.length,
-                        matched_psns: Object.keys(uploadedImages).length,
+                        batch_files: validIndices.length,
+                        batch_valid_images: processedCount,
+                        batch_failed_uploads: failedCount,
+                        batch_orphaned_images: orphanedImages.length,
+                        batch_matched_psns: Object.keys(uploadedImages).length,
+                        cumulative_total_images: newTotal,
+                        cumulative_matched_psns: newMatchedPsnCount,
+                        cumulative_orphaned_images: mergedOrphaned.length,
+                        is_batch: true,
                     },
                 })
 
