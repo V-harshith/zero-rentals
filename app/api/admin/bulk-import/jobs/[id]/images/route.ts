@@ -189,14 +189,25 @@ export async function POST(
                 const formData = await request.formData()
                 const files: File[] = []
 
+                // CRITICAL FIX: Build path map from separate path fields
+                const pathMap = new Map<number, string>()
+                for (const [key, value] of formData.entries()) {
+                    if (key.startsWith('path_')) {
+                        const index = parseInt(key.replace('path_', ''))
+                        pathMap.set(index, value as string)
+                        console.log(`[Image Upload] Path map: index ${index} -> "${value}"`)
+                    }
+                }
+
                 // Get all files from form data
                 console.log(`[Image Upload] Parsing form data entries...`)
                 const invalidFiles: string[] = []
                 const validationPromises: Promise<void>[] = []
+                let fileIndex = 0
 
                 for (const [key, value] of formData.entries()) {
                     console.log(`[Image Upload] Form entry: key="${key}", type="${value instanceof File ? 'File' : typeof value}"`)
-                    if (value instanceof File) {
+                    if (value instanceof File && key === 'images') {
                         console.log(`[Image Upload] File details: name="${value.name}", type="${value.type}", size=${value.size}, webkitRelativePath="${(value as any).webkitRelativePath || 'N/A'}"`)
                         if (value.type.startsWith('image/')) {
                             // Validate file using magic numbers (async)
@@ -259,10 +270,11 @@ export async function POST(
 
                 console.log(`[Image Upload] Starting PSN extraction for ${files.length} files...`)
 
-                for (const file of files) {
-                    // Get relative path from webkitRelativePath
-                    const relativePath = (file as any).webkitRelativePath || file.name
-                    console.log(`[Image Upload] Processing file: "${file.name}", relativePath: "${relativePath}"`)
+                for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
+                    const file = files[fileIndex]
+                    // CRITICAL FIX: Use path from pathMap instead of webkitRelativePath (which is NOT transmitted)
+                    const relativePath = pathMap.get(fileIndex) || file.name
+                    console.log(`[Image Upload] Processing file: "${file.name}", relativePath: "${relativePath}" (from pathMap: ${pathMap.has(fileIndex)})`)
                     const psn = extractPSNFromPath(relativePath)
 
                     if (!psn) {
@@ -279,11 +291,15 @@ export async function POST(
                         mime_type: file.type,
                     }
 
-                    console.log(`[Image Upload] File "${file.name}" -> PSN "${psn}", expected: ${expectedPSNs.includes(psn)}`)
+                    // CRITICAL FIX: Normalize both sides to strings and trim
+                    const normalizedPsn = String(psn).trim()
+                    const normalizedExpectedPSNs = expectedPSNs.map((p: string) => String(p).trim())
+                    const isMatched = normalizedExpectedPSNs.includes(normalizedPsn)
+                    console.log(`[Image Upload] File "${file.name}" -> PSN "${normalizedPsn}", expected: ${isMatched} (in [${normalizedExpectedPSNs.join(', ')}])`)
 
-                    if (expectedPSNs.includes(psn)) {
-                        if (!imagesByPSN[psn]) imagesByPSN[psn] = []
-                        imagesByPSN[psn].push({ ...imageInfo, file })
+                    if (isMatched) {
+                        if (!imagesByPSN[normalizedPsn]) imagesByPSN[normalizedPsn] = []
+                        imagesByPSN[normalizedPsn].push({ ...imageInfo, file })
                     } else {
                         orphanedImages.push(imageInfo)
                     }

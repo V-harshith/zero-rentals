@@ -360,8 +360,10 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
 
                 batch.forEach((file, index) => {
                     const path = (file as any).webkitRelativePath || file.name
-                    console.log(`[Upload] Batch ${batchIndex + 1}: Appending file ${index + 1}: "${file.name}", path: "${path}"`)
+                    console.log(`[Upload DEBUG] Batch ${batchIndex + 1}: File ${index + 1}: name="${file.name}", webkitRelativePath="${(file as any).webkitRelativePath || 'N/A'}"`)
                     formData.append("images", file)
+                    // CRITICAL FIX: Send path as separate field since webkitRelativePath is NOT transmitted via FormData
+                    formData.append(`path_${index}`, path)
                 })
 
                 const res = await secureFetch(`/api/admin/bulk-import/jobs/${jobId}/images`, {

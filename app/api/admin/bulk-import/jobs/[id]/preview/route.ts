@@ -40,9 +40,15 @@ export async function GET(
 
         // Parse data
         const properties = (job.parsed_properties as any[]) || []
-        const imagesByPSN = (job.images_by_psn as Record<string, any[]>) || {}
+        const rawImagesByPSN = (job.images_by_psn as Record<string, any[]>) || {}
         const orphanedImages = (job.orphaned_images as any[]) || []
         const newOwners = (job.new_owners as any[]) || []
+
+        // CRITICAL FIX: Normalize all images_by_psn keys to strings (PostgreSQL JSONB may coerce numeric strings)
+        const imagesByPSN: Record<string, any[]> = {}
+        for (const [key, value] of Object.entries(rawImagesByPSN)) {
+            imagesByPSN[String(key).trim()] = value
+        }
 
         console.log(`[Preview API] Data parsed:`, {
             properties_count: properties.length,
