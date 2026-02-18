@@ -165,7 +165,7 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
                 const options: CompressionOptions = {
                     maxSizeMB: fileSizeMB > 2 ? 2 : Math.max(0.5, fileSizeMB * 0.7),
                     maxWidthOrHeight: 1920,
-                    useWebWorker: true,
+                    useWebWorker: false, // Disabled to avoid CSP blob: script-src errors
                     fileType: 'image/jpeg',
                 }
 
