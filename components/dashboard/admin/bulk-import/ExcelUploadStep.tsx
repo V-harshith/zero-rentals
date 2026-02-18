@@ -81,10 +81,17 @@ export function ExcelUploadStep({ jobId, onComplete, onCancel }: ExcelUploadStep
             const existingOwners = data.existing_owners || 0
             const errors = data.errors || []
 
-            if (data.valid_properties > 0) {
+            if (errors.length > 0) {
+                // Block proceeding if there are validation errors
+                toast.error(`Excel has ${errors.length} error${errors.length === 1 ? '' : 's'}`, {
+                    description: "Please fix the errors and re-upload the file",
+                    duration: 8000,
+                })
+                setCanProceed(false)
+            } else if (data.valid_properties > 0) {
                 // Detailed success notification
                 toast.success(`Excel parsed: ${data.valid_properties} valid properties`, {
-                    description: `${newOwners} new owners, ${existingOwners} existing accounts` + (errors.length > 0 ? `, ${errors.length} errors` : ''),
+                    description: `${newOwners} new owners, ${existingOwners} existing accounts`,
                 })
 
                 // Show PSN list for verification
