@@ -413,7 +413,40 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
 
                     while (true) {
                         const { done, value } = await reader.read()
-                        if (done) break
+
+                        if (done) {
+                            // Process any remaining data in buffer
+                            if (buffer.trim()) {
+                                try {
+                                    const data = JSON.parse(buffer.trim()) as {
+                                        error?: string
+                                        progress?: number
+                                        status?: string
+                                        completed?: boolean
+                                        total_images?: number
+                                        matched_psns?: number
+                                        orphaned_images?: number
+                                        failed_uploads?: number
+                                        unmatched_psns?: string[]
+                                    }
+                                    if (data.progress === 100 || data.completed) {
+                                        allResults.push({
+                                            total_images: data.total_images || totalUploaded,
+                                            matched_psns: data.matched_psns || 0,
+                                            orphaned_images: data.orphaned_images || 0,
+                                            failed_uploads: data.failed_uploads || 0,
+                                            unmatched_psns: data.unmatched_psns || [],
+                                            completed: true,
+                                            progress: 100,
+                                            status: data.status || "Images uploaded successfully"
+                                        })
+                                    }
+                                } catch {
+                                    // Ignore parse errors on final buffer
+                                }
+                            }
+                            break
+                        }
 
                         buffer += decoder.decode(value, { stream: true })
                         const lines = buffer.split("\n")
@@ -452,8 +485,9 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
                                 }
 
                                 if (data.completed || data.progress === 100) {
-                                    const result: ImageUploadResult = {
-                                        total_images: data.total_images || batch.length,
+                                    // Server sends aggregate data in final response - use it directly
+                                    allResults.push({
+                                        total_images: data.total_images || totalUploaded,
                                         matched_psns: data.matched_psns || 0,
                                         orphaned_images: data.orphaned_images || 0,
                                         failed_uploads: data.failed_uploads || 0,
@@ -461,9 +495,7 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
                                         completed: true,
                                         progress: 100,
                                         status: data.status || "Images uploaded successfully"
-                                    }
-                                    allResults.push(result)
-                                    totalUploaded += data.total_images || batch.length
+                                    })
                                 }
                             } catch (parseError: unknown) {
                                 const errorMessage = parseError instanceof Error ? parseError.message : String(parseError)

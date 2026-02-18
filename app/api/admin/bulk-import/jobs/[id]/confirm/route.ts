@@ -401,8 +401,15 @@ export async function POST(
                     return
                 }
 
-                if (job.status !== "images_uploaded" && job.status !== "ready") {
-                    send({ error: "Job is not ready for import" })
+                // Allow import if job has parsed properties (excel uploaded)
+                // Status could be: excel_parsed, images_uploaded, ready, etc.
+                const canImport = job.status === "excel_parsed" ||
+                                  job.status === "images_uploaded" ||
+                                  job.status === "ready" ||
+                                  job.status === "preview_ready"
+
+                if (!canImport) {
+                    send({ error: `Job status "${job.status}" is not ready for import. Please upload Excel and images first.` })
                     controller.close()
                     return
                 }

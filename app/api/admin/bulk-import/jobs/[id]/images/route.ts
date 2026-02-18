@@ -504,14 +504,18 @@ export async function POST(
                     }
                 }
 
+                // Calculate cumulative totals across all batches
+                const cumulativeTotal = (job.total_images || 0) + processedCount
+                const cumulativeMatchedPSNs = Object.keys(existingImagesByPSN).length + Object.keys(uploadedImages).length
+
                 send({
                     status: "Images uploaded successfully",
                     progress: 100,
-                    total_images: processedCount,
+                    total_images: cumulativeTotal, // Cumulative total across all batches
                     failed_uploads: failedCount,
                     orphaned_images: orphanedImages.length,
-                    matched_psns: Object.keys(uploadedImages).length,
-                    unmatched_psns: expectedPSNs.filter(psn => !uploadedImages[psn]),
+                    matched_psns: cumulativeMatchedPSNs, // Cumulative matched PSNs
+                    unmatched_psns: expectedPSNs.filter(psn => !uploadedImages[psn] && !existingImagesByPSN[psn]),
                     failed_files: failedUploads,
                     invalid_files: [...invalidFiles, ...unmatchedFiles].slice(0, 20),
                     validation_errors: invalidFiles.length > 0 ? invalidFiles.slice(0, 10) : undefined,
