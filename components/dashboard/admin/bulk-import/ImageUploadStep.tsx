@@ -422,9 +422,19 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
                         for (const line of lines) {
                             if (!line.trim()) continue
 
-                            let data: { error?: string; progress?: number; status?: string; completed?: boolean; total_images?: number }
+                            let data: {
+                                error?: string
+                                progress?: number
+                                status?: string
+                                completed?: boolean
+                                total_images?: number
+                                matched_psns?: number
+                                orphaned_images?: number
+                                failed_uploads?: number
+                                unmatched_psns?: string[]
+                            }
                             try {
-                                data = JSON.parse(line) as { error?: string; progress?: number; status?: string; completed?: boolean; total_images?: number }
+                                data = JSON.parse(line) as typeof data
 
                                 if (data.error) {
                                     throw new Error(data.error)
@@ -444,9 +454,10 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
                                 if (data.completed || data.progress === 100) {
                                     const result: ImageUploadResult = {
                                         total_images: data.total_images || batch.length,
-                                        matched_psns: 0,
-                                        orphaned_images: 0,
-                                        failed_uploads: 0,
+                                        matched_psns: data.matched_psns || 0,
+                                        orphaned_images: data.orphaned_images || 0,
+                                        failed_uploads: data.failed_uploads || 0,
+                                        unmatched_psns: data.unmatched_psns || [],
                                         completed: true,
                                         progress: 100,
                                         status: data.status || "Images uploaded successfully"
@@ -467,23 +478,13 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
                 }
             }
 
-            // All batches completed
-            // Calculate PSN info from files (avoid stale closure)
-            const uploadedPsnInfo = filesToUpload.reduce((acc, file) => {
-                const path = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name
-                const parts = path.split(/[/\\]/)
-                const psn = parts.length >= 2 ? parts[parts.length - 2] : null
-                if (psn && /^\d+$/.test(psn)) {
-                    acc[psn] = (acc[psn] || 0) + 1
-                }
-                return acc
-            }, {} as Record<string, number>)
-
+            // All batches completed - use server's final result
             const lastResult = allResults[allResults.length - 1]
-            const finalResult = lastResult || {
+            // Server returns aggregate data in the final response
+            const finalResult: ImageUploadResult = lastResult || {
                 total_images: totalUploaded,
                 failed_uploads: totalFailed,
-                matched_psns: Object.keys(uploadedPsnInfo).length,
+                matched_psns: 0,
                 orphaned_images: 0,
                 completed: true,
                 progress: 100,
