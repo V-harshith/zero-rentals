@@ -134,32 +134,36 @@ export function BulkUploadTab() {
                     </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                    <div className="flex items-start gap-4">
-                        <div className="flex-1">
+                    <div className="flex flex-col sm:flex-row items-start gap-4">
+                        <div className="flex-1 min-w-0">
                             <p className="text-sm text-muted-foreground mb-3">
                                 Import properties with images in one seamless workflow. Upload your Excel file
                                 and image folders organized by PSN. The system will automatically match
                                 images to properties and create owner accounts.
                             </p>
                             <div className="flex flex-wrap gap-2 mb-4">
-                                <Badge variant="outline" className="gap-1">
+                                <Badge variant="outline" className="gap-1 text-xs">
                                     <FileSpreadsheet className="h-3 w-3" />
-                                    Excel Upload
+                                    <span className="hidden sm:inline">Excel Upload</span>
+                                    <span className="sm:hidden">Excel</span>
                                 </Badge>
-                                <Badge variant="outline" className="gap-1">
+                                <Badge variant="outline" className="gap-1 text-xs">
                                     <Images className="h-3 w-3" />
-                                    Image Folders
+                                    <span className="hidden sm:inline">Image Folders</span>
+                                    <span className="sm:hidden">Images</span>
                                 </Badge>
-                                <Badge variant="outline" className="gap-1">
+                                <Badge variant="outline" className="gap-1 text-xs">
                                     <Users className="h-3 w-3" />
-                                    Auto-Create Owners
+                                    <span className="hidden sm:inline">Auto-Create Owners</span>
+                                    <span className="sm:hidden">Owners</span>
                                 </Badge>
                             </div>
                         </div>
                     </div>
                     <Link href="/dashboard/admin/bulk-import">
                         <Button className="w-full gap-2 bg-blue-600 hover:bg-blue-700">
-                            Launch Unified Import Wizard
+                            <span className="hidden sm:inline">Launch Unified Import Wizard</span>
+                            <span className="sm:hidden">Launch Import</span>
                             <ArrowRight className="h-4 w-4" />
                         </Button>
                     </Link>
@@ -196,11 +200,11 @@ export function BulkUploadTab() {
                                 <div key={item.id} className="rounded-lg border hover:bg-muted/50 transition-colors">
                                     <button
                                         onClick={() => toggleDetail(item.id)}
-                                        className="w-full flex items-center justify-between p-3 text-left"
+                                        className="w-full flex flex-col sm:flex-row sm:items-center justify-between p-3 text-left gap-2 sm:gap-3"
                                     >
                                         <div className="flex items-center gap-3 min-w-0">
                                             <FileSpreadsheet className="h-5 w-5 text-muted-foreground shrink-0" />
-                                            <div className="min-w-0">
+                                            <div className="min-w-0 flex-1">
                                                 <p className="font-medium text-sm truncate">{item.file_name}</p>
                                                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                                                     <Clock className="h-3 w-3" />
@@ -215,7 +219,7 @@ export function BulkUploadTab() {
                                             </div>
                                         </div>
 
-                                        <div className="flex items-center gap-3 shrink-0">
+                                        <div className="flex items-center gap-2 sm:gap-3 shrink-0 justify-between sm:justify-end w-full sm:w-auto">
                                             <div className="text-right text-xs">
                                                 <span className="text-green-600 font-medium">{item.success_count}</span>
                                                 <span className="text-muted-foreground"> / </span>
@@ -224,22 +228,24 @@ export function BulkUploadTab() {
                                                     <span className="text-red-600 ml-1">({item.failed_count} failed)</span>
                                                 )}
                                             </div>
-                                            {item.new_owners_count > 0 && (
-                                                <Badge variant="outline" className="text-xs gap-1">
-                                                    <Users className="h-3 w-3" />
-                                                    {item.new_owners_count}
+                                            <div className="flex items-center gap-2">
+                                                {item.new_owners_count > 0 && (
+                                                    <Badge variant="outline" className="text-xs gap-1">
+                                                        <Users className="h-3 w-3" />
+                                                        {item.new_owners_count}
+                                                    </Badge>
+                                                )}
+                                                <Badge
+                                                    variant={
+                                                        item.status === 'completed' ? 'default' :
+                                                        item.status === 'processing' ? 'secondary' : 'destructive'
+                                                    }
+                                                    className="text-xs"
+                                                >
+                                                    {item.status}
                                                 </Badge>
-                                            )}
-                                            <Badge
-                                                variant={
-                                                    item.status === 'completed' ? 'default' :
-                                                    item.status === 'processing' ? 'secondary' : 'destructive'
-                                                }
-                                                className="text-xs"
-                                            >
-                                                {item.status}
-                                            </Badge>
-                                            <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${expandedId === item.id ? 'rotate-180' : ''}`} />
+                                                <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${expandedId === item.id ? 'rotate-180' : ''}`} />
+                                            </div>
                                         </div>
                                     </button>
 
@@ -254,21 +260,21 @@ export function BulkUploadTab() {
                                             ) : uploadDetail ? (
                                                 <div className="pt-3 space-y-3">
                                                     {/* Stats Row */}
-                                                    <div className="grid grid-cols-4 gap-2">
+                                                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                                                         <div className="text-center p-2 bg-blue-50 rounded">
-                                                            <p className="text-lg font-bold">{uploadDetail.total_rows}</p>
+                                                            <p className="text-base sm:text-lg font-bold">{uploadDetail.total_rows}</p>
                                                             <p className="text-xs text-muted-foreground">Total</p>
                                                         </div>
                                                         <div className="text-center p-2 bg-green-50 rounded">
-                                                            <p className="text-lg font-bold text-green-600">{uploadDetail.success_count}</p>
+                                                            <p className="text-base sm:text-lg font-bold text-green-600">{uploadDetail.success_count}</p>
                                                             <p className="text-xs text-muted-foreground">Success</p>
                                                         </div>
                                                         <div className="text-center p-2 bg-red-50 rounded">
-                                                            <p className="text-lg font-bold text-red-600">{uploadDetail.failed_count}</p>
+                                                            <p className="text-base sm:text-lg font-bold text-red-600">{uploadDetail.failed_count}</p>
                                                             <p className="text-xs text-muted-foreground">Failed</p>
                                                         </div>
                                                         <div className="text-center p-2 bg-purple-50 rounded">
-                                                            <p className="text-lg font-bold text-purple-600">{uploadDetail.new_owners_count}</p>
+                                                            <p className="text-base sm:text-lg font-bold text-purple-600">{uploadDetail.new_owners_count}</p>
                                                             <p className="text-xs text-muted-foreground">New Owners</p>
                                                         </div>
                                                     </div>
@@ -304,15 +310,16 @@ export function BulkUploadTab() {
                                                     )}
 
                                                     {/* Action Buttons */}
-                                                    <div className="flex gap-2">
+                                                    <div className="flex flex-col sm:flex-row gap-2">
                                                         {uploadDetail.credentials_count > 0 && (
                                                             <Button
                                                                 size="sm"
                                                                 onClick={() => downloadPastCredentials(uploadDetail.id)}
-                                                                className="gap-1 bg-green-600 hover:bg-green-700 text-white text-xs"
+                                                                className="gap-1 bg-green-600 hover:bg-green-700 text-white text-xs w-full sm:w-auto"
                                                             >
                                                                 <Key className="h-3 w-3" />
-                                                                Download {uploadDetail.credentials_count} Credentials
+                                                                <span className="hidden sm:inline">Download {uploadDetail.credentials_count} Credentials</span>
+                                                                <span className="sm:hidden">Download {uploadDetail.credentials_count} Creds</span>
                                                             </Button>
                                                         )}
                                                     </div>
