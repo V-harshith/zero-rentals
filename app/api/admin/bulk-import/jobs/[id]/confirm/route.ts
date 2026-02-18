@@ -339,7 +339,9 @@ async function createPropertyAtomically(
 
     try {
         // Get images for this property
-        const propertyImages = imagesByPSN[prop.psn] || []
+        // CRITICAL: Normalize PSN to string for lookup (Excel may parse as number)
+        const psnKey = String(prop.psn)
+        const propertyImages = imagesByPSN[psnKey] || []
         const imageUrls = propertyImages.map((img: any) => img.public_url)
 
         // Build property data
@@ -382,7 +384,7 @@ async function createPropertyAtomically(
                 .from('bulk_import_staged_images')
                 .update({ status: 'assigned', processed_at: new Date().toISOString() })
                 .eq('job_id', jobId)
-                .eq('extracted_psn', prop.psn)
+                .eq('extracted_psn', psnKey)
         }
 
         // Track in transaction context

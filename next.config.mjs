@@ -21,13 +21,6 @@ const nextConfig = {
   compress: true,
   // Enable React strict mode for better development
   reactStrictMode: true,
-  // API Routes Configuration
-  api: {
-    bodyParser: {
-      sizeLimit: '15mb',
-    },
-    responseLimit: '15mb',
-  },
   // Experimental features for better performance
   experimental: {
     optimizeCss: true,

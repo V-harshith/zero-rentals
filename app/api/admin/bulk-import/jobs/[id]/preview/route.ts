@@ -53,7 +53,9 @@ export async function GET(
 
         // Build property preview
         const propertyPreviews = properties.map(prop => {
-            const images = imagesByPSN[prop.psn] || []
+            // CRITICAL: Normalize PSN to string for lookup (Excel may parse as number)
+            const psnKey = String(prop.psn)
+            const images = imagesByPSN[psnKey] || []
             const isNewOwner = newOwners.some(o => o.email === prop.owner_email)
 
             return {

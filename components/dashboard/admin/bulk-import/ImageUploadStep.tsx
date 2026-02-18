@@ -459,6 +459,20 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
             }
 
             // All batches completed
+            const finalResult = allResults[allResults.length - 1] || {
+                total_images: totalUploaded,
+                failed_uploads: totalFailed,
+                matched_psns: Object.keys(psnInfo).length,
+                orphaned_images: 0,
+                completed: true,
+                progress: 100,
+                status: "Images uploaded successfully"
+            }
+
+            setResult(finalResult)
+            setUploadComplete(true)
+            setProgress(100)
+
             if (totalUploaded > 0) {
                 toast.success(`Successfully uploaded ${totalUploaded} images`)
             }
