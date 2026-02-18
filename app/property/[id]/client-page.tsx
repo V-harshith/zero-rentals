@@ -114,6 +114,17 @@ export default function PropertyClientPage({ id, initialProperty }: { id: string
     useEffect(() => {
         async function trackView() {
             try {
+                // Client-side bot detection: Skip tracking for known bots
+                const userAgent = navigator.userAgent.toLowerCase()
+                const botPatterns = [
+                    'bot', 'crawler', 'spider', 'scrape', 'curl', 'wget',
+                    'python', 'java', 'scrapy', 'headless', 'phantomjs'
+                ]
+                const isBot = botPatterns.some(pattern => userAgent.includes(pattern))
+                if (isBot) {
+                    return // Don't track bot views
+                }
+
                 // Client-side deduplication: Check if we already viewed this property recently
                 const viewedKey = `viewed_${id}`
                 const lastViewed = sessionStorage.getItem(viewedKey)
@@ -140,7 +151,22 @@ export default function PropertyClientPage({ id, initialProperty }: { id: string
                     // Expire after 24 hours (done by date in key)
                 }
 
-                await fetch(`/api/properties/${id}/view`, { method: 'POST' })
+                // Determine view source from referrer
+                let viewSource = 'direct'
+                const referrer = document.referrer
+                if (referrer) {
+                    if (referrer.includes('/search')) viewSource = 'search'
+                    else if (referrer.includes('/featured')) viewSource = 'featured'
+                    else if (referrer.includes('/pg') || referrer.includes('/co-living') || referrer.includes('/rent')) viewSource = 'category'
+                    else if (referrer.includes(window.location.host)) viewSource = 'internal'
+                    else viewSource = 'external'
+                }
+
+                await fetch(`/api/properties/${id}/view`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ viewSource })
+                })
             } catch {
                 // Silently fail - don't break UX if view tracking fails
             }

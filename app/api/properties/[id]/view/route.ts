@@ -52,17 +52,22 @@ export async function POST(
             return NextResponse.json({ success: true, tracked: false, reason: 'owner_view' })
         }
 
+        // Parse request body for view source (from client-side tracking)
+        let viewSource = 'direct'
+        try {
+            const body = await request.json()
+            if (body.viewSource) {
+                viewSource = body.viewSource
+            }
+        } catch {
+            // No body or invalid JSON - use default
+        }
+
         // Generate session ID for anonymous tracking
         const sessionId = generateSessionId(request)
         const ipHash = hashIp(request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || '')
         const userAgent = request.headers.get('user-agent') || ''
         const referrer = request.headers.get('referer') || ''
-
-        // Determine view source from referrer
-        let viewSource = 'direct'
-        if (referrer.includes('/search')) viewSource = 'search'
-        else if (referrer.includes('/featured')) viewSource = 'featured'
-        else if (referrer.includes('/pg') || referrer.includes('/co-living') || referrer.includes('/rent')) viewSource = 'category'
 
         // Use the secure tracking function
         const { data: result, error } = await supabase.rpc('track_property_view', {

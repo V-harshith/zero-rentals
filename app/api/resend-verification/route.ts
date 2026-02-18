@@ -1,14 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 import { generateVerificationToken, getTokenExpiry } from '@/lib/verification-utils'
 import { sendVerificationEmail } from '@/lib/email-service'
 import { rateLimit } from '@/lib/rate-limit'
-
-// Use service role key for admin operations
-const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
 
 export async function POST(request: NextRequest) {
     try {
@@ -31,7 +25,7 @@ export async function POST(request: NextRequest) {
         }
 
         // Find user
-        const { data: user, error } = await supabase
+        const { data: user, error } = await supabaseAdmin
             .from('users')
             .select('id, email, name, role, email_verified_at')
             .eq('email', email)
@@ -58,7 +52,7 @@ export async function POST(request: NextRequest) {
         const tokenExpiresAt = getTokenExpiry()
 
         // Update user with new token
-        const { error: updateError } = await supabase
+        const { error: updateError } = await supabaseAdmin
             .from('users')
             .update({
                 verification_token: verificationToken,

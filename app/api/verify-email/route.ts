@@ -1,12 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 import { isTokenExpired } from '@/lib/verification-utils'
-
-// Use service role key for admin operations
-const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
 
 export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams
@@ -20,7 +14,7 @@ export async function GET(request: NextRequest) {
 
     try {
         // Find user with this token
-        const { data: user, error } = await supabase
+        const { data: user, error } = await supabaseAdmin
             .from('users')
             .select('id, email, name, role, token_expires_at, email_verified_at')
             .eq('verification_token', token)
@@ -62,7 +56,7 @@ export async function GET(request: NextRequest) {
         }
 
         // CRITICAL: Update Supabase Auth status so they can actually login
-        const { error: authError } = await supabase.auth.admin.updateUserById(
+        const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(
             user.id,
             { email_confirm: true }
         )
@@ -73,7 +67,7 @@ export async function GET(request: NextRequest) {
         }
 
         // Mark as verified
-        const { error: updateError } = await supabase
+        const { error: updateError } = await supabaseAdmin
             .from('users')
             .update({
                 verified: true,

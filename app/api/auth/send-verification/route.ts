@@ -1,11 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 import crypto from 'crypto'
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
 
 // Rate limiting store (in production, use Redis)
 const rateLimitStore = new Map<string, { count: number; resetAt: number }>()
@@ -54,7 +49,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if user exists
-    const { data: user, error: userError } = await supabase
+    const { data: user, error: userError } = await supabaseAdmin
       .from('users')
       .select('id, email_verified_at')
       .eq('email', email)
@@ -83,7 +78,7 @@ export async function POST(request: NextRequest) {
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000) // 24 hours
 
     // Update user with new token
-    const { error: updateError } = await supabase
+    const { error: updateError } = await supabaseAdmin
       .from('users')
       .update({
         verification_token: token,

@@ -100,19 +100,10 @@ export async function GET(
       return new NextResponse(null, { status: 304, headers: { ETag: etag } })
     }
 
-    // Track view with deduplication and rate limiting
-    const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
-               request.headers.get('x-real-ip') ??
-               'unknown'
-    const viewKey = `property:view:${ip}:${id}`
-
-    // Rate limit: 1 view per IP per property per hour
-    const viewRateLimit = await rateLimit(viewKey, 1, 60 * 60 * 1000)
-
-    if (viewRateLimit.success) {
-      // Use atomic increment RPC to avoid race conditions
-      await supabase.rpc('increment_property_views', { property_id: id })
-    }
+    // Note: View tracking is handled exclusively by POST /api/properties/[id]/view
+    // which uses the comprehensive track_property_view() function with bot detection,
+    // rate limiting, and session tracking. This prevents dual tracking mechanisms
+    // and ensures consistent view counting.
 
     return NextResponse.json({ data }, { headers: { ETag: etag } })
   } catch {
