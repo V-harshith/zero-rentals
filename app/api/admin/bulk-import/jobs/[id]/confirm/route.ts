@@ -99,13 +99,27 @@ async function processOwnerBatches(
     let criticalFailure = false
     let ownersFailedCount = 0
 
+    logger.info("Starting owner batch processing", {
+        jobId,
+        totalOwners: newOwnersFromExcel.length,
+        batchCount: ownerBatches.length,
+        batchSize: 3,
+    })
+
     for (let batchIndex = 0; batchIndex < ownerBatches.length; batchIndex++) {
         const batch = ownerBatches[batchIndex]
         const batchOwnersCreated: string[] = []
         let batchFailed = false
 
+        logger.info(`Processing owner batch ${batchIndex + 1}/${ownerBatches.length}`, {
+            jobId,
+            batchIndex,
+            batchSize: batch.length,
+        })
+
         for (let itemIndex = 0; itemIndex < batch.length; itemIndex++) {
             const ownerData = batch[itemIndex]
+
             const result = await createOwnerWithSubscriptionAtomically(
                 ownerData,
                 jobId,
@@ -114,6 +128,14 @@ async function processOwnerBatches(
                 batchIndex,
                 itemIndex
             )
+
+            logger.info(`Owner creation result for ${ownerData.email}`, {
+                jobId,
+                success: result.success,
+                userId: result.userId,
+                alreadyExists: result.alreadyExists,
+                error: result.error,
+            })
 
             if (result.success && result.userId) {
                 batchOwnersCreated.push(result.userId)
@@ -171,6 +193,12 @@ async function processOwnerBatches(
             throw new Error(`Critical failure in owner creation batch ${batchIndex + 1}. Import aborted.`)
         }
     }
+
+    logger.info("Owner batch processing completed", {
+        jobId,
+        totalCreated: tx.createdOwners.length,
+        totalFailed: ownersFailedCount,
+    })
 }
 
 // ============================================================================
@@ -199,6 +227,14 @@ async function processPropertyBatches(
     let criticalFailure = false
     let propertiesFailedCount = 0
 
+    logger.info("Starting property batch processing", {
+        jobId,
+        totalProperties: properties.length,
+        batchCount: propertyBatches.length,
+        batchSize: 10,
+        ownerMapSize: ownerEmailToId.size,
+    })
+
     for (let batchIndex = 0; batchIndex < propertyBatches.length; batchIndex++) {
         const batch = propertyBatches[batchIndex]
         const batchPropertiesCreated: string[] = []
@@ -209,6 +245,12 @@ async function processPropertyBatches(
             const ownerId = ownerEmailToId.get(prop.owner_email)
 
             if (!ownerId) {
+                logger.error(`Owner not found for property ${prop.psn}`, {
+                    jobId,
+                    propertyPsn: prop.psn,
+                    ownerEmail: prop.owner_email,
+                    availableOwners: Array.from(ownerEmailToId.keys()),
+                })
                 failedItems.push({
                     type: "property",
                     psn: prop.psn,
@@ -297,6 +339,12 @@ async function processPropertyBatches(
             await delay(100)
         }
     }
+
+    logger.info("Property batch processing completed", {
+        jobId,
+        totalCreated: tx.createdProperties.length,
+        totalFailed: propertiesFailedCount,
+    })
 }
 
 // ============================================================================

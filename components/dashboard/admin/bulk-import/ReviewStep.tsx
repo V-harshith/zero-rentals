@@ -111,43 +111,85 @@ const processStream = async (
     const decoder = new TextDecoder()
     let buffer = ""
 
-    while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
+    try {
+        while (true) {
+            const { done, value } = await reader.read()
 
-        // Check abort after read to ensure we process any remaining data
-        if (signal?.aborted) {
-            throw new Error("Import cancelled")
-        }
+            // Process any remaining data in buffer when stream ends
+            if (done) {
+                // Process remaining buffer content
+                if (buffer.trim()) {
+                    const lines = buffer.split("\n")
+                    for (const line of lines) {
+                        if (!line.trim()) continue
 
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split("\n")
-        buffer = lines.pop() || ""
+                        try {
+                            const data: StreamData = JSON.parse(line)
 
-        for (const line of lines) {
-            if (!line.trim()) continue
+                            if (data.error) {
+                                handleStreamError(new Error(data.error))
+                            }
 
-            try {
-                const data: StreamData = JSON.parse(line)
+                            handleProgressUpdate(data, setProgress, setStatus)
 
-                if (data.error) {
-                    handleStreamError(new Error(data.error))
+                            if (data.completed) {
+                                handleCompletion(data, onComplete)
+                            }
+
+                            handleStepNotification(data, properties.length)
+                        } catch (e: unknown) {
+                            if (signal?.aborted) return
+                            const message = e instanceof Error ? e.message : "Failed to process server response"
+                            toast.error(message)
+                        }
+                    }
                 }
+                break
+            }
 
-                handleProgressUpdate(data, setProgress, setStatus)
+            // Check abort after read to ensure we process any remaining data
+            if (signal?.aborted) {
+                throw new Error("Import cancelled")
+            }
 
-                if (data.completed) {
-                    handleCompletion(data, onComplete)
+            buffer += decoder.decode(value, { stream: true })
+            const lines = buffer.split("\n")
+            buffer = lines.pop() || ""
+
+            for (const line of lines) {
+                if (!line.trim()) continue
+
+                try {
+                    const data: StreamData = JSON.parse(line)
+
+                    if (data.error) {
+                        handleStreamError(new Error(data.error))
+                    }
+
+                    handleProgressUpdate(data, setProgress, setStatus)
+
+                    if (data.completed) {
+                        handleCompletion(data, onComplete)
+                    }
+
+                    handleStepNotification(data, properties.length)
+                } catch (e: unknown) {
+                    // Skip errors if aborted
+                    if (signal?.aborted) return
+                    const message = e instanceof Error ? e.message : "Failed to process server response"
+                    toast.error(message)
                 }
-
-                handleStepNotification(data, properties.length)
-            } catch (e: unknown) {
-                // Skip errors if aborted
-                if (signal?.aborted) return
-                const message = e instanceof Error ? e.message : "Failed to process server response"
-                toast.error(message)
             }
         }
+    } catch (err: unknown) {
+        // Handle stream reading errors
+        if (err instanceof Error) {
+            if (err.name === 'AbortError' || err.message === "Import cancelled") {
+                throw err
+            }
+            toast.error(`Stream error: ${err.message}`)
+        }
+        throw err
     }
 }
 
