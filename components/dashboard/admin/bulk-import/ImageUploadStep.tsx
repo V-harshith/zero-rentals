@@ -48,47 +48,58 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
     // Hard limit for total images
     const MAX_TOTAL_IMAGES = 500
 
-    // Compress images before upload (max 2MB)
+    // Compress images before upload (max 2MB target)
     // PRESERVES webkitRelativePath which is critical for PSN extraction
     const compressImages = async (imageFiles: File[]): Promise<File[]> => {
-        const options = {
-            maxSizeMB: 2,
-            maxWidthOrHeight: 1920,
-            useWebWorker: true,
-            fileType: 'image/jpeg',
-        }
-
         const compressed: File[] = []
         let originalSize = 0
         let compressedSize = 0
+        let compressedCount = 0
+        let skippedCount = 0
 
         for (let i = 0; i < imageFiles.length; i++) {
             const file = imageFiles[i]
-            setStatus(`Compressing ${i + 1} of ${imageFiles.length}: ${file.name}...`)
+            setStatus(`Processing ${i + 1} of ${imageFiles.length}: ${file.name}...`)
 
             try {
                 // Store the original webkitRelativePath before compression
                 const originalPath = file.webkitRelativePath
-                console.log(`[Compression] Processing file ${i + 1}/${imageFiles.length}: "${file.name}", path: "${originalPath || 'N/A'}"`)
+                const fileSizeMB = file.size / 1024 / 1024
+                console.log(`[Compression] File ${i + 1}/${imageFiles.length}: "${file.name}", Size: ${fileSizeMB.toFixed(2)}MB`)
 
                 let processedFile: File
+                originalSize += file.size
 
-                // Only compress if file is larger than 2MB
-                if (file.size > 2 * 1024 * 1024) {
-                    const compressedBlob = await imageCompression(file, options)
-                    // Create new File from blob, preserving the original name and path
-                    processedFile = new File([compressedBlob], file.name, {
-                        type: 'image/jpeg',
-                        lastModified: file.lastModified,
-                    })
-                    originalSize += file.size
-                    compressedSize += compressedBlob.size
-                    console.log(`[Compression] Compressed "${file.name}": ${(file.size / 1024 / 1024).toFixed(2)}MB -> ${(compressedBlob.size / 1024 / 1024).toFixed(2)}MB`)
+                // Always compress images, but with different targets based on original size
+                // This ensures consistent compression even for smaller files
+                const options = {
+                    maxSizeMB: fileSizeMB > 2 ? 2 : Math.max(0.5, fileSizeMB * 0.7), // Target 70% of original or 2MB max
+                    maxWidthOrHeight: 1920,
+                    useWebWorker: true,
+                    fileType: 'image/jpeg',
+                    initialQuality: 0.8,
+                    alwaysKeepResolution: false,
+                }
+
+                // Compress all files, but be less aggressive on already-small files
+                const compressedBlob = await imageCompression(file, options)
+
+                // Create new File from blob, preserving the original name and path
+                processedFile = new File([compressedBlob], file.name, {
+                    type: 'image/jpeg',
+                    lastModified: file.lastModified,
+                })
+
+                const compressedSizeMB = compressedBlob.size / 1024 / 1024
+                compressedSize += compressedBlob.size
+
+                const savingsPercent = ((file.size - compressedBlob.size) / file.size * 100).toFixed(0)
+                console.log(`[Compression] "${file.name}": ${fileSizeMB.toFixed(2)}MB -> ${compressedSizeMB.toFixed(2)}MB (${savingsPercent}% saved)`)
+
+                if (compressedBlob.size < file.size * 0.95) {
+                    compressedCount++
                 } else {
-                    processedFile = file
-                    originalSize += file.size
-                    compressedSize += file.size
-                    console.log(`[Compression] Skipped "${file.name}" (already under 2MB)`)
+                    skippedCount++
                 }
 
                 // CRITICAL: Preserve webkitRelativePath for PSN extraction on server
@@ -98,25 +109,37 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
                         writable: false,
                         configurable: true,
                     })
-                    console.log(`[Compression] Preserved path for "${file.name}": "${originalPath}"`)
                 }
 
                 compressed.push(processedFile)
             } catch (err) {
                 console.error('[Compression] Failed for', file.name, err)
-                // Use original file if compression fails, but ensure path is preserved
+                // Use original file if compression fails
                 compressed.push(file)
                 originalSize += file.size
                 compressedSize += file.size
+                skippedCount++
             }
         }
+
+        const totalSavings = originalSize - compressedSize
+        const savingsPercent = originalSize > 0 ? (totalSavings / originalSize * 100).toFixed(1) : '0'
+
+        console.log(`[Compression] Complete:`, {
+            totalFiles: compressed.length,
+            compressed: compressedCount,
+            skipped: skippedCount,
+            originalSize: (originalSize / 1024 / 1024).toFixed(2) + 'MB',
+            compressedSize: (compressedSize / 1024 / 1024).toFixed(2) + 'MB',
+            savings: (totalSavings / 1024 / 1024).toFixed(2) + 'MB',
+            savingsPercent: savingsPercent + '%'
+        })
 
         setCompressionStats({
             original: originalSize / 1024 / 1024,
             compressed: compressedSize / 1024 / 1024,
         })
 
-        console.log(`[Compression] Complete. Total files: ${compressed.length}, Original: ${(originalSize / 1024 / 1024).toFixed(2)}MB, Compressed: ${(compressedSize / 1024 / 1024).toFixed(2)}MB`)
         return compressed
     }
 
@@ -181,11 +204,24 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
         try {
             const compressed = await compressImages(imageFiles)
             setCompressedFiles(compressed)
-            const saved = imageFiles.reduce((sum, f) => sum + f.size, 0) / 1024 / 1024 -
-                         compressed.reduce((sum, f) => sum + f.size, 0) / 1024 / 1024
-            toast.success(`Compressed ${imageFiles.length} images. Saved ${saved.toFixed(2)} MB`)
+
+            // Calculate actual savings
+            const originalTotal = imageFiles.reduce((sum, f) => sum + f.size, 0)
+            const compressedTotal = compressed.reduce((sum, f) => sum + f.size, 0)
+            const savedMB = (originalTotal - compressedTotal) / 1024 / 1024
+            const savingsPercent = originalTotal > 0 ? ((originalTotal - compressedTotal) / originalTotal * 100).toFixed(1) : '0'
+
+            if (savedMB > 0.1) {
+                toast.success(`Compressed ${imageFiles.length} images`, {
+                    description: `Saved ${savedMB.toFixed(2)} MB (${savingsPercent}%)`,
+                })
+            } else {
+                toast.info(`${imageFiles.length} images processed`, {
+                    description: "Images were already optimally compressed",
+                })
+            }
         } catch (err) {
-            toast.error("Some images failed to compress, using originals")
+            toast.error("Image compression failed, using original files")
             setCompressedFiles(imageFiles)
         } finally {
             setCompressing(false)
