@@ -77,14 +77,34 @@ function getPropertyType(propertyType: string | null): 'PG' | 'Co-living' | 'Ren
     return 'PG'
 }
 
-function getPreferredTenant(pgFor: string | null): 'Male' | 'Female' | 'Any' {
-    if (!pgFor) return 'Any'
+function getPreferredTenant(pgFor: string | null, propertyType?: string | null): 'Male' | 'Female' | 'Couple' | null {
+    // Check property type first - Co-living defaults to Couple
+    if (propertyType) {
+        const pt = propertyType.toLowerCase().trim()
+        if (pt === 'co-living' || pt === 'coliving') return 'Couple'
+    }
+
+    if (!pgFor) return null
+
     const lower = pgFor.toLowerCase().trim()
-    // Male keywords: Male, Mens, Gents, Boys
-    if (lower.includes('male') || lower.includes('mens') || lower.includes('gent') || lower.includes('boys')) return 'Male'
-    // Female keywords: Female, Ladies, Girls
-    if (lower.includes('female') || lower.includes('ladies') || lower.includes('girls')) return 'Female'
-    return 'Any'
+
+    // Co-living in PG_For column should also be Couple
+    if (lower === 'co-living' || lower === 'coliving') return 'Couple'
+
+    // Male keywords - use exact matches to avoid matching "living" as "male"
+    if (lower === 'male' || lower === 'males' || lower === 'mens' ||
+        lower === 'boys' || lower === 'boy' || lower === 'gents' || lower === 'gent') return 'Male'
+
+    // Female keywords - exact matches
+    if (lower === 'female' || lower === 'females' || lower === 'ladies' ||
+        lower === 'lady' || lower === 'girls' || lower === 'girl') return 'Female'
+
+    // Couple keywords
+    if (lower === 'couple' || lower === 'couples' || lower === 'any' ||
+        lower === 'family' || lower === 'families' || lower.includes('unisex')) return 'Couple'
+
+    // Default: return null for unknown values
+    return null
 }
 
 function parsePrice(value: unknown): number | null {
@@ -354,7 +374,7 @@ export async function POST(
 
                 // Determine property type and preferred tenant
                 const determinedPropertyType = getPropertyType(propertyTypeValue)
-                const determinedPreferredTenant = getPreferredTenant(pgFor)
+                const determinedPreferredTenant = getPreferredTenant(pgFor, propertyTypeValue)
 
                 // Build property data - matches normal property posting structure
                 const propertyData = {

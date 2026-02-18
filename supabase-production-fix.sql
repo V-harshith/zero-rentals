@@ -396,6 +396,25 @@ CREATE INDEX IF NOT EXISTS idx_properties_bulk_import_job
     ON properties(bulk_import_job_id)
     WHERE bulk_import_job_id IS NOT NULL;
 
+-- =============================================
+-- FIX 11: Fix preferred_tenant constraint
+-- =============================================
+-- Drop existing constraint if it doesn't allow NULL or has wrong values
+ALTER TABLE properties DROP CONSTRAINT IF EXISTS properties_preferred_tenant_check;
+
+-- Update any invalid values to NULL
+UPDATE properties
+SET preferred_tenant = NULL
+WHERE preferred_tenant NOT IN ('Male', 'Female', 'Couple')
+   OR preferred_tenant = 'Any';
+
+-- Add correct constraint: Male, Female, Couple, or NULL
+ALTER TABLE properties
+ADD CONSTRAINT properties_preferred_tenant_check
+CHECK (preferred_tenant IN ('Male', 'Female', 'Couple') OR preferred_tenant IS NULL);
+
+COMMENT ON COLUMN properties.preferred_tenant IS 'Preferred tenant gender: Male, Female, Couple, or NULL for non-PG properties';
+
 -- ============================================================================
 -- STEP 3: VERIFY FIXES
 -- ============================================================================
