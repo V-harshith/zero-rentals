@@ -4,19 +4,8 @@ import { supabaseAdmin } from "@/lib/supabase-admin"
 import { csrfProtection } from "@/lib/csrf-server"
 import { hasConcurrentProcessingJob } from "@/lib/bulk-import-queue"
 
-// ============================================================================
-// Route Configuration - Increase body size limit for file uploads
-// This prevents 413 Payload Too Large errors on Vercel
-// ============================================================================
-export const config = {
-    api: {
-        bodyParser: {
-            sizeLimit: '15mb',
-        },
-    },
-    // Increase maxDuration for large uploads (Vercel Pro plan supports up to 900s)
-    maxDuration: 60,
-}
+// Note: Body size limit is configured in next.config.mjs (api.bodyParser.sizeLimit)
+// and vercel.json (maxDuration)
 
 // ============================================================================
 // Extract PSN from file path
