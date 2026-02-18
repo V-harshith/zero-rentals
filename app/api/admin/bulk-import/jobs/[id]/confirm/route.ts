@@ -422,7 +422,7 @@ export async function POST(
                     return
                 }
 
-                // Atomic status update
+                // Atomic status update - use current job status to prevent concurrent updates
                 const { data: updatedJob, error: updateError } = await supabaseAdmin
                     .from("bulk_import_jobs")
                     .update({
@@ -431,7 +431,7 @@ export async function POST(
                         processing_started_at: new Date().toISOString(),
                     })
                     .eq("id", jobId)
-                    .eq("status", "images_uploaded")
+                    .eq("status", job.status) // Use the job's current status we already verified
                     .select()
                     .maybeSingle()
 
