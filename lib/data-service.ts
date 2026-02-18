@@ -182,6 +182,8 @@ function buildSearchQuery(filters: SearchFilters) {
       query = query.eq('property_type', 'PG')
     } else if (filters.lookingFor === 'Room/Bed') {
       query = query.in('property_type', ['Co-living', 'Rent'])
+    } else if (filters.lookingFor === 'Co-living') {
+      query = query.eq('property_type', 'Co-living')
     }
   }
 
@@ -793,15 +795,13 @@ export async function getPendingProperties(limit: number = 100): Promise<Propert
   }
 }
 
-export async function approveProperty(id: string, csrfToken?: string): Promise<{ error: any }> {
+export async function approveProperty(id: string, csrfToken: string): Promise<{ error: any }> {
   try {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     }
 
-    if (csrfToken) {
-      headers['x-csrf-token'] = csrfToken
-    }
+    headers['x-csrf-token'] = csrfToken
 
     const response = await fetch(`/api/admin/properties/${id}/approve`, {
       method: 'PUT',
@@ -819,15 +819,13 @@ export async function approveProperty(id: string, csrfToken?: string): Promise<{
   }
 }
 
-export async function rejectProperty(id: string, reason: string = 'Admin Action', csrfToken?: string): Promise<{ error: any }> {
+export async function rejectProperty(id: string, reason: string = 'Admin Action', csrfToken: string): Promise<{ error: any }> {
   try {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     }
 
-    if (csrfToken) {
-      headers['x-csrf-token'] = csrfToken
-    }
+    headers['x-csrf-token'] = csrfToken
 
     const response = await fetch(`/api/admin/properties/${id}/reject`, {
       method: 'PUT',

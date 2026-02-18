@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef } from "react"
+import { useState, useRef, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -52,6 +52,11 @@ export function UsersManagementTab({
     const [bulkDeleting, setBulkDeleting] = useState(false)
     const [bulkVerifying, setBulkVerifying] = useState(false)
     const { csrfToken } = useCsrf()
+
+    // Clear selection when users data changes to prevent stale selections
+    useEffect(() => {
+        setSelectedIds(new Set())
+    }, [users])
 
     // Filter users based on search query prop - with XSS-safe sanitization
     const sanitizeInput = (input: string): string => {

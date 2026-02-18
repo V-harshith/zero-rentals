@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useCsrf } from "@/lib/csrf-context"
 import { Button } from "@/components/ui/button"
@@ -47,6 +47,11 @@ export function PendingPropertiesTab({
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
     const [bulkActionLoading, setBulkActionLoading] = useState(false)
     const [showBulkRejectDialog, setShowBulkRejectDialog] = useState(false)
+
+    // Clear selection when properties data changes to prevent stale selections
+    useEffect(() => {
+        setSelectedIds(new Set())
+    }, [properties])
 
     const handleApprove = async (propertyId: string) => {
         // Check for CSRF token before making request

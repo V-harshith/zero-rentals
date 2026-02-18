@@ -394,7 +394,7 @@ async function createPropertyAtomically(
     tx: TransactionContext,
     batchNumber: number,
     itemNumber: number
-): Promise<{ success: boolean; propertyId?: string; error?: string }> {
+): Promise<{ success: boolean; propertyId?: string; error?: string; imageMoveErrors?: string[] }> {
     const idempotencyKey = `property:${prop.psn}`
 
     // Check idempotency
@@ -555,7 +555,7 @@ async function createPropertyAtomically(
             },
         })
 
-        return { success: true, propertyId }
+        return { success: true, propertyId, imageMoveErrors: imageMoveErrors.length > 0 ? imageMoveErrors : undefined }
 
     } catch (error: any) {
         console.error(`Failed to create property PSN ${prop.psn}:`, error)
@@ -830,6 +830,9 @@ export async function POST(
                                 type: 'owner',
                                 email: ownerData.email,
                                 error: result.error,
+                                suggestion: result.error?.includes('decrypt')
+                                    ? 'Password encryption issue. Contact support.'
+                                    : 'Check the email format and ensure it is not already registered.',
                             })
                             // Check if this is a critical failure requiring rollback
                             if (result.error?.includes('Simulated failure')) {
@@ -985,7 +988,8 @@ export async function POST(
                                 type: 'property',
                                 psn: prop.psn,
                                 title: prop.property_name,
-                                error: `Owner not found for email: ${prop.owner_email}`,
+                                error: `Owner not found for email: ${prop.owner_email}. Ensure the owner was created successfully or check the email spelling.`,
+                                suggestion: 'Verify the owner email in the Excel file and retry the import.',
                             })
                             continue
                         }
@@ -1003,6 +1007,16 @@ export async function POST(
 
                         if (result.success && result.propertyId) {
                             batchPropertiesCreated.push(result.propertyId)
+                            // Report image move errors as warnings but don't fail the property
+                            if (result.imageMoveErrors && result.imageMoveErrors.length > 0) {
+                                failedItems.push({
+                                    type: 'image_warning',
+                                    psn: prop.psn,
+                                    title: prop.property_name,
+                                    error: `Image upload issues: ${result.imageMoveErrors.join(', ')}`,
+                                    severity: 'warning',
+                                })
+                            }
                         } else if (!result.success) {
                             failedItems.push({
                                 type: 'property',
@@ -1037,12 +1051,14 @@ export async function POST(
                         })
                     }
 
+                    // Track actual processed count (not just batch size) for accurate progress
                     processedProperties += batch.length
-                    const currentProgress = 25 + Math.round((processedProperties / properties.length) * 50)
+                    const actualProcessed = tx!.createdProperties.length + failedItems.filter(i => i.type === 'property').length
+                    const currentProgress = 25 + Math.round((actualProcessed / properties.length) * 70)
                     const propertiesFailed = failedItems.filter(i => i.type === 'property').length
 
                     send({
-                        progress: currentProgress,
+                        progress: Math.min(currentProgress, 95), // Cap at 95% until fully complete
                         properties_created: tx!.createdProperties.length,
                         properties_failed: propertiesFailed,
                         status: `Created ${tx!.createdProperties.length} of ${properties.length} properties...`,
@@ -1051,12 +1067,12 @@ export async function POST(
                     // Persist progress
                     await updateJobProgress(jobId, {
                         status: "processing",
-                        progress: currentProgress,
+                        progress: Math.min(currentProgress, 95),
                         step: "creating_properties",
                         totalCount: properties.length,
                         processedCount: tx!.createdProperties.length,
                         failedCount: propertiesFailed,
-                        message: `Created ${tx!.createdProperties.length} of ${properties.length} properties...`,
+                        message: `Created ${tx!.createdProperties.length} of ${properties.length} properties (${propertiesFailed} failed)`,
                     })
 
                     // Stop processing if critical failure
@@ -1152,20 +1168,30 @@ export async function POST(
                 // ============================================================================
                 // STEP 5: Send success response
                 // ============================================================================
+                const hasWarnings = failedItems.some(item => item.severity === 'warning')
+                const hasErrors = failedItems.some(item => !item.severity || item.severity === 'error')
+
                 send({
-                    status: "Import completed",
+                    status: hasErrors ? "Import completed with errors" : (hasWarnings ? "Import completed with warnings" : "Import completed successfully"),
                     progress: 100,
                     completed: true,
-                    success: true,
+                    success: !hasErrors,
+                    partial_success: hasErrors && tx!.createdProperties.length > 0,
                     results: {
                         total_properties: properties.length,
                         created_properties: tx!.createdProperties.length,
-                        failed_properties: failedItems.length,
+                        failed_properties: failedItems.filter(i => !i.severity || i.severity === 'error').length,
+                        warning_count: failedItems.filter(i => i.severity === 'warning').length,
                         new_owners: tx!.createdOwners.filter(o => o.password !== '[ALREADY EXISTS]').length,
                         existing_owners: tx!.createdOwners.filter(o => o.password === '[ALREADY EXISTS]').length,
                         failed_items: failedItems,
                     },
                     credentials_count: credentialsForDownload.length,
+                    message: hasErrors
+                        ? `Import completed but ${failedItems.filter(i => !i.severity || i.severity === 'error').length} items failed. Check the failed_items list for details.`
+                        : (hasWarnings
+                            ? `Import completed with ${failedItems.filter(i => i.severity === 'warning').length} warnings. Properties were created successfully.`
+                            : `All ${tx!.createdProperties.length} properties imported successfully.`),
                 })
 
                 // Release processing lock on successful completion
@@ -1179,38 +1205,65 @@ export async function POST(
 
                 console.error("Import confirmation error:", error)
 
-                // Rollback any created data on critical failure using transaction context
-                if (tx) {
-                    const rollbackResult = await rollbackTransaction(tx)
-                    console.error("Rollback result:", rollbackResult)
+                // Build detailed error message
+                const errorMessage = error.message || "Import failed due to an unexpected error"
+                const isCriticalError = errorMessage.includes('Critical failure') || errorMessage.includes('Simulated failure')
 
-                    // Send rollback information to client
-                    send({
-                        error: error.message || "Import failed",
-                        progress: 0,
-                        completed: false,
-                        rollback_performed: true,
-                        rollback_success: rollbackResult.success,
-                        rollback_details: rollbackResult.details,
-                        rollback_errors: rollbackResult.errors,
-                    })
-                } else {
-                    send({
-                        error: error.message || "Import failed",
-                        progress: 0,
-                        completed: false,
-                    })
+                // Rollback any created data on critical failure using transaction context
+                let rollbackInfo = null
+                if (tx) {
+                    try {
+                        const rollbackResult = await rollbackTransaction(tx)
+                        console.error("Rollback result:", rollbackResult)
+                        rollbackInfo = {
+                            rollback_performed: true,
+                            rollback_success: rollbackResult.success,
+                            rollback_details: rollbackResult.details,
+                            rollback_errors: rollbackResult.errors,
+                        }
+                    } catch (rollbackError) {
+                        console.error("Rollback failed:", rollbackError)
+                        rollbackInfo = {
+                            rollback_performed: true,
+                            rollback_success: false,
+                            rollback_error: rollbackError instanceof Error ? rollbackError.message : "Unknown rollback error",
+                        }
+                    }
                 }
 
-                // Update job with error
-                await supabaseAdmin
+                // Send error to client BEFORE any async operations that might delay
+                const errorResponse: Record<string, unknown> = {
+                    error: errorMessage,
+                    error_type: isCriticalError ? 'critical' : 'general',
+                    progress: 0,
+                    completed: false,
+                    suggestion: isCriticalError
+                        ? 'The import encountered a critical error and was rolled back. Please check the data and try again.'
+                        : 'Please check the error details, fix any issues, and retry the import.',
+                    ...rollbackInfo,
+                }
+
+                // Ensure error is sent immediately
+                try {
+                    send(errorResponse)
+                } catch (sendError) {
+                    console.error("Failed to send error response:", sendError)
+                }
+
+                // Update job with error (fire and forget - don't block stream close)
+                const jobUpdatePromise = supabaseAdmin
                     .from("bulk_import_jobs")
                     .update({
                         status: "failed",
-                        error_message: error.message,
-                        error_details: { stack: error.stack },
+                        error_message: errorMessage,
+                        error_details: { stack: error.stack, type: error.name },
+                        failed_items: failedItems.length > 0 ? failedItems : null,
                     })
                     .eq("id", jobId)
+
+                // Wait for job update but with timeout to ensure stream closes promptly
+                const timeoutPromise = new Promise(resolve => setTimeout(resolve, 2000))
+                await Promise.race([jobUpdatePromise, timeoutPromise])
 
                 controller.close()
             }
