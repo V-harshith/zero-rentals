@@ -43,7 +43,6 @@ export class AssertionError extends Error {
             message,
             severity,
             context,
-            stack: this.stack,
         })
     }
 }

@@ -129,12 +129,15 @@ function safeSerialize(obj: unknown, maxDepth: number = 3, currentDepth: number 
     }
 
     if (obj instanceof Error) {
-        return {
+        const result: Record<string, unknown> = {
             name: obj.name,
             message: obj.message,
             stack: obj.stack,
-            ...(obj.cause && { cause: safeSerialize(obj.cause, maxDepth, currentDepth + 1) }),
         }
+        if (obj.cause) {
+            result.cause = safeSerialize(obj.cause, maxDepth, currentDepth + 1)
+        }
+        return result
     }
 
     if (obj instanceof Date) {

@@ -603,6 +603,9 @@ export async function POST(
             // Initialize transaction context for atomic operations
             let tx: TransactionContext | null = null
 
+            // Initialize failedItems outside try so it's available in catch
+            let failedItems: any[] = []
+
             try {
                 // Auth check
                 const supabase = await createClient()
@@ -778,8 +781,7 @@ export async function POST(
 
                 const newOwnersFromExcel = job.new_owners as any[] || []
 
-                // Track results
-                const failedItems: any[] = []
+                // Track results (failedItems already initialized earlier)
                 let criticalFailure = false
 
                 // Update initial progress

@@ -48,6 +48,7 @@ import { GatedContent } from "@/components/auth/gated-content"
 import { LockedButton } from "@/components/auth/locked-button"
 import { useAuth } from "@/lib/auth-context"
 import { supabase } from "@/lib/supabase"
+import { useCsrf } from "@/lib/csrf-context"
 import { PLAN_FEATURES } from "@/lib/constants"
 import { approveProperty, rejectProperty } from "@/lib/data-service"
 import { FavoriteButton } from "@/components/favorite-button"
@@ -55,6 +56,7 @@ import { FavoriteButton } from "@/components/favorite-button"
 export default function PropertyClientPage({ id, initialProperty }: { id: string, initialProperty: Property | null }) {
     const router = useRouter()
     const { user, isLoading: authLoading } = useAuth()
+    const { csrfToken } = useCsrf()
     const isAdmin = !authLoading && user?.role === 'admin'
     const [property, setProperty] = useState<Property | null>(initialProperty)
     const [loading, setLoading] = useState(!initialProperty)
@@ -380,7 +382,7 @@ export default function PropertyClientPage({ id, initialProperty }: { id: string
                                     if (confirm('Are you sure you want to reject this property?')) {
                                         setActionLoading(true)
                                         try {
-                                            const { error } = await rejectProperty(property.id)
+                                            const { error } = await rejectProperty(property.id, 'Admin Action', csrfToken || '')
                                             if (error) throw error
                                             toast.success('Property rejected')
                                             router.push('/dashboard/admin')
@@ -402,7 +404,7 @@ export default function PropertyClientPage({ id, initialProperty }: { id: string
                                 onClick={async () => {
                                     setActionLoading(true)
                                     try {
-                                        const { error } = await approveProperty(property.id)
+                                        const { error } = await approveProperty(property.id, csrfToken || '')
                                         if (error) throw error
                                         toast.success('Property approved successfully')
                                         setProperty(prev => prev ? ({ ...prev, status: 'active', availability: 'Available' }) : null)

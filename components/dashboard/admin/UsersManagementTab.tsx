@@ -51,7 +51,7 @@ export function UsersManagementTab({
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
     const [bulkDeleting, setBulkDeleting] = useState(false)
     const [bulkVerifying, setBulkVerifying] = useState(false)
-    const { csrfToken } = useCsrf()
+    const { csrfToken, isLoading: isCsrfLoading } = useCsrf()
 
     // Clear selection when users data changes to prevent stale selections
     useEffect(() => {
@@ -128,7 +128,20 @@ export function UsersManagementTab({
     const bulkDelete = async () => {
         if (selectedIds.size === 0) return
 
+        // Check for CSRF token before making request
+        if (!csrfToken) {
+            toast.error('Security token not available. Please wait a moment and try again.')
+            return
+        }
+
         const count = selectedIds.size
+
+        // Confirmation dialog
+        const confirmed = window.confirm(
+            `Are you sure you want to delete ${count} user${count === 1 ? '' : 's'}?\n\nThis action cannot be undone.`
+        )
+        if (!confirmed) return
+
         // Get auth token first
         const { data: { session } } = await supabase.auth.getSession()
         if (!session) {
@@ -146,14 +159,22 @@ export function UsersManagementTab({
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${session.access_token}`,
-                    ...(csrfToken ? { 'x-csrf-token': csrfToken } : {})
+                    'x-csrf-token': csrfToken,
                 },
                 body: JSON.stringify({ ids }),
             })
 
             if (!response.ok) {
-                const data = await response.json()
-                throw new Error(data.error || 'Failed to delete users')
+                // Safe JSON parsing with fallback
+                let errorMessage = 'Failed to delete users'
+                try {
+                    const data = await response.json()
+                    errorMessage = data.error || errorMessage
+                } catch {
+                    // If JSON parsing fails, use status text
+                    errorMessage = response.statusText || errorMessage
+                }
+                throw new Error(errorMessage)
             }
 
             const result = await response.json()
@@ -317,7 +338,7 @@ export function UsersManagementTab({
                             size="sm"
                             variant="destructive"
                             onClick={bulkDelete}
-                            disabled={bulkDeleting || bulkVerifying}
+                            disabled={bulkDeleting || bulkVerifying || isCsrfLoading}
                         >
                             {bulkDeleting ? (
                                 <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Deleting...</>
