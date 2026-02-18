@@ -43,6 +43,71 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
     const [warnings, setWarnings] = useState<string[]>([])
     const folderInputRef = useRef<HTMLInputElement>(null)
 
+    // Fallback canvas-based compression when library fails
+    const fallbackCanvasCompression = async (file: File, options: any): Promise<Blob> => {
+        return new Promise((resolve, reject) => {
+            console.log(`[Compression] Using fallback canvas compression for "${file.name}"`)
+            const img = new Image()
+            const url = URL.createObjectURL(file)
+
+            img.onload = () => {
+                URL.revokeObjectURL(url)
+
+                // Calculate new dimensions
+                let { width, height } = img
+                const maxDim = options.maxWidthOrHeight || 1920
+
+                if (width > maxDim || height > maxDim) {
+                    if (width > height) {
+                        height = (height / width) * maxDim
+                        width = maxDim
+                    } else {
+                        width = (width / height) * maxDim
+                        height = maxDim
+                    }
+                }
+
+                // Create canvas
+                const canvas = document.createElement('canvas')
+                canvas.width = width
+                canvas.height = height
+                const ctx = canvas.getContext('2d')
+
+                if (!ctx) {
+                    reject(new Error('Could not get canvas context'))
+                    return
+                }
+
+                // Draw and compress
+                ctx.drawImage(img, 0, 0, width, height)
+
+                // Determine quality based on target size
+                const targetSizeMB = options.maxSizeMB || 2
+                const quality = targetSizeMB < 1 ? 0.6 : targetSizeMB < 2 ? 0.7 : 0.8
+
+                canvas.toBlob(
+                    (blob) => {
+                        if (blob) {
+                            console.log(`[Compression] Canvas fallback: ${file.name} -> ${(blob.size / 1024 / 1024).toFixed(2)}MB`)
+                            resolve(blob)
+                        } else {
+                            reject(new Error('Canvas toBlob failed'))
+                        }
+                    },
+                    options.fileType || 'image/jpeg',
+                    quality
+                )
+            }
+
+            img.onerror = () => {
+                URL.revokeObjectURL(url)
+                reject(new Error('Failed to load image for compression'))
+            }
+
+            img.src = url
+        })
+    }
+
     // Maximum recommended images per PSN
     const MAX_IMAGES_PER_PSN = 10
     // Hard limit for total images
@@ -79,10 +144,20 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
                     fileType: 'image/jpeg',
                     initialQuality: 0.8,
                     alwaysKeepResolution: false,
+                    preserveExif: false, // Remove EXIF to save space
                 }
 
+                console.log(`[Compression] Starting compression for "${file.name}" with options:`, options)
+
                 // Compress all files, but be less aggressive on already-small files
-                const compressedBlob = await imageCompression(file, options)
+                let compressedBlob: Blob
+                try {
+                    compressedBlob = await imageCompression(file, options)
+                } catch (compressionError: any) {
+                    console.error(`[Compression] Library failed for "${file.name}":`, compressionError)
+                    // Try fallback canvas compression
+                    compressedBlob = await fallbackCanvasCompression(file, options)
+                }
 
                 // Create new File from blob, preserving the original name and path
                 processedFile = new File([compressedBlob], file.name, {

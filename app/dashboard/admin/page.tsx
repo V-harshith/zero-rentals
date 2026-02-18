@@ -637,6 +637,12 @@ function AdminDashboard() {
   }
 
   const handleImportProperties = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Check for CSRF token before making request
+    if (!csrfToken) {
+      toast.error('Security token not available. Please refresh the page.')
+      return
+    }
+
     const file = e.target.files?.[0]
     if (!file) return
 
@@ -663,6 +669,9 @@ function AdminDashboard() {
     try {
       const response = await fetch('/api/admin/import-properties', {
         method: 'POST',
+        headers: {
+          'x-csrf-token': csrfToken,
+        },
         body: formData,
       })
 
