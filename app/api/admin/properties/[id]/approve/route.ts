@@ -4,51 +4,15 @@ import { supabaseAdmin } from '@/lib/supabase-admin'
 import { sendPropertyApprovalNotification } from '@/lib/email-service'
 import { csrfProtection } from '@/lib/csrf-server'
 import { rateLimit } from '@/lib/rate-limit'
-
-// Approval lock cache to prevent concurrent approvals (in-memory, per-instance)
-// For multi-instance deployments, this should be replaced with Redis or similar
-const approvalLocks = new Map<string, { timestamp: number; adminId: string }>()
-const LOCK_TTL_MS = 30000 // 30 seconds
+import { acquirePropertyLock, releasePropertyLock } from '@/lib/property-locks'
 
 /**
- * Clean up expired locks periodically
+ * PUT /api/admin/properties/[id]/approve
+ *
+ * Approve a property with database-level concurrent edit protection.
+ * Uses distributed locking via PostgreSQL to prevent race conditions
+ * across Vercel serverless instances.
  */
-function cleanupExpiredLocks(): void {
-  const now = Date.now()
-  for (const [propertyId, lock] of approvalLocks.entries()) {
-    if (now - lock.timestamp > LOCK_TTL_MS) {
-      approvalLocks.delete(propertyId)
-    }
-  }
-}
-
-/**
- * Acquire approval lock for a property
- * Returns true if lock acquired, false if already locked
- */
-function acquireApprovalLock(propertyId: string, adminId: string): boolean {
-  cleanupExpiredLocks()
-
-  const existingLock = approvalLocks.get(propertyId)
-  if (existingLock && existingLock.adminId !== adminId) {
-    // Another admin is currently processing this property
-    return false
-  }
-
-  approvalLocks.set(propertyId, { timestamp: Date.now(), adminId })
-  return true
-}
-
-/**
- * Release approval lock for a property
- */
-function releaseApprovalLock(propertyId: string, adminId: string): void {
-  const existingLock = approvalLocks.get(propertyId)
-  if (existingLock && existingLock.adminId === adminId) {
-    approvalLocks.delete(propertyId)
-  }
-}
-
 export async function PUT(
   request: NextRequest,
   props: { params: Promise<{ id: string }> }
@@ -89,11 +53,18 @@ export async function PUT(
       )
     }
 
-    // 2. Check for concurrent approval (in-memory lock)
-    if (!acquireApprovalLock(params.id, authUser.id)) {
+    // 2. Acquire distributed lock for concurrent edit protection
+    // This prevents multiple admins from processing the same property simultaneously
+    const lockResult = await acquirePropertyLock(params.id, authUser.id, 30, 'approve')
+    if (!lockResult.success) {
       return NextResponse.json(
-        { error: 'Property is being processed by another admin. Please try again later.' },
-        { status: 423 }
+        {
+          error: lockResult.error || 'Property is being processed by another admin. Please try again later.',
+          locked_by: lockResult.adminId,
+          expires_at: lockResult.expiresAt,
+          seconds_remaining: lockResult.secondsRemaining
+        },
+        { status: 423 } // Locked
       )
     }
 
@@ -202,8 +173,8 @@ export async function PUT(
         }
       })
     } finally {
-      // Always release the lock
-      releaseApprovalLock(params.id, authUser.id)
+      // Always release the lock, even if the operation failed
+      await releasePropertyLock(params.id, authUser.id, 'approve')
     }
   } catch (error: any) {
     console.error('[ADMIN APPROVE] Error:', error?.message || error)

@@ -9,20 +9,23 @@ import {
     releaseProcessingLock,
     updateJobProgress,
 } from "@/lib/bulk-import-queue"
+import {
+    createTransactionContext,
+    trackCreatedOwner,
+    trackCreatedProperty,
+    trackCreatedSubscription,
+    markItemProcessed,
+    isItemProcessed,
+    rollbackTransaction,
+    rollbackBatch,
+    shouldSimulateFailure,
+    type TransactionContext,
+    type FailureSimulationConfig,
+} from "@/lib/bulk-import-transaction"
 
 // ============================================================================
-// Types for Transaction Management
+// Types for Idempotency Management
 // ============================================================================
-interface TransactionContext {
-    jobId: string
-    adminUserId: string
-    createdOwners: Array<{ email: string; id: string; password: string }>
-    createdPropertyIds: string[]
-    createdSubscriptionIds: string[]
-    processedItems: Set<string> // For idempotency tracking
-    isRolledBack: boolean
-}
-
 interface IdempotencyRecord {
     key: string
     status: 'pending' | 'completed' | 'failed'
@@ -107,21 +110,6 @@ async function recordIdempotency(
 }
 
 // ============================================================================
-// Helper: Create transaction context
-// ============================================================================
-function createTransactionContext(jobId: string, adminUserId: string): TransactionContext {
-    return {
-        jobId,
-        adminUserId,
-        createdOwners: [],
-        createdPropertyIds: [],
-        createdSubscriptionIds: [],
-        processedItems: new Set(),
-        isRolledBack: false,
-    }
-}
-
-// ============================================================================
 // Helper: Atomic owner creation with subscription
 // ============================================================================
 async function createOwnerWithSubscriptionAtomically(
@@ -133,12 +121,14 @@ async function createOwnerWithSubscriptionAtomically(
     },
     jobId: string,
     adminId: string,
-    tx: TransactionContext
+    tx: TransactionContext,
+    batchNumber: number,
+    itemNumber: number
 ): Promise<{ success: boolean; userId?: string; password?: string; error?: string; alreadyExists?: boolean }> {
     const idempotencyKey = `owner:${ownerData.email}`
 
     // Check idempotency
-    if (tx.processedItems.has(idempotencyKey)) {
+    if (isItemProcessed(tx, idempotencyKey)) {
         const existing = tx.createdOwners.find(o => o.email === ownerData.email)
         return { success: true, userId: existing?.id, password: existing?.password, alreadyExists: true }
     }
@@ -146,8 +136,15 @@ async function createOwnerWithSubscriptionAtomically(
     const existingCheck = await checkIdempotency(jobId, 'owner_created', ownerData.email)
     if (existingCheck.completed && existingCheck.result) {
         const result = existingCheck.result as { userId: string; password: string }
-        tx.processedItems.add(idempotencyKey)
+        markItemProcessed(tx, idempotencyKey)
         return { success: true, userId: result.userId, password: result.password, alreadyExists: true }
+    }
+
+    // Simulate failure for testing
+    if (shouldSimulateFailure(tx, 'owner', batchNumber, itemNumber)) {
+        const error = new Error(`Simulated failure for owner ${ownerData.email} at batch ${batchNumber}, item ${itemNumber}`)
+        await recordIdempotency(jobId, adminId, 'owner_created', ownerData.email, 'failed', { error: error.message })
+        return { success: false, error: error.message }
     }
 
     // Decrypt password
@@ -199,12 +196,12 @@ async function createOwnerWithSubscriptionAtomically(
                     }, { onConflict: 'id' })
 
                     // Track for potential rollback (but don't delete existing users)
-                    tx.createdOwners.push({
+                    trackCreatedOwner(tx, {
                         email: ownerData.email,
                         id: existingUser.id,
                         password: '[ALREADY EXISTS]',
                     })
-                    tx.processedItems.add(idempotencyKey)
+                    markItemProcessed(tx, idempotencyKey)
 
                     // Record idempotency
                     await recordIdempotency(jobId, adminId, 'owner_created', ownerData.email, 'completed', {
@@ -265,16 +262,16 @@ async function createOwnerWithSubscriptionAtomically(
             console.error("Error creating subscription for owner:", subError)
             // Log but continue - property will still be created
         } else if (subData) {
-            tx.createdSubscriptionIds.push(subData.id)
+            trackCreatedSubscription(tx, { id: subData.id, userId })
         }
 
         // Track in transaction context
-        tx.createdOwners.push({
+        trackCreatedOwner(tx, {
             email: ownerData.email,
             id: userId,
             password: password,
         })
-        tx.processedItems.add(idempotencyKey)
+        markItemProcessed(tx, idempotencyKey)
 
         // Record idempotency
         await recordIdempotency(jobId, adminId, 'owner_created', ownerData.email, 'completed', {
@@ -319,22 +316,31 @@ async function createPropertyAtomically(
     imagesByPSN: Record<string, any[]>,
     jobId: string,
     adminId: string,
-    tx: TransactionContext
+    tx: TransactionContext,
+    batchNumber: number,
+    itemNumber: number
 ): Promise<{ success: boolean; propertyId?: string; error?: string }> {
     const idempotencyKey = `property:${prop.psn}`
 
     // Check idempotency
-    if (tx.processedItems.has(idempotencyKey)) {
-        const existingId = tx.createdPropertyIds.find(id => id === prop.psn)
-        return { success: true, propertyId: existingId }
+    if (isItemProcessed(tx, idempotencyKey)) {
+        const existing = tx.createdProperties.find(p => p.psn === prop.psn)
+        return { success: true, propertyId: existing?.id }
     }
 
     const existingCheck = await checkIdempotency(jobId, 'property_created', prop.psn)
     if (existingCheck.completed && existingCheck.result) {
         const result = existingCheck.result as { propertyId: string }
-        tx.processedItems.add(idempotencyKey)
-        tx.createdPropertyIds.push(result.propertyId)
+        markItemProcessed(tx, idempotencyKey)
+        trackCreatedProperty(tx, { id: result.propertyId, psn: prop.psn, ownerId })
         return { success: true, propertyId: result.propertyId }
+    }
+
+    // Simulate failure for testing
+    if (shouldSimulateFailure(tx, 'property', batchNumber, itemNumber)) {
+        const error = new Error(`Simulated failure for property ${prop.psn} at batch ${batchNumber}, item ${itemNumber}`)
+        await recordIdempotency(jobId, adminId, 'property_created', prop.psn, 'failed', { error: error.message })
+        return { success: false, error: error.message }
     }
 
     try {
@@ -388,8 +394,8 @@ async function createPropertyAtomically(
         }
 
         // Track in transaction context
-        tx.createdPropertyIds.push(propertyId)
-        tx.processedItems.add(idempotencyKey)
+        trackCreatedProperty(tx, { id: propertyId, psn: prop.psn, ownerId })
+        markItemProcessed(tx, idempotencyKey)
 
         // Record idempotency
         await recordIdempotency(jobId, adminId, 'property_created', prop.psn, 'completed', {
@@ -422,128 +428,8 @@ async function createPropertyAtomically(
 }
 
 // ============================================================================
-// Helper: Comprehensive rollback with retry logic
-// ============================================================================
-async function rollbackTransaction(tx: TransactionContext): Promise<{ success: boolean; details: Record<string, unknown> }> {
-    if (tx.isRolledBack) {
-        return { success: true, details: { alreadyRolledBack: true } }
-    }
-
-    tx.isRolledBack = true
-    const details: Record<string, unknown> = {
-        properties_attempted: 0,
-        properties_succeeded: 0,
-        properties_failed: [],
-        owners_attempted: 0,
-        owners_succeeded: 0,
-        owners_failed: [],
-        subscriptions_attempted: 0,
-        subscriptions_succeeded: 0,
-    }
-
-    // Rollback in reverse order of creation:
-    // 1. Properties first (they reference owners)
-    // 2. Subscriptions (they reference users)
-    // 3. Users table entries
-    // 4. Auth users last
-
-    // Rollback properties
-    details.properties_attempted = tx.createdPropertyIds.length
-    for (const propId of tx.createdPropertyIds) {
-        try {
-            const { error } = await supabaseAdmin
-                .from('properties')
-                .delete()
-                .eq('id', propId)
-
-            if (error) {
-                console.error(`Failed to delete property ${propId}:`, error)
-                ;(details.properties_failed as string[]).push(propId)
-            } else {
-                details.properties_succeeded = (details.properties_succeeded as number) + 1
-            }
-        } catch (error: any) {
-            console.error(`Exception deleting property ${propId}:`, error)
-            ;(details.properties_failed as string[]).push(propId)
-        }
-    }
-
-    // Rollback subscriptions
-    details.subscriptions_attempted = tx.createdSubscriptionIds.length
-    for (const subId of tx.createdSubscriptionIds) {
-        try {
-            const { error } = await supabaseAdmin
-                .from('subscriptions')
-                .delete()
-                .eq('id', subId)
-
-            if (error) {
-                console.error(`Failed to delete subscription ${subId}:`, error)
-            } else {
-                details.subscriptions_succeeded = (details.subscriptions_succeeded as number) + 1
-            }
-        } catch (error: any) {
-            console.error(`Exception deleting subscription ${subId}:`, error)
-        }
-    }
-
-    // Rollback owners (only those created in this transaction, not pre-existing)
-    const newOwners = tx.createdOwners.filter(o => o.password !== '[ALREADY EXISTS]')
-    details.owners_attempted = newOwners.length
-
-    for (const owner of newOwners) {
-        try {
-            // Delete from users table first
-            const { error: userError } = await supabaseAdmin
-                .from('users')
-                .delete()
-                .eq('id', owner.id)
-
-            if (userError) {
-                console.error(`Failed to delete user record ${owner.id}:`, userError)
-            }
-
-            // Delete auth user
-            const { error: authError } = await supabaseAdmin.auth.admin.deleteUser(owner.id)
-
-            if (authError) {
-                console.error(`Failed to delete auth user ${owner.id}:`, authError)
-                ;(details.owners_failed as string[]).push(owner.id)
-            } else {
-                details.owners_succeeded = (details.owners_succeeded as number) + 1
-            }
-        } catch (error: any) {
-            console.error(`Exception deleting owner ${owner.id}:`, error)
-            ;(details.owners_failed as string[]).push(owner.id)
-        }
-    }
-
-    // Log rollback
-    await supabaseAdmin.from("bulk_import_audit_log").insert({
-        job_id: tx.jobId,
-        admin_id: tx.adminUserId,
-        action: "rollback_executed",
-        details: {
-            properties_rolled_back: details.properties_succeeded,
-            owners_rolled_back: details.owners_succeeded,
-            subscriptions_rolled_back: details.subscriptions_succeeded,
-            failures: {
-                properties: details.properties_failed,
-                owners: details.owners_failed,
-            },
-            transaction_id: tx.jobId,
-        },
-    })
-
-    const overallSuccess = (details.properties_failed as string[]).length === 0 &&
-                          (details.owners_failed as string[]).length === 0
-
-    return { success: overallSuccess, details }
-}
-
-// ============================================================================
 // POST /api/admin/bulk-import/jobs/[id]/confirm
-// Execute the final import
+// Execute the final import with transaction rollback support
 // ============================================================================
 export async function POST(
     request: NextRequest,
@@ -551,6 +437,18 @@ export async function POST(
 ) {
     const encoder = new TextEncoder()
     const { id: jobId } = await params
+
+    // Parse failure simulation header for testing
+    let failureSimulation: FailureSimulationConfig | undefined
+    const simHeader = request.headers.get('x-failure-simulation')
+    if (simHeader && process.env.NODE_ENV !== 'production') {
+        try {
+            failureSimulation = JSON.parse(simHeader)
+            console.log('[Bulk Import] Failure simulation enabled:', failureSimulation)
+        } catch (e) {
+            console.error('[Bulk Import] Invalid failure simulation header:', e)
+        }
+    }
 
     const stream = new ReadableStream({
         async start(controller) {
@@ -580,8 +478,8 @@ export async function POST(
                     return
                 }
 
-                // Initialize transaction context
-                tx = createTransactionContext(jobId, authUser.id)
+                // Initialize transaction context with optional failure simulation
+                tx = createTransactionContext(jobId, authUser.id, failureSimulation)
 
                 // Verify job
                 const { data: job, error: jobError } = await supabaseAdmin
@@ -694,6 +592,7 @@ export async function POST(
 
                 // Track results
                 const failedItems: any[] = []
+                let criticalFailure = false
 
                 // Update initial progress
                 await updateJobProgress(jobId, {
@@ -707,7 +606,7 @@ export async function POST(
                 })
 
                 // ============================================================================
-                // STEP 1: Create new owner accounts
+                // STEP 1: Create new owner accounts with per-batch rollback
                 // ============================================================================
                 send({
                     status: `Creating ${newOwnersFromExcel.length} owner accounts...`,
@@ -720,27 +619,63 @@ export async function POST(
 
                 for (let batchIndex = 0; batchIndex < ownerBatches.length; batchIndex++) {
                     const batch = ownerBatches[batchIndex]
+                    const batchOwnersCreated: string[] = []
+                    const batchSubscriptionsCreated: string[] = []
+                    let batchFailed = false
 
                     // Process sequentially within batch for better transaction safety
-                    for (const ownerData of batch) {
+                    for (let itemIndex = 0; itemIndex < batch.length; itemIndex++) {
+                        const ownerData = batch[itemIndex]
                         const result = await createOwnerWithSubscriptionAtomically(
                             ownerData,
                             jobId,
                             authUser.id,
-                            tx!
+                            tx!,
+                            batchIndex,
+                            itemIndex
                         )
 
-                        if (!result.success) {
+                        if (result.success && result.userId) {
+                            batchOwnersCreated.push(result.userId)
+                        } else if (!result.success) {
                             failedItems.push({
                                 type: 'owner',
                                 email: ownerData.email,
                                 error: result.error,
                             })
+                            // Check if this is a critical failure requiring rollback
+                            if (result.error?.includes('Simulated failure')) {
+                                batchFailed = true
+                                criticalFailure = true
+                                break
+                            }
                         }
                     }
 
+                    // If batch had critical failure, rollback this batch
+                    if (batchFailed) {
+                        console.error(`[Bulk Import] Critical failure in owner batch ${batchIndex}, rolling back batch...`)
+                        const rollbackResult = await rollbackBatch(
+                            tx!,
+                            [], // No properties yet
+                            batchSubscriptionsCreated,
+                            batchOwnersCreated
+                        )
+                        console.log(`[Bulk Import] Batch rollback result:`, rollbackResult)
+
+                        send({
+                            status: `Critical error in owner batch ${batchIndex + 1}, rolling back...`,
+                            progress: 10,
+                            rollback_performed: true,
+                            rollback_result: rollbackResult.success,
+                        })
+
+                        // Continue with remaining batches or stop based on error severity
+                        // For now, we continue but mark the failure
+                    }
+
                     // Rate limit delay between batches
-                    if (batchIndex < ownerBatches.length - 1) {
+                    if (batchIndex < ownerBatches.length - 1 && !criticalFailure) {
                         await delay(500)
                     }
 
@@ -763,6 +698,11 @@ export async function POST(
                         failedCount: ownersFailed,
                         message: `Creating owners... (${tx!.createdOwners.length} created, ${ownersFailed} failed)`,
                     })
+
+                    // Stop processing if critical failure
+                    if (criticalFailure) {
+                        throw new Error(`Critical failure in owner creation batch ${batchIndex + 1}. Import aborted.`)
+                    }
                 }
 
                 // Build owner email to ID map from transaction context
@@ -771,7 +711,7 @@ export async function POST(
                     ownerEmailToId.set(owner.email, owner.id)
                 }
 
-                // Also get IDs for existing owners
+                // Also get IDs for existing owners and track their subscriptions
                 const allOwnerEmails = [...new Set(properties.map(p => p.owner_email))]
                 for (const email of allOwnerEmails) {
                     if (!ownerEmailToId.has(email)) {
@@ -783,7 +723,7 @@ export async function POST(
                         if (user) {
                             ownerEmailToId.set(email, user.id)
 
-                            // 🔥 CRITICAL: Ensure existing owners have a subscription
+                            // CRITICAL: Ensure existing owners have a subscription
                             try {
                                 const { data: existingSub } = await supabaseAdmin
                                     .from('subscriptions')
@@ -797,7 +737,7 @@ export async function POST(
                                     const endDate = new Date()
                                     endDate.setFullYear(endDate.getFullYear() + 100)
 
-                                    await supabaseAdmin.from('subscriptions').insert({
+                                    const { data: newSub } = await supabaseAdmin.from('subscriptions').insert({
                                         user_id: user.id,
                                         plan_name: 'Free',
                                         plan_duration: 'lifetime',
@@ -806,7 +746,11 @@ export async function POST(
                                         properties_limit: 1,
                                         start_date: startDate.toISOString(),
                                         end_date: endDate.toISOString(),
-                                    })
+                                    }).select('id').single()
+
+                                    if (newSub) {
+                                        trackCreatedSubscription(tx!, { id: newSub.id, userId: user.id })
+                                    }
                                 }
                             } catch (subError) {
                                 console.error("Error checking/creating subscription for existing owner:", subError)
@@ -835,15 +779,18 @@ export async function POST(
                 })
 
                 // ============================================================================
-                // STEP 2: Create properties
+                // STEP 2: Create properties with per-batch rollback
                 // ============================================================================
                 const propertyBatches = chunkArray(properties, 10)
                 let processedProperties = 0
 
                 for (let batchIndex = 0; batchIndex < propertyBatches.length; batchIndex++) {
                     const batch = propertyBatches[batchIndex]
+                    const batchPropertiesCreated: string[] = []
+                    let batchFailed = false
 
-                    for (const prop of batch) {
+                    for (let itemIndex = 0; itemIndex < batch.length; itemIndex++) {
+                        const prop = batch[itemIndex]
                         const ownerId = ownerEmailToId.get(prop.owner_email)
 
                         if (!ownerId) {
@@ -862,17 +809,46 @@ export async function POST(
                             imagesByPSN,
                             jobId,
                             authUser.id,
-                            tx!
+                            tx!,
+                            batchIndex,
+                            itemIndex
                         )
 
-                        if (!result.success) {
+                        if (result.success && result.propertyId) {
+                            batchPropertiesCreated.push(result.propertyId)
+                        } else if (!result.success) {
                             failedItems.push({
                                 type: 'property',
                                 psn: prop.psn,
                                 title: prop.property_name,
                                 error: result.error,
                             })
+                            // Check if this is a critical failure requiring rollback
+                            if (result.error?.includes('Simulated failure')) {
+                                batchFailed = true
+                                criticalFailure = true
+                                break
+                            }
                         }
+                    }
+
+                    // If batch had critical failure, rollback this batch
+                    if (batchFailed) {
+                        console.error(`[Bulk Import] Critical failure in property batch ${batchIndex}, rolling back batch...`)
+                        const rollbackResult = await rollbackBatch(
+                            tx!,
+                            batchPropertiesCreated,
+                            [],
+                            []
+                        )
+                        console.log(`[Bulk Import] Batch rollback result:`, rollbackResult)
+
+                        send({
+                            status: `Critical error in property batch ${batchIndex + 1}, rolling back...`,
+                            progress: 25 + Math.round((processedProperties / properties.length) * 50),
+                            rollback_performed: true,
+                            rollback_result: rollbackResult.success,
+                        })
                     }
 
                     processedProperties += batch.length
@@ -881,9 +857,9 @@ export async function POST(
 
                     send({
                         progress: currentProgress,
-                        properties_created: tx!.createdPropertyIds.length,
+                        properties_created: tx!.createdProperties.length,
                         properties_failed: propertiesFailed,
-                        status: `Created ${tx!.createdPropertyIds.length} of ${properties.length} properties...`,
+                        status: `Created ${tx!.createdProperties.length} of ${properties.length} properties...`,
                     })
 
                     // Persist progress
@@ -892,10 +868,15 @@ export async function POST(
                         progress: currentProgress,
                         step: "creating_properties",
                         totalCount: properties.length,
-                        processedCount: tx!.createdPropertyIds.length,
+                        processedCount: tx!.createdProperties.length,
                         failedCount: propertiesFailed,
-                        message: `Created ${tx!.createdPropertyIds.length} of ${properties.length} properties...`,
+                        message: `Created ${tx!.createdProperties.length} of ${properties.length} properties...`,
                     })
+
+                    // Stop processing if critical failure
+                    if (criticalFailure) {
+                        throw new Error(`Critical failure in property creation batch ${batchIndex + 1}. Import aborted.`)
+                    }
 
                     // Small delay between batches
                     if (batchIndex < propertyBatches.length - 1) {
@@ -945,9 +926,9 @@ export async function POST(
                     .update({
                         status: finalStatus,
                         step: "completed",
-                        processed_properties: tx!.createdPropertyIds.length,
+                        processed_properties: tx!.createdProperties.length,
                         failed_properties: failedItems.length,
-                        created_property_ids: tx!.createdPropertyIds,
+                        created_property_ids: tx!.createdProperties.map(p => p.id),
                         created_owner_ids: tx!.createdOwners.map(o => o.id),
                         failed_items: failedItems,
                         credentials_encrypted: credentialsEncrypted,
@@ -962,7 +943,7 @@ export async function POST(
                     action: "import_completed",
                     details: {
                         total_properties: properties.length,
-                        created_properties: tx!.createdPropertyIds.length,
+                        created_properties: tx!.createdProperties.length,
                         failed_properties: failedItems.length,
                         new_owners: tx!.createdOwners.length,
                         final_status: finalStatus,
@@ -980,7 +961,7 @@ export async function POST(
                     success: true,
                     results: {
                         total_properties: properties.length,
-                        created_properties: tx!.createdPropertyIds.length,
+                        created_properties: tx!.createdProperties.length,
                         failed_properties: failedItems.length,
                         new_owners: tx!.createdOwners.filter(o => o.password !== '[ALREADY EXISTS]').length,
                         existing_owners: tx!.createdOwners.filter(o => o.password === '[ALREADY EXISTS]').length,
@@ -1004,6 +985,23 @@ export async function POST(
                 if (tx) {
                     const rollbackResult = await rollbackTransaction(tx)
                     console.error("Rollback result:", rollbackResult)
+
+                    // Send rollback information to client
+                    send({
+                        error: error.message || "Import failed",
+                        progress: 0,
+                        completed: false,
+                        rollback_performed: true,
+                        rollback_success: rollbackResult.success,
+                        rollback_details: rollbackResult.details,
+                        rollback_errors: rollbackResult.errors,
+                    })
+                } else {
+                    send({
+                        error: error.message || "Import failed",
+                        progress: 0,
+                        completed: false,
+                    })
                 }
 
                 // Update job with error
@@ -1016,11 +1014,6 @@ export async function POST(
                     })
                     .eq("id", jobId)
 
-                send({
-                    error: error.message || "Import failed",
-                    progress: 0,
-                    completed: false,
-                })
                 controller.close()
             }
         }

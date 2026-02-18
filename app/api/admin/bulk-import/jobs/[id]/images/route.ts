@@ -241,7 +241,8 @@ export async function POST(
 
                 // Get expected PSNs from parsed properties
                 const parsedProperties = job.parsed_properties as any[] || []
-                const expectedPSNs = parsedProperties.map((p: any) => p.psn)
+                // CRITICAL: Normalize PSN to string (Excel may parse as number)
+                const expectedPSNs = parsedProperties.map((p: any) => String(p.psn))
 
                 console.log(`[Image Upload] Expected PSNs from Excel:`, expectedPSNs)
 

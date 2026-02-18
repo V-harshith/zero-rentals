@@ -459,10 +459,22 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
             }
 
             // All batches completed
-            const finalResult = allResults[allResults.length - 1] || {
+            // Calculate PSN info from files (avoid stale closure)
+            const uploadedPsnInfo = filesToUpload.reduce((acc, file) => {
+                const path = file.webkitRelativePath || file.name
+                const parts = path.split(/[/\\]/)
+                const psn = parts.length >= 2 ? parts[parts.length - 2] : null
+                if (psn && /^\d+$/.test(psn)) {
+                    acc[psn] = (acc[psn] || 0) + 1
+                }
+                return acc
+            }, {} as Record<string, number>)
+
+            const lastResult = allResults[allResults.length - 1]
+            const finalResult = lastResult || {
                 total_images: totalUploaded,
                 failed_uploads: totalFailed,
-                matched_psns: Object.keys(psnInfo).length,
+                matched_psns: Object.keys(uploadedPsnInfo).length,
                 orphaned_images: 0,
                 completed: true,
                 progress: 100,

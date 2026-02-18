@@ -75,10 +75,10 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // 2. Fetch properties to verify they exist and get count (Use Admin client)
+    // 2. Fetch properties to verify they exist and get images (Use Admin client)
     const { data: properties, error: fetchError } = await supabaseAdmin
       .from('properties')
-      .select('id')
+      .select('id, images')
       .in('id', ids)
 
     if (fetchError) {
@@ -95,7 +95,52 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // 3. Delete the properties
+    // 3. Collect all image paths from properties to delete
+    const allImagePaths: string[] = []
+    for (const property of properties || []) {
+      if (property.images && property.images.length > 0) {
+        const paths = property.images
+          .map((url: string) => {
+            const parts = url.split('/property-images/')
+            return parts[1]
+          })
+          .filter(Boolean)
+        allImagePaths.push(...paths)
+      }
+    }
+
+    // 4. Delete images from storage BEFORE deleting properties (for potential rollback)
+    if (allImagePaths.length > 0) {
+      try {
+        console.log(`[ADMIN BULK DELETE] Deleting ${allImagePaths.length} images from storage for ${foundIds.length} properties`)
+
+        // Supabase storage.remove() can handle up to 1000 paths at once
+        // Process in batches of 500 to be safe
+        const batchSize = 500
+        let deletedCount = 0
+
+        for (let i = 0; i < allImagePaths.length; i += batchSize) {
+          const batch = allImagePaths.slice(i, i + batchSize)
+          const { error: storageError } = await supabaseAdmin.storage
+            .from('property-images')
+            .remove(batch)
+
+          if (storageError) {
+            console.error(`[ADMIN BULK DELETE] Storage delete warning for batch ${i / batchSize + 1}:`, storageError)
+            // Continue with other batches - don't fail the request
+          } else {
+            deletedCount += batch.length
+          }
+        }
+
+        console.log(`[ADMIN BULK DELETE] Successfully deleted ${deletedCount}/${allImagePaths.length} images from storage`)
+      } catch (storageError) {
+        console.error('[ADMIN BULK DELETE] Storage delete error:', storageError)
+        // Don't fail the request - continue with property deletion
+      }
+    }
+
+    // 5. Delete the properties
     const { error: deleteError, count } = await supabaseAdmin
       .from('properties')
       .delete()
