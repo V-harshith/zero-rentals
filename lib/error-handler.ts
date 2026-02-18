@@ -91,7 +91,9 @@ export function isAuthError(error: unknown): boolean {
         errMessage.includes('unauthorized') ||
         errMessage.includes('Unauthorized') ||
         errCode === '401' ||
-        errCode === '403' ||
+        // NOTE: 403 Forbidden is NOT an auth error - it's permission denied
+        // CSRF errors return 403 but the user is still authenticated
+        // errCode === '403' ||
         errCode === 'P0001'
     )
 }

@@ -128,47 +128,82 @@ export function AllPropertiesTab() {
     }
 
     const toggleVerified = async (id: string, current: boolean) => {
+        // Check for CSRF token before making request
+        if (!csrfToken) {
+            toast.error('Security token not available. Please wait a moment and try again.')
+            return
+        }
+
         try {
             setUpdatingId(id)
-            // Directly using supabase to ensure 'verified' is updated (if not in Property types yet)
-            const { error } = await supabase
-                .from('properties')
-                .update({ verified: !current })
-                .eq('id', id)
 
-            if (error) throw error
+            // Call the admin API endpoint to toggle verified status
+            const response = await fetch(`/api/admin/properties/${id}/verify`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-csrf-token': csrfToken,
+                },
+                body: JSON.stringify({ verified: !current }),
+            })
+
+            if (!response.ok) {
+                const data = await response.json()
+                throw new Error(data.error || 'Failed to update verification status')
+            }
 
             setProperties(prev => prev.map(p => p.id === id ? { ...p, verified: !current } : p))
             toast.success(current ? "Verification removed" : "Property verified!")
-        } catch (error) {
-            toast.error("Failed to update verification")
+        } catch (error: any) {
+            toast.error(error.message || "Failed to update verification")
         } finally {
             setUpdatingId(null)
         }
     }
 
     const changePropertyType = async (id: string, newType: 'PG' | 'Co-living' | 'Rent') => {
+        // Check for CSRF token before making request
+        if (!csrfToken) {
+            toast.error('Security token not available. Please wait a moment and try again.')
+            return
+        }
+
         try {
             setUpdatingId(id)
-            const { error } = await supabase
-                .from('properties')
-                .update({ property_type: newType })
-                .eq('id', id)
 
-            if (error) throw error
+            // Call the admin API endpoint to change property type
+            const response = await fetch(`/api/admin/properties/${id}/type`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-csrf-token': csrfToken,
+                },
+                body: JSON.stringify({ property_type: newType }),
+            })
 
-            setProperties(prev => prev.map(p => 
+            if (!response.ok) {
+                const data = await response.json()
+                throw new Error(data.error || 'Failed to update property type')
+            }
+
+            setProperties(prev => prev.map(p =>
                 p.id === id ? { ...p, propertyType: newType } : p
             ))
             toast.success(`Property type changed to ${newType}`)
-        } catch (error) {
-            toast.error("Failed to update property type")
+        } catch (error: any) {
+            toast.error(error.message || "Failed to update property type")
         } finally {
             setUpdatingId(null)
         }
     }
 
     const deleteProperty = async (id: string, title: string) => {
+        // Check for CSRF token before making request
+        if (!csrfToken) {
+            toast.error('Security token not available. Please wait a moment and try again.')
+            return
+        }
+
         // Confirmation dialog
         const confirmed = window.confirm(
             `Are you sure you want to delete "${title}"?\n\nThis action cannot be undone. The property will be permanently removed from the database.`
@@ -178,19 +213,25 @@ export function AllPropertiesTab() {
 
         try {
             setDeletingId(id)
-            
-            // Delete property from database
-            const { error } = await supabase
-                .from('properties')
-                .delete()
-                .eq('id', id)
 
-            if (error) throw error
+            // Call the admin API endpoint to delete property
+            const response = await fetch(`/api/admin/properties/${id}/delete`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-csrf-token': csrfToken,
+                },
+            })
+
+            if (!response.ok) {
+                const data = await response.json()
+                throw new Error(data.error || 'Failed to delete property')
+            }
 
             // Optimistic UI update - remove from list
             setProperties(prev => prev.filter(p => p.id !== id))
             setTotalCount(prev => prev - 1)
-            
+
             toast.success("Property deleted successfully")
         } catch (error: any) {
             toast.error(error.message || "Failed to delete property")
@@ -236,6 +277,13 @@ export function AllPropertiesTab() {
 
     const bulkDelete = async () => {
         if (selectedIds.size === 0) return
+
+        // Check for CSRF token before making request
+        if (!csrfToken) {
+            toast.error('Security token not available. Please wait a moment and try again.')
+            return
+        }
+
         const count = selectedIds.size
         const confirmed = window.confirm(
             `Are you sure you want to delete ${count} propert${count === 1 ? 'y' : 'ies'}?\n\nThis action cannot be undone.`
@@ -245,21 +293,31 @@ export function AllPropertiesTab() {
         setBulkDeleting(true)
         try {
             const ids = Array.from(selectedIds)
-            const { error } = await supabase
-                .from('properties')
-                .delete()
-                .in('id', ids)
 
-            if (error) throw error
+            // Call the admin API endpoint to bulk delete properties
+            const response = await fetch('/api/admin/properties/bulk-delete', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-csrf-token': csrfToken,
+                },
+                body: JSON.stringify({ ids }),
+            })
+
+            if (!response.ok) {
+                const data = await response.json()
+                throw new Error(data.error || 'Failed to delete properties')
+            }
+
+            const result = await response.json()
 
             // Immediate UI update
             setProperties(prev => prev.filter(p => !selectedIds.has(p.id)))
             setTotalCount(prev => prev - count)
             setSelectedIds(new Set())
-            toast.success(`${count} propert${count === 1 ? 'y' : 'ies'} deleted successfully`)
-        } catch (error: unknown) {
-            const message = error instanceof Error ? error.message : 'Failed to delete properties'
-            toast.error(message)
+            toast.success(`${result.data?.deletedCount || count} propert${count === 1 ? 'y' : 'ies'} deleted successfully`)
+        } catch (error: any) {
+            toast.error(error.message || 'Failed to delete properties')
             fetchProperties()
         } finally {
             setBulkDeleting(false)
@@ -294,7 +352,7 @@ export function AllPropertiesTab() {
                         size="sm"
                         variant="destructive"
                         onClick={bulkDelete}
-                        disabled={bulkDeleting}
+                        disabled={bulkDeleting || isCsrfLoading}
                     >
                         {bulkDeleting ? (
                             <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Deleting...</>
@@ -361,7 +419,7 @@ export function AllPropertiesTab() {
                                             <Select
                                                 value={property.propertyType}
                                                 onValueChange={(value) => changePropertyType(property.id, value as 'PG' | 'Co-living' | 'Rent')}
-                                                disabled={updatingId === property.id}
+                                                disabled={updatingId === property.id || isCsrfLoading}
                                             >
                                                 <SelectTrigger className="w-[100px] h-8">
                                                     <SelectValue />
@@ -405,9 +463,10 @@ export function AllPropertiesTab() {
                                                 variant={property.verified ? "secondary" : "outline"}
                                                 className={property.verified ? "bg-blue-100 text-blue-700 hover:bg-blue-200 border-blue-200" : ""}
                                                 onClick={() => toggleVerified(property.id, property.verified || false)}
-                                                disabled={updatingId === property.id}
+                                                disabled={updatingId === property.id || isCsrfLoading}
+                                                title={property.verified ? "Click to unverify" : "Click to verify"}
                                             >
-                                                <CheckCircle className="h-4 w-4" />
+                                                <CheckCircle className={`h-4 w-4 ${property.verified ? "text-blue-700" : ""}`} />
                                             </Button>
                                         </TableCell>
                                         <TableCell>
@@ -427,12 +486,12 @@ export function AllPropertiesTab() {
                                                         <Pencil className="h-4 w-4" />
                                                     </Button>
                                                 </Link>
-                                                <Button 
-                                                    size="sm" 
+                                                <Button
+                                                    size="sm"
                                                     variant="ghost"
                                                     className="text-destructive hover:text-destructive hover:bg-destructive/10"
                                                     onClick={() => deleteProperty(property.id, property.title)}
-                                                    disabled={deletingId === property.id}
+                                                    disabled={deletingId === property.id || isCsrfLoading}
                                                     title="Delete Property"
                                                 >
                                                     {deletingId === property.id ? (

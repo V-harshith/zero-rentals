@@ -18,16 +18,6 @@ export async function PUT(
       return NextResponse.json({ error: csrfCheck.error || 'Invalid request' }, { status: 403 })
     }
 
-    // Rate limiting: 60 property rejections per hour per admin
-    const rateLimitKey = `admin:property:reject:${request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || request.headers.get('x-real-ip') || 'unknown'}`
-    const rateLimitResult = await rateLimit(rateLimitKey, 60, 60 * 60 * 1000)
-    if (!rateLimitResult.success) {
-      return NextResponse.json(
-        { error: 'Rate limit exceeded. Please try again later.' },
-        { status: 429 }
-      )
-    }
-
     const { reason } = await request.json()
 
     // Validate rejection reason
@@ -54,6 +44,16 @@ export async function PUT(
 
     if (profileError || !userProfile || userProfile.role !== 'admin') {
       return NextResponse.json({ error: 'Forbidden: Admin access required' }, { status: 403 })
+    }
+
+    // Rate limiting: 60 property rejections per hour per admin (after auth to use user ID)
+    const rateLimitKey = `admin:property:reject:${authUser.id}`
+    const rateLimitResult = await rateLimit(rateLimitKey, 60, 60 * 60 * 1000)
+    if (!rateLimitResult.success) {
+      return NextResponse.json(
+        { error: 'Rate limit exceeded. Please try again later.' },
+        { status: 429 }
+      )
     }
 
     // 2. Fetch Property (Admin Client)
@@ -147,7 +147,7 @@ export async function PUT(
   } catch (error: any) {
     console.error('[ADMIN REJECT] Error:', error?.message || error)
     return NextResponse.json(
-      { error: error?.message || 'Failed to reject property' },
+      { error: 'An internal error occurred' },
       { status: 500 }
     )
   }

@@ -61,16 +61,6 @@ export async function PUT(
       return NextResponse.json({ error: csrfCheck.error || 'Invalid request' }, { status: 403 })
     }
 
-    // Rate limiting: 60 property approvals per hour per admin
-    const rateLimitKey = `admin:property:approve:${request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || request.headers.get('x-real-ip') || 'unknown'}`
-    const rateLimitResult = await rateLimit(rateLimitKey, 60, 60 * 60 * 1000)
-    if (!rateLimitResult.success) {
-      return NextResponse.json(
-        { error: 'Rate limit exceeded. Please try again later.' },
-        { status: 429 }
-      )
-    }
-
     // 1. Verify Authentication & Admin Role (Standard Client)
     const supabase = await createClient()
     const { data: { user: authUser }, error: authError } = await supabase.auth.getUser()
@@ -87,6 +77,16 @@ export async function PUT(
 
     if (profileError || !userProfile || userProfile.role !== 'admin') {
       return NextResponse.json({ error: 'Forbidden: Admin access required' }, { status: 403 })
+    }
+
+    // Rate limiting: 60 property approvals per hour per admin (after auth to use user ID)
+    const rateLimitKey = `admin:property:approve:${authUser.id}`
+    const rateLimitResult = await rateLimit(rateLimitKey, 60, 60 * 60 * 1000)
+    if (!rateLimitResult.success) {
+      return NextResponse.json(
+        { error: 'Rate limit exceeded. Please try again later.' },
+        { status: 429 }
+      )
     }
 
     // 2. Check for concurrent approval (in-memory lock)
@@ -208,7 +208,7 @@ export async function PUT(
   } catch (error: any) {
     console.error('[ADMIN APPROVE] Error:', error?.message || error)
     return NextResponse.json(
-      { error: error?.message || 'Failed to approve property' },
+      { error: 'An internal error occurred' },
       { status: 500 }
     )
   }
