@@ -84,66 +84,115 @@ export function PaymentsTab({ payments, loading, onRefresh, lastUpdated }: Payme
                         No payments found
                     </div>
                 ) : (
-                    <div className="rounded-md border">
-                        <Table>
-                            <TableHeader>
-                                <TableRow>
-                                    <TableHead>User</TableHead>
-                                    <TableHead>Plan</TableHead>
-                                    <TableHead>Amount</TableHead>
-                                    <TableHead>Method</TableHead>
-                                    <TableHead>Status</TableHead>
-                                    <TableHead>Date</TableHead>
-                                </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                                {payments.map((payment) => (
-                                    <TableRow key={payment.id}>
-                                        <TableCell>
-                                            <div>
-                                                <p className="font-medium">{payment.user?.name || "Unknown"}</p>
-                                                <p className="text-sm text-muted-foreground">
-                                                    {payment.user?.email || "N/A"}
-                                                </p>
-                                            </div>
-                                        </TableCell>
-                                        <TableCell>
-                                            <Badge variant="outline">{payment.plan_name || 'N/A'}</Badge>
-                                        </TableCell>
-                                        <TableCell className="font-medium">
-                                            ₹{payment.amount.toLocaleString()}
-                                        </TableCell>
-                                        <TableCell className="capitalize">
-                                            {payment.payment_method || 'N/A'}
-                                        </TableCell>
-                                        <TableCell>
-                                            <Badge
-                                                variant={
-                                                    payment.status === 'success' || payment.status === 'completed'
-                                                        ? 'default'
-                                                        : payment.status === 'failed' || payment.status === 'refunded'
-                                                            ? 'destructive'
-                                                            : 'secondary'
-                                                }
-                                            >
-                                                {payment.status}
-                                            </Badge>
-                                        </TableCell>
-                                        <TableCell>
-                                            {payment.created_at ? (
-                                                <div>
-                                                    <div>{new Date(payment.created_at).toLocaleDateString()}</div>
-                                                    <div className="text-xs text-muted-foreground">
-                                                        {new Date(payment.created_at).toLocaleTimeString()}
-                                                    </div>
-                                                </div>
-                                            ) : 'N/A'}
-                                        </TableCell>
+                    <>
+                        {/* Desktop Table - Hidden on mobile */}
+                        <div className="hidden md:block rounded-md border overflow-x-auto">
+                            <Table>
+                                <TableHeader>
+                                    <TableRow>
+                                        <TableHead>User</TableHead>
+                                        <TableHead>Plan</TableHead>
+                                        <TableHead>Amount</TableHead>
+                                        <TableHead>Method</TableHead>
+                                        <TableHead>Status</TableHead>
+                                        <TableHead>Date</TableHead>
                                     </TableRow>
-                                ))}
-                            </TableBody>
-                        </Table>
-                    </div>
+                                </TableHeader>
+                                <TableBody>
+                                    {payments.map((payment) => (
+                                        <TableRow key={payment.id}>
+                                            <TableCell>
+                                                <div>
+                                                    <p className="font-medium">{payment.user?.name || "Unknown"}</p>
+                                                    <p className="text-sm text-muted-foreground">
+                                                        {payment.user?.email || "N/A"}
+                                                    </p>
+                                                </div>
+                                            </TableCell>
+                                            <TableCell>
+                                                <Badge variant="outline">{payment.plan_name || 'N/A'}</Badge>
+                                            </TableCell>
+                                            <TableCell className="font-medium">
+                                                ₹{payment.amount.toLocaleString()}
+                                            </TableCell>
+                                            <TableCell className="capitalize">
+                                                {payment.payment_method || 'N/A'}
+                                            </TableCell>
+                                            <TableCell>
+                                                <Badge
+                                                    variant={
+                                                        payment.status === 'success' || payment.status === 'completed'
+                                                            ? 'default'
+                                                            : payment.status === 'failed' || payment.status === 'refunded'
+                                                                ? 'destructive'
+                                                                : 'secondary'
+                                                    }
+                                                >
+                                                    {payment.status}
+                                                </Badge>
+                                            </TableCell>
+                                            <TableCell>
+                                                {payment.created_at ? (
+                                                    <div>
+                                                        <div>{new Date(payment.created_at).toLocaleDateString()}</div>
+                                                        <div className="text-xs text-muted-foreground">
+                                                            {new Date(payment.created_at).toLocaleTimeString()}
+                                                        </div>
+                                                    </div>
+                                                ) : 'N/A'}
+                                            </TableCell>
+                                        </TableRow>
+                                    ))}
+                                </TableBody>
+                            </Table>
+                        </div>
+
+                        {/* Mobile Card View - Shown only on mobile */}
+                        <div className="md:hidden space-y-3">
+                            {payments.map((payment) => (
+                                <Card key={payment.id} className="p-4">
+                                    <div className="flex items-start justify-between gap-2">
+                                        <div className="min-w-0 flex-1">
+                                            <p className="font-medium text-sm truncate">{payment.user?.name || "Unknown"}</p>
+                                            <p className="text-xs text-muted-foreground truncate">
+                                                {payment.user?.email || "N/A"}
+                                            </p>
+                                        </div>
+                                        <Badge
+                                            variant={
+                                                payment.status === 'success' || payment.status === 'completed'
+                                                    ? 'default'
+                                                    : payment.status === 'failed' || payment.status === 'refunded'
+                                                        ? 'destructive'
+                                                        : 'secondary'
+                                            }
+                                            className="text-xs whitespace-nowrap"
+                                        >
+                                            {payment.status}
+                                        </Badge>
+                                    </div>
+
+                                    <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                                        <div>
+                                            <p className="text-xs text-muted-foreground">Plan</p>
+                                            <Badge variant="outline" className="text-xs mt-0.5">
+                                                {payment.plan_name || 'N/A'}
+                                            </Badge>
+                                        </div>
+                                        <div>
+                                            <p className="text-xs text-muted-foreground">Amount</p>
+                                            <p className="font-semibold text-primary">₹{payment.amount.toLocaleString()}</p>
+                                        </div>
+                                    </div>
+
+                                    <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
+                                        <span className="capitalize">{payment.payment_method || 'N/A'}</span>
+                                        <span>{payment.created_at ? new Date(payment.created_at).toLocaleDateString() : 'N/A'}</span>
+                                    </div>
+                                </Card>
+                            ))}
+                        </div>
+                    </>
                 )}
             </CardContent>
         </Card>
