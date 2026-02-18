@@ -304,153 +304,165 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
         }
     }, [])
 
+    const MAX_BATCH_SIZE_MB = 3.5 // Stay under Vercel's 4.5MB limit
+    const MAX_FILES_PER_BATCH = 5 // Conservative limit
+
+    const createBatches = (files: File[]): File[][] => {
+        const batches: File[][] = []
+        let currentBatch: File[] = []
+        let currentBatchSize = 0
+
+        for (const file of files) {
+            const fileSizeMB = file.size / 1024 / 1024
+
+            // If single file is too large, we'll try to upload it anyway
+            // (compression should have handled this)
+            if (currentBatch.length >= MAX_FILES_PER_BATCH ||
+                (currentBatchSize + fileSizeMB > MAX_BATCH_SIZE_MB && currentBatch.length > 0)) {
+                batches.push(currentBatch)
+                currentBatch = []
+                currentBatchSize = 0
+            }
+
+            currentBatch.push(file)
+            currentBatchSize += fileSizeMB
+        }
+
+        if (currentBatch.length > 0) {
+            batches.push(currentBatch)
+        }
+
+        return batches
+    }
+
     const handleUpload = async () => {
         const filesToUpload = compressedFiles.length > 0 ? compressedFiles : files
         if (filesToUpload.length === 0) return
 
         setUploading(true)
         setError(null)
-        setStatus("Uploading images...")
+        setStatus("Preparing upload batches...")
+
+        // Create batches to stay under Vercel's 4.5MB limit
+        const batches = createBatches(filesToUpload)
+        console.log(`[Upload] Created ${batches.length} batches from ${filesToUpload.length} files`)
+
+        const allResults: any[] = []
+        let totalUploaded = 0
+        let totalFailed = 0
 
         try {
-            const formData = new FormData()
-            console.log(`[Upload] Preparing ${filesToUpload.length} files for upload...`)
+            for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+                const batch = batches[batchIndex]
+                setStatus(`Uploading batch ${batchIndex + 1} of ${batches.length} (${batch.length} files)...`)
 
-            filesToUpload.forEach((file, index) => {
-                // The compressed file should already have webkitRelativePath preserved
-                // But we double-check and log for debugging
-                const path = (file as any).webkitRelativePath || file.name
-                console.log(`[Upload] Appending file ${index + 1}: "${file.name}", path: "${path}"`)
+                const formData = new FormData()
 
-                // Append directly - webkitRelativePath was preserved during compression
-                formData.append("images", file)
-            })
+                batch.forEach((file, index) => {
+                    const path = (file as any).webkitRelativePath || file.name
+                    console.log(`[Upload] Batch ${batchIndex + 1}: Appending file ${index + 1}: "${file.name}", path: "${path}"`)
+                    formData.append("images", file)
+                })
 
-            const res = await secureFetch(`/api/admin/bulk-import/jobs/${jobId}/images`, {
-                method: "POST",
-                body: formData,
-            })
+                const res = await secureFetch(`/api/admin/bulk-import/jobs/${jobId}/images`, {
+                    method: "POST",
+                    body: formData,
+                })
 
-            if (!res.ok) {
-                // Handle non-JSON error responses (like HTML error pages)
-                const contentType = res.headers.get('content-type') || ''
-                let errorMessage = `Upload failed: ${res.status} ${res.statusText}`
+                if (!res.ok) {
+                    const contentType = res.headers.get('content-type') || ''
+                    let errorMessage = `Upload failed: ${res.status} ${res.statusText}`
 
-                if (contentType.includes('application/json')) {
-                    try {
-                        const errorData = await res.json()
-                        errorMessage = errorData.error || errorData.message || errorMessage
-                    } catch {
-                        // JSON parsing failed, use default message
+                    if (contentType.includes('application/json')) {
+                        try {
+                            const errorData = await res.json()
+                            errorMessage = errorData.error || errorData.message || errorMessage
+                        } catch {
+                            // JSON parsing failed, use default message
+                        }
+                    } else {
+                        if (res.status === 413) {
+                            errorMessage = "File size too large. Try selecting fewer images or reducing image quality."
+                        } else if (res.status === 429) {
+                            errorMessage = "Rate limit exceeded. Please wait a moment and try again."
+                        } else if (res.status >= 500) {
+                            errorMessage = "Server error. Please try again later or contact support."
+                        }
                     }
-                } else {
-                    // Non-JSON response (HTML error page)
-                    if (res.status === 413) {
-                        errorMessage = "File size too large. Maximum upload is 15MB (after compression). Try selecting fewer images or a folder with smaller images."
-                    } else if (res.status === 429) {
-                        errorMessage = "Rate limit exceeded. Please wait a moment and try again."
-                    } else if (res.status >= 500) {
-                        errorMessage = "Server error. Please try again later or contact support."
+
+                    // If a batch fails, mark all files in that batch as failed
+                    totalFailed += batch.length
+                    console.error(`[Upload] Batch ${batchIndex + 1} failed:`, errorMessage)
+
+                    // Continue with next batch instead of failing completely
+                    if (batchIndex < batches.length - 1) {
+                        toast.error(`Batch ${batchIndex + 1} failed: ${errorMessage}`, {
+                            description: "Continuing with next batch..."
+                        })
+                        continue
+                    } else {
+                        throw new Error(errorMessage)
                     }
                 }
 
-                throw new Error(errorMessage)
-            }
+                // Handle streaming response for this batch
+                const reader = res.body?.getReader()
+                const decoder = new TextDecoder()
 
-            // Handle streaming response
-            const reader = res.body?.getReader()
-            const decoder = new TextDecoder()
+                if (reader) {
+                    let buffer = ""
 
-            if (reader) {
-                let buffer = ""
+                    while (true) {
+                        const { done, value } = await reader.read()
+                        if (done) break
 
-                while (true) {
-                    const { done, value } = await reader.read()
-                    if (done) break
+                        buffer += decoder.decode(value, { stream: true })
+                        const lines = buffer.split("\n")
+                        buffer = lines.pop() || ""
 
-                    buffer += decoder.decode(value, { stream: true })
-                    const lines = buffer.split("\n")
-                    buffer = lines.pop() || ""
+                        for (const line of lines) {
+                            if (!line.trim()) continue
 
-                    for (const line of lines) {
-                        if (!line.trim()) continue
+                            let data: any
+                            try {
+                                data = JSON.parse(line)
 
-                        let data: any
-                        try {
-                            data = JSON.parse(line)
-                            console.log('[Upload] Received:', data)
-
-                            if (data.error) {
-                                throw new Error(data.error)
-                            }
-
-                            if (data.progress !== undefined) {
-                                setProgress(data.progress)
-                            }
-
-                            if (data.status) {
-                                setStatus(data.status)
-                            }
-
-                            // Handle warnings from API response
-                            if (data.warnings && data.warnings.length > 0) {
-                                setWarnings(data.warnings)
-                            }
-
-                            // Log detailed progress info
-                            if (data.matched_psns !== undefined) {
-                                console.log(`[Upload] Progress: ${data.progress}%, Matched PSNs: ${data.matched_psns}, Orphaned: ${data.orphaned_count}`)
-                            }
-
-                            if (data.completed || data.progress === 100) {
-                                setResult(data)
-
-                                // Detailed PSN matching notification
-                                const matched = data.matched_psns || 0
-                                const orphaned = data.orphaned_images || 0
-                                const failed = data.failed_uploads || 0
-                                const unmatchedPsns = data.unmatched_psns || []
-
-                                if (failed > 0) {
-                                    toast.error(`${failed} images failed to upload`, {
-                                        description: "Check the error details below",
-                                    })
+                                if (data.error) {
+                                    throw new Error(data.error)
                                 }
 
-                                if (orphaned > 0) {
-                                    toast.warning(`${orphaned} images don't match any PSN in the Excel`, {
-                                        description: unmatchedPsns.length > 0
-                                            ? `Missing images for PSNs: ${unmatchedPsns.join(', ')}`
-                                            : "These images will be skipped",
-                                        duration: 6000,
-                                    })
+                                if (data.progress !== undefined) {
+                                    // Calculate overall progress across all batches
+                                    const batchProgress = data.progress / 100
+                                    const overallProgress = ((batchIndex + batchProgress) / batches.length) * 100
+                                    setProgress(Math.round(overallProgress))
                                 }
 
-                                if (matched > 0) {
-                                    toast.success(`Successfully matched ${matched} PSNs with images`, {
-                                        description: `${data.total_images} images uploaded total`,
-                                    })
+                                if (data.status) {
+                                    setStatus(`Batch ${batchIndex + 1}/${batches.length}: ${data.status}`)
                                 }
 
-                                // Mark upload as complete - let user click Next to proceed
-                                setUploadComplete(true)
-                                setResult(data)
+                                if (data.completed || data.progress === 100) {
+                                    allResults.push(data)
+                                    totalUploaded += data.total_images || batch.length
+                                }
+                            } catch (parseError: any) {
+                                if (parseError.message &&
+                                    parseError.message !== 'Unexpected end of JSON input' &&
+                                    !parseError.message.includes('JSON')) {
+                                    throw parseError
+                                }
                             }
-                        } catch (parseError: any) {
-                            // Only throw if it's a real error from the server, not a parse error from partial data
-                            if (parseError.message &&
-                                parseError.message !== 'Unexpected end of JSON input' &&
-                                !parseError.message.includes('JSON') &&
-                                !parseError.message.includes('Unexpected token')) {
-                                console.error('[Upload] Server error:', parseError)
-                                throw parseError
-                            }
-                            // Otherwise continue - this might be a partial line or incomplete JSON
-                            console.log('[Upload] Skipping incomplete/partial line:', line.substring(0, 50))
                         }
                     }
                 }
             }
+
+            // All batches completed
+            if (totalUploaded > 0) {
+                toast.success(`Successfully uploaded ${totalUploaded} images`)
+            }
+
         } catch (err: any) {
             const errorMessage = err.message || "Image upload failed"
             setError(errorMessage)
@@ -638,10 +650,10 @@ export function ImageUploadStep({ jobId, onComplete, onBack, onCancel, onSkip }:
                         <div className="mt-2 text-xs text-red-600">
                             <strong>Troubleshooting:</strong>
                             <ul className="list-disc list-inside mt-1 space-y-1">
-                                <li>Ensure total folder size is under 10MB</li>
-                                <li>Split large uploads into smaller batches</li>
-                                <li>Check your internet connection</li>
-                                <li>Try refreshing the page and starting over</li>
+                                <li>Images are uploaded in batches of 5 files maximum</li>
+                                <li>Each image is automatically compressed to under 2MB</li>
+                                <li>Maximum 500 images per import</li>
+                                <li>Supported formats: JPG, PNG, WebP</li>
                             </ul>
                         </div>
                     </AlertDescription>
