@@ -488,7 +488,7 @@ function EditPropertyPage() {
                     address: formData.address,
                     pincode: formData.pincode,
                 },
-                preferredTenant: (formData.gender === 'male' ? 'Male' : formData.gender === 'female' ? 'Female' : formData.gender === 'couple' ? 'Couple' : 'Any') as Property['preferredTenant'],
+                preferredTenant: (formData.gender === 'male' ? 'Male' : formData.gender === 'female' ? 'Female' : 'Couple') as 'Male' | 'Female' | 'Couple',
                 furnishing: formData.furnishing || undefined,
                 rules: [
                     formData.noSmoking ? 'No Smoking' : '',

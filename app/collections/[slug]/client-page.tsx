@@ -71,7 +71,7 @@ const COLLECTION_CONFIG: Record<string, {
     "for-students": {
         title: "For Students",
         description: "Student-friendly accommodations near colleges",
-        filter: (p) => p.preferredTenant === "Any" || p.price <= 12000,
+        filter: (p) => p.price <= 12000,
         color: "from-indigo-600 to-purple-600",
     },
     "single-rooms": {

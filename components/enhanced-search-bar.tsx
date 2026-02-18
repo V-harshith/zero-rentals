@@ -35,15 +35,15 @@ export function EnhancedSearchBar({ className }: EnhancedSearchBarProps) {
     const [sessionToken] = useState(() => generateSessionToken())
 
     // Filter state - Gender defaults based on property type
-    const [gender, setGender] = useState<"Male" | "Female" | "Couple" | "Any">(
-        activeType === "Co-living" ? "Couple" : "Any"
+    const [gender, setGender] = useState<"Male" | "Female" | "Couple">(
+        activeType === "Co-living" ? "Couple" : "Male"
     )
     const [lookingFor, setLookingFor] = useState<"PG" | "Room/Bed">("PG")
     const [budget, setBudget] = useState<string>("10k-20k")
 
     // Reset gender when property type changes
     useEffect(() => {
-        setGender(activeType === "Co-living" ? "Couple" : "Any")
+        setGender(activeType === "Co-living" ? "Couple" : "Male")
     }, [activeType])
 
     const inputRef = useRef<HTMLInputElement>(null)

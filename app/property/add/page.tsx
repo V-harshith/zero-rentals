@@ -53,7 +53,7 @@ function AddPropertyPage() {
         floorNumber: "",
         totalFloors: "",
         roomSize: "",
-        preferredTenant: "Any",
+        preferredTenant: "Male",
         pincode: "",
         rules: "",
         images: [] as string[]
@@ -295,7 +295,7 @@ function AddPropertyPage() {
                 floorNumber: formData.floorNumber ? parseInt(formData.floorNumber) : undefined,
                 totalFloors: formData.totalFloors ? parseInt(formData.totalFloors) : undefined,
                 roomSize: formData.roomSize ? parseInt(formData.roomSize) : undefined,
-                preferredTenant: formData.preferredTenant as 'Male' | 'Female' | 'Any',
+                preferredTenant: formData.preferredTenant as 'Male' | 'Female' | 'Couple',
                 rules: formData.rules ? formData.rules.split('\n').filter(r => r.trim()) : [],
                 images: [], // Will be updated after upload
                 ownerId: user.id,
@@ -687,9 +687,9 @@ function AddPropertyPage() {
                                             <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            <SelectItem value="Any">Any</SelectItem>
                                             <SelectItem value="Male">Male</SelectItem>
                                             <SelectItem value="Female">Female</SelectItem>
+                                            <SelectItem value="Couple">Couple</SelectItem>
                                         </SelectContent>
                                     </Select>
                                 </div>

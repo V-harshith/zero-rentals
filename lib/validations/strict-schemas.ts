@@ -211,7 +211,7 @@ export const FurnishingSchema = ValidationUtils.enum(
 )
 
 export const PreferredTenantSchema = ValidationUtils.enum(
-    ['Male', 'Female', 'Any', 'Gents', 'Ladies'],
+    ['Male', 'Female', 'Couple'],
     'preferred tenant'
 )
 

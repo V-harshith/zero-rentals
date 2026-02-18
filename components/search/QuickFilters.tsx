@@ -10,9 +10,9 @@ const COLIVING_ROOM_TYPES = ["Single Sharing", "Double Sharing"]
 const RENT_ROOM_TYPES = ["1 RK", "1 BHK", "2 BHK", "3 BHK", "4 BHK"]
 
 interface QuickFiltersProps {
-    gender: "Male" | "Female" | "Any" | "Couple"
+    gender: "Male" | "Female" | "Couple"
     activeType: "PG" | "Co-living" | "Rent"
-    onGenderChange: (value: "Male" | "Female" | "Any" | "Couple") => void
+    onGenderChange: (value: "Male" | "Female" | "Couple") => void
     priceRange: [number, number]
     onPriceRangeChange: (range: [number, number]) => void
     selectedRoomTypes: string[]
@@ -70,7 +70,6 @@ export function QuickFilters({
                                 </>
                             ) : (
                                 <>
-                                    <SelectItem value="Any">Any</SelectItem>
                                     <SelectItem value="Male">Male</SelectItem>
                                     <SelectItem value="Female">Female</SelectItem>
                                 </>

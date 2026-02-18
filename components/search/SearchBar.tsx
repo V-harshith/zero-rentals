@@ -23,11 +23,11 @@ function parseUrlParams(params: URLSearchParams) {
     const type = params.get("type") as "PG" | "Co-living" | "Rent" | null
     const activeType = type && PROPERTY_TYPES.includes(type) ? type : "PG"
 
-    const gender = params.get("gender") as "Male" | "Female" | "Any" | "Couple" | null
-    const validGender: "Male" | "Female" | "Any" | "Couple" =
-        gender && ["Male", "Female", "Any", "Couple"].includes(gender)
+    const gender = params.get("gender") as "Male" | "Female" | "Couple" | null
+    const validGender: "Male" | "Female" | "Couple" =
+        gender && ["Male", "Female", "Couple"].includes(gender)
             ? gender
-            : activeType === "Co-living" ? "Couple" : "Any"
+            : activeType === "Co-living" ? "Couple" : "Male"
 
     const roomType = params.get("roomType")
     const selectedRoomType = roomType || ""
@@ -69,7 +69,7 @@ export function SearchBar({ className }: SearchBarProps) {
     const [sessionToken] = useState(() => generateSessionToken())
 
     // Filter State - Gender defaults based on property type
-    const [gender, setGender] = useState<"Male" | "Female" | "Any" | "Couple">(initialState.gender)
+    const [gender, setGender] = useState<"Male" | "Female" | "Couple">(initialState.gender)
 
     // Advanced Filter State
     const [selectedRoomTypes, setSelectedRoomTypes] = useState<string[]>([])
@@ -86,7 +86,7 @@ export function SearchBar({ className }: SearchBarProps) {
             isInitialMount.current = false
             return
         }
-        setGender(activeType === "Co-living" ? "Couple" : "Any")
+        setGender(activeType === "Co-living" ? "Couple" : "Male")
         setSelectedRoomType("")
         setSelectedRoomTypes([])
         setSelectedAmenities([])
@@ -120,7 +120,8 @@ export function SearchBar({ className }: SearchBarProps) {
         setSelectedAmenities([])
         setPreferredTenant("Any")
         setPriceRange([0, 50000])
-        setGender("Any")
+        // Reset gender based on property type - PG defaults to Male, Co-living to Couple
+        setGender(activeType === "Co-living" ? "Couple" : "Male")
         // Also clear location
         setLocationValue("")
         setSelectedPlace(null)
@@ -191,7 +192,7 @@ export function SearchBar({ className }: SearchBarProps) {
             }
 
             // Only apply gender filter for PG/Co-living
-            if ((activeType === "PG" || activeType === "Co-living") && gender !== "Any") {
+            if (activeType === "PG" || activeType === "Co-living") {
                 params.set("gender", gender)
             }
 

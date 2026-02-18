@@ -1076,7 +1076,7 @@ function PostPropertyPage() {
         ownerName: ownerName,
         ownerContact: ownerContact,
 
-        preferredTenant: (formData.gender === 'male' ? 'Male' : formData.gender === 'female' ? 'Female' : formData.gender === 'couple' ? 'Couple' : 'Any') as 'Male' | 'Female' | 'Couple' | 'Any',
+        preferredTenant: (formData.gender === 'male' ? 'Male' : formData.gender === 'female' ? 'Female' : 'Couple') as 'Male' | 'Female' | 'Couple',
         furnishing: formData.furnishing || undefined,
         rules: [
           formData.noSmoking ? 'No Smoking' : '',

@@ -124,11 +124,13 @@ export default function RentPage() {
       )
     }
 
-    if (filters.preferredTenant && filters.preferredTenant !== "Any") {
+    // Filter by preferred tenant
+    // Male search matches Male + Couple properties, Female matches Female + Couple, Couple matches only Couple
+    if (filters.preferredTenant) {
       filtered = filtered.filter(
         (p) =>
           p.preferredTenant === filters.preferredTenant ||
-          p.preferredTenant === "Any"
+          p.preferredTenant === "Couple"
       )
     }
 
