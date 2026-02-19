@@ -111,7 +111,7 @@ const PricingStepComponent = ({ formData, updateRoomData, toggleAmenity, updateF
                     <h3 className="text-lg font-semibold mb-2">Furnish Type</h3>
                     <p className="text-sm text-muted-foreground">Select furnishing status for the property</p>
                 </div>
-                <div className="max-w-xs">
+                <div className="w-full sm:max-w-sm md:max-w-md">
                     <Label>Select Furnish Type <span className="text-red-500">*</span></Label>
                     <select
                         value={formData.furnishing}

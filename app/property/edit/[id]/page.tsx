@@ -646,7 +646,12 @@ function EditPropertyPage() {
 
                         {/* Step 4: Rules & Preferences — Shared Component */}
                         {currentStep === 4 && (
-                            <RulesStep formData={formData} setFormData={(newData) => updateFormData(() => newData)} />
+                            <RulesStep
+                                formData={formData}
+                                setFormData={(newData) => updateFormData(() => newData)}
+                                isEditMode={true}
+                                isAdmin={isAdmin}
+                            />
                         )}
 
                         {/* Step 5: Media — Shared Component */}

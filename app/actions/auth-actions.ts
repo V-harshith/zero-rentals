@@ -57,6 +57,8 @@ export async function forgotPasswordAction(email: string) {
             type: 'recovery',
             email: email,
             options: {
+                // IMPORTANT: This must match the route that handles password recovery
+                // The /reset-password page handles the auth callback and session establishment
                 redirectTo: `${baseUrl}/reset-password`
             }
         })

@@ -6,7 +6,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { getHouseRules, getGenderOptions, type FormData } from "./types"
 import { memo } from "react"
-import { ShieldCheck, ImageIcon, Phone } from "lucide-react"
+import { ShieldCheck, ImageIcon, Phone, Home } from "lucide-react"
 
 interface RulesStepProps {
     formData: FormData
@@ -118,7 +118,8 @@ const RulesStepComponent = ({ formData, setFormData, isAdmin, isEditMode }: Rule
                                 className="mt-0.5"
                             />
                             <div className="space-y-1">
-                                <Label htmlFor="consentPublished" className="cursor-pointer font-medium">
+                                <Label htmlFor="consentPublished" className="cursor-pointer font-medium flex items-center gap-2">
+                                    <Home className="h-4 w-4" />
                                     Property Listing Consent
                                 </Label>
                                 <p className="text-sm text-muted-foreground">

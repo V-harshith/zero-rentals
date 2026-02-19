@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { supabaseAdmin } from './supabase-admin'
 import { generateVerificationToken, getTokenExpiry } from './verification-utils'
 import { checkRateLimit, maskUserId, sanitizeForLog } from './security-utils'
 
@@ -290,10 +291,28 @@ export async function signUp(
 
   console.log("Auth: Registration successful, userId:", result.userId)
 
+  // Generate and save verification token
+  const verificationToken = generateVerificationToken()
+  const tokenExpiresAt = getTokenExpiry()
+
+  // CRITICAL: Save token to database before sending email
+  const { error: tokenUpdateError } = await supabaseAdmin
+    .from('users')
+    .update({
+      verification_token: verificationToken,
+      token_expires_at: tokenExpiresAt.toISOString(),
+    })
+    .eq('id', result.userId)
+
+  if (tokenUpdateError) {
+    console.error("Auth: Failed to save verification token:", tokenUpdateError)
+    // Don't fail registration, but log for manual intervention
+    // User can resend verification email which will generate a new token
+  }
+
   // Send verification email via server action (non-blocking)
   // The API already triggers Supabase's verification email, but we also
   // send our custom verification email for consistency
-  const verificationToken = generateVerificationToken()
   try {
     await sendVerificationViaAction(email, userData.name, verificationToken, userData.role)
   } catch (emailError: any) {

@@ -702,9 +702,14 @@ function AdminDashboard() {
   }
 
 
-  // Calculate stats with memoization
+  // Calculate stats with memoization - only count completed/successful payments
   const totalRevenue = React.useMemo(() =>
-    payments.reduce((sum, p) => sum + p.amount, 0),
+    payments.reduce((sum, p) => {
+      if (p.status === 'success' || p.status === 'completed') {
+        return sum + p.amount
+      }
+      return sum
+    }, 0),
     [payments]
   )
 
