@@ -106,7 +106,7 @@ export async function POST(request: NextRequest) {
     if (createError) {
       console.error('Admin create user error:', createError)
       return NextResponse.json(
-        { error: `Failed to create owner account: ${authError.message}` },
+        { error: `Failed to create owner account: ${createError.message || 'Unknown error'}` },
         { status: 500 }
       )
     }
