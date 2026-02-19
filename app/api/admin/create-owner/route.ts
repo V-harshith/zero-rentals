@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
-import { getCurrentUser } from '@/lib/auth'
+import { createClient as createServiceClient } from '@supabase/supabase-js'
+import { createClient } from '@/lib/supabase-server'
 import { csrfProtection } from '@/lib/csrf-server'
 import { rateLimit } from '@/lib/rate-limit'
 
-const createServiceClient = () => {
+const createAdminClient = () => {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
 
-  return createClient(supabaseUrl, serviceRoleKey, {
+  return createServiceClient(supabaseUrl, serviceRoleKey, {
     auth: { autoRefreshToken: false, persistSession: false }
   })
 }
@@ -21,14 +21,31 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid CSRF token' }, { status: 403 })
     }
 
-    // Verify admin
-    const currentUser = await getCurrentUser()
-    if (!currentUser || currentUser.role !== 'admin') {
+    // Get server-side Supabase client (handles cookies properly)
+    const supabase = await createClient()
+
+    // Verify admin using server-side auth
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+
+    if (authError || !user) {
+      console.error('[ADMIN API] Auth error:', authError)
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    // Fetch user profile to get role
+    const { data: userData, error: profileError } = await supabase
+      .from('users')
+      .select('role, name, email')
+      .eq('id', user.id)
+      .single()
+
+    if (profileError || !userData || userData.role !== 'admin') {
+      console.error('[ADMIN API] Not admin:', profileError, userData)
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     // Rate limit admin owner creation (20 per hour per admin)
-    const rateLimitKey = `admin:create-owner:${currentUser.id}`
+    const rateLimitKey = `admin:create-owner:${user.id}`
     const rateLimitResult = await rateLimit(rateLimitKey, 20, 60 * 60 * 1000)
     if (!rateLimitResult.success) {
       return NextResponse.json(
@@ -62,10 +79,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid email format' }, { status: 400 })
     }
 
-    const supabase = createServiceClient()
+    const adminSupabase = createAdminClient()
 
     // Check if email exists
-    const { data: existingUser } = await supabase
+    const { data: existingUser } = await adminSupabase
       .from('users')
       .select('id, email')
       .eq('email', email.toLowerCase())
@@ -79,15 +96,15 @@ export async function POST(request: NextRequest) {
     }
 
     // Create user with admin API (bypasses public API rate limits)
-    const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+    const { data: authData, error: createError } = await adminSupabase.auth.admin.createUser({
       email: email.toLowerCase(),
       password,
       email_confirm: false,
       user_metadata: { name, role: 'owner', phone: phone || null }
     })
 
-    if (authError) {
-      console.error('Admin create user error:', authError)
+    if (createError) {
+      console.error('Admin create user error:', createError)
       return NextResponse.json(
         { error: `Failed to create owner account: ${authError.message}` },
         { status: 500 }
@@ -102,7 +119,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Insert into users table
-    const { error: userError } = await supabase
+    const { error: userError } = await adminSupabase
       .from('users')
       .insert({
         id: authData.user.id,
@@ -115,7 +132,7 @@ export async function POST(request: NextRequest) {
 
     if (userError) {
       // Rollback auth user
-      await supabase.auth.admin.deleteUser(authData.user.id)
+      await adminSupabase.auth.admin.deleteUser(authData.user.id)
       return NextResponse.json(
         { error: `Failed to create owner profile: ${userError.message}` },
         { status: 500 }
