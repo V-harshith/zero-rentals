@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { z } from 'zod'
 import { csrfProtection } from '@/lib/csrf-server'
+import { generateVerificationToken, getTokenExpiry } from '@/lib/verification-utils'
 
 // ============================================================================
 // VALIDATION SCHEMA
@@ -53,6 +54,7 @@ function createServiceClient() {
 interface UserCreationResult {
   success: boolean
   userId?: string
+  verificationToken?: string
   error?: string
   code?: string
 }
@@ -120,6 +122,10 @@ async function createUserAtomically(
     // -------------------------------------------------------------------------
     // STEP 2: Create user profile in database
     // -------------------------------------------------------------------------
+    // Generate verification token for email verification
+    const verificationToken = generateVerificationToken()
+    const tokenExpiresAt = getTokenExpiry()
+
     const profileData: Record<string, unknown> = {
       id: authUserId,
       email: data.email.toLowerCase(),
@@ -129,6 +135,8 @@ async function createUserAtomically(
       verified: false,
       status: 'active',
       email_verified_at: null,
+      verification_token: verificationToken,
+      token_expires_at: tokenExpiresAt.toISOString(),
     }
 
     // Add tenant-specific fields
@@ -203,6 +211,7 @@ async function createUserAtomically(
     return {
       success: true,
       userId: authUserId,
+      verificationToken: verificationToken,
     }
 
   } catch (error: any) {
@@ -308,6 +317,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       userId: result.userId,
+      verificationToken: result.verificationToken,
       message: 'Account created successfully. Please check your email to verify your account.',
       requiresVerification: true,
     }, { status: 201 })

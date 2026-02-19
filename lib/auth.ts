@@ -1,7 +1,6 @@
 import { supabase } from './supabase'
-import { supabaseAdmin } from './supabase-admin'
-import { generateVerificationToken, getTokenExpiry } from './verification-utils'
-import { checkRateLimit, maskUserId, sanitizeForLog } from './security-utils'
+import { generateVerificationToken } from './verification-utils'
+import { checkRateLimit } from './security-utils'
 
 // ============================================================================
 // SECURITY CONFIGURATION
@@ -59,73 +58,6 @@ function handleAuthError(error: any): never {
 // ============================================================================
 // USER PROFILE HELPERS
 // ============================================================================
-
-async function createUserProfile(userId: string, email: string, userData: any, verificationToken: string) {
-  const tokenExpiresAt = getTokenExpiry()
-
-  const profileData: any = {
-    id: userId,
-    email,
-    name: userData.name,
-    phone: userData.phone || null,
-    role: userData.role,
-    verified: false,
-    status: 'active',
-    verification_token: verificationToken,
-    token_expires_at: tokenExpiresAt.toISOString(),
-    email_verified_at: null,
-  }
-
-  // Add tenant-specific fields
-  if (userData.role === 'tenant') {
-    if (userData.preferred_city) {
-      profileData.preferred_city = userData.preferred_city
-    }
-    if (userData.preferred_area) {
-      profileData.preferred_area = userData.preferred_area
-    }
-  }
-
-
-
-  // Retry logic for profile creation to handle race conditions/aborts
-  let attempts = 0
-  const maxAttempts = 3
-
-  while (attempts < maxAttempts) {
-    try {
-      const { data, error } = await supabase
-        .from('users')
-        .upsert(profileData, { onConflict: 'id' })
-        .select()
-
-      if (error) {
-        // Database error - log and throw
-        console.error('User record creation failed:', JSON.stringify(error, null, 2))
-        throw new Error(`Failed to create user profile: ${error.message}`)
-      }
-
-      return // Success
-    } catch (error: any) {
-      // Handle AbortError or network errors by retrying
-      if (error.name === 'AbortError' || error.message?.includes('aborted') || error.message?.includes('fetch')) {
-        attempts++
-        if (attempts < maxAttempts) {
-          console.warn(`Profile creation attempt ${attempts} failed (retrying):`, error.message)
-          await new Promise(resolve => setTimeout(resolve, 500 * attempts)) // Backoff
-          continue
-        }
-      }
-
-      // If we ran out of retries or it's a different error
-      console.error('User record creation failed:', JSON.stringify(error, null, 2))
-      throw new Error(`Failed to create user profile: ${error.message}`)
-    }
-  }
-
-  // Fallback: If loop exits without returning, throw error
-  throw new Error('Failed to create user profile: Maximum retry attempts exceeded')
-}
 
 async function sendVerificationViaAction(email: string, name: string, token: string, role?: 'owner' | 'tenant') {
   try {
@@ -291,33 +223,22 @@ export async function signUp(
 
   console.log("Auth: Registration successful, userId:", result.userId)
 
-  // Generate and save verification token
-  const verificationToken = generateVerificationToken()
-  const tokenExpiresAt = getTokenExpiry()
-
-  // CRITICAL: Save token to database before sending email
-  const { error: tokenUpdateError } = await supabaseAdmin
-    .from('users')
-    .update({
-      verification_token: verificationToken,
-      token_expires_at: tokenExpiresAt.toISOString(),
-    })
-    .eq('id', result.userId)
-
-  if (tokenUpdateError) {
-    console.error("Auth: Failed to save verification token:", tokenUpdateError)
-    // Don't fail registration, but log for manual intervention
-    // User can resend verification email which will generate a new token
-  }
+  // The API route has already saved the verification_token to the database
+  // Use the token returned from the API to send the custom verification email
+  const verificationToken = result.verificationToken
 
   // Send verification email via server action (non-blocking)
   // The API already triggers Supabase's verification email, but we also
   // send our custom verification email for consistency
-  try {
-    await sendVerificationViaAction(email, userData.name, verificationToken, userData.role)
-  } catch (emailError: any) {
-    console.error("Auth: Failed to send custom verification email (non-fatal):", emailError)
-    // Don't throw - user is created, they can resend verification email later
+  if (verificationToken) {
+    try {
+      await sendVerificationViaAction(email, userData.name, verificationToken, userData.role)
+    } catch (emailError: any) {
+      console.error("Auth: Failed to send custom verification email (non-fatal):", emailError)
+      // Don't throw - user is created, they can resend verification email later
+    }
+  } else {
+    console.warn("Auth: No verification token returned from API, skipping custom verification email")
   }
 
   console.log("Auth: signUp flow complete")
