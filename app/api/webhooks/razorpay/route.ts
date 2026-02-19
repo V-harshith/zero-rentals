@@ -6,6 +6,8 @@ import {
     determineSubscriptionAction,
     type SubscriptionStatus
 } from '@/lib/subscription-service'
+import { validatePlanAmount, validatePropertyAmount } from '@/lib/pricing'
+import { PLAN_LIMITS } from '@/lib/constants'
 
 // Event sequence numbers for ordering (higher = more recent)
 const EVENT_SEQUENCE: Record<string, number> = {
@@ -165,17 +167,54 @@ async function processQueuedEvents(entityId: string | null): Promise<void> {
 /**
  * Process event based on its type
  */
-async function processEventByType(eventType: string, payload: { payload: { order: { entity: { notes: { userId: string; planName: string; duration: string }; amount: number; id: string } } } }): Promise<void> {
+async function processEventByType(eventType: string, payload: { payload: { order: { entity: { notes: { userId: string; type?: string; planName?: string; duration?: string; plan?: string; days?: string }; amount: number; id: string } } } }): Promise<void> {
     if (eventType === 'order.paid') {
         const order = payload.payload.order.entity
         const notes = order.notes
-        await fulfillSubscription(
-            notes.userId,
-            notes.planName,
-            notes.duration,
-            order.amount / 100,
-            order.id
-        )
+        const paymentType = notes.type || 'subscription'
+
+        if (paymentType === 'property_payment') {
+            // Validate required property payment fields
+            if (!notes.plan || !notes.days) {
+                console.error('Missing required property payment fields in queued event:', {
+                    userId: notes.userId,
+                    plan: notes.plan,
+                    days: notes.days
+                })
+                throw new Error('Invalid property payment metadata: missing plan or days')
+            }
+
+            const days = parseInt(notes.days, 10)
+            if (isNaN(days) || days <= 0) {
+                throw new Error(`Invalid days value: ${notes.days}`)
+            }
+
+            await fulfillPropertyPayment(
+                notes.userId,
+                notes.plan,
+                days,
+                order.amount / 100,
+                order.id
+            )
+        } else {
+            // Validate required subscription fields
+            if (!notes.planName || !notes.duration) {
+                console.error('Missing required subscription fields in queued event:', {
+                    userId: notes.userId,
+                    planName: notes.planName,
+                    duration: notes.duration
+                })
+                throw new Error('Invalid subscription metadata: missing planName or duration')
+            }
+
+            await fulfillSubscription(
+                notes.userId,
+                notes.planName,
+                notes.duration,
+                order.amount / 100,
+                order.id
+            )
+        }
     }
     // Add other event types as needed
 }
@@ -309,12 +348,113 @@ export async function POST(req: NextRequest) {
             const order = event.payload.order.entity
             const notes = order.notes
             const userId = notes.userId
-            const planName = notes.planName
-            const duration = notes.duration
             const amount = order.amount / 100 // Convert from paise
             const orderId = order.id
+            const paymentType = notes.type || 'subscription' // Default to subscription for backward compat
 
-            await fulfillSubscription(userId, planName, duration, amount, orderId)
+            if (paymentType === 'property_payment') {
+                // Handle property addon payment
+                const plan = notes.plan
+                const daysValue = notes.days
+
+                // Validate required fields
+                if (!plan || !daysValue) {
+                    console.error('[webhook] Missing required property payment metadata:', {
+                        userId,
+                        plan,
+                        days: daysValue
+                    })
+                    await supabaseAdmin
+                        .from('payment_logs')
+                        .insert({
+                            user_id: userId,
+                            amount: amount,
+                            currency: 'INR',
+                            payment_gateway: 'razorpay',
+                            transaction_id: orderId,
+                            status: 'failed',
+                            metadata: { type: 'property_payment', error: 'Missing plan or days' }
+                        })
+                    return NextResponse.json(
+                        { error: 'Invalid payment metadata: missing plan or days' },
+                        { status: 400 }
+                    )
+                }
+
+                const days = parseInt(daysValue, 10)
+                if (isNaN(days) || days <= 0) {
+                    console.error('[webhook] Invalid days value:', daysValue)
+                    await supabaseAdmin
+                        .from('payment_logs')
+                        .insert({
+                            user_id: userId,
+                            amount: amount,
+                            currency: 'INR',
+                            payment_gateway: 'razorpay',
+                            transaction_id: orderId,
+                            status: 'failed',
+                            metadata: { type: 'property_payment', plan, days: daysValue, error: 'Invalid days value' }
+                        })
+                    return NextResponse.json(
+                        { error: 'Invalid payment metadata: days must be a positive number' },
+                        { status: 400 }
+                    )
+                }
+
+                // Validate amount against server-side pricing
+                const validation = validatePropertyAmount(plan, amount)
+                if (!validation.valid) {
+                    console.error('[webhook] Property amount validation failed:', validation.error)
+                    // Log security event
+                    await supabaseAdmin
+                        .from('payment_logs')
+                        .insert({
+                            user_id: userId,
+                            amount: amount,
+                            currency: 'INR',
+                            payment_gateway: 'razorpay',
+                            transaction_id: orderId,
+                            status: 'failed',
+                            metadata: { type: 'property_payment', plan, days, error: validation.error }
+                        })
+                    // Return error to prevent fulfillment
+                    return NextResponse.json(
+                        { error: 'Amount validation failed', details: validation.error },
+                        { status: 400 }
+                    )
+                }
+
+                await fulfillPropertyPayment(userId, plan, days, amount, orderId)
+            } else {
+                // Handle subscription payment (default, backward compatible)
+                const planName = notes.planName
+                const duration = notes.duration
+
+                // Validate amount against server-side pricing
+                const validation = validatePlanAmount(planName, duration, amount)
+                if (!validation.valid) {
+                    console.error('[webhook] Amount validation failed:', validation.error)
+                    // Log security event
+                    await supabaseAdmin
+                        .from('payment_logs')
+                        .insert({
+                            user_id: userId,
+                            amount: amount,
+                            currency: 'INR',
+                            payment_gateway: 'razorpay',
+                            transaction_id: orderId,
+                            status: 'failed',
+                            plan_name: planName,
+                        })
+                    // Return error to prevent subscription fulfillment
+                    return NextResponse.json(
+                        { error: 'Amount validation failed', details: validation.error },
+                        { status: 400 }
+                    )
+                }
+
+                await fulfillSubscription(userId, planName, duration, amount, orderId)
+            }
         }
 
         // Mark event as completed
@@ -358,84 +498,61 @@ async function fulfillSubscription(
     orderId: string
 ) {
     try {
-        // 🔥 CRITICAL FIX: Use atomic UPSERT-FIRST pattern to prevent race conditions
-        // This ensures only one webhook can create a subscription per orderId
+        // Calculate dates
+        const now = new Date()
+        const startDate = new Date(Date.UTC(
+            now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(),
+            now.getUTCHours(), now.getUTCMinutes(), now.getUTCSeconds()
+        ))
+        const endDate = new Date(startDate)
 
-        // Step 1: Atomically insert payment log (this acts as a distributed lock)
-        const { error: insertError } = await supabaseAdmin
-            .from('payment_logs')
-            .insert({
-                user_id: userId,
-                subscription_id: null, // Will update after subscription creation
-                amount: amount,
-                currency: 'INR',
-                plan_name: planName, // CRITICAL: Include plan name for admin dashboard
-                transaction_id: orderId,
-                status: 'processing', // Mark as processing until subscription is created
-                payment_gateway: 'razorpay',
-                processed_at: new Date().toISOString()
-            })
-
-        // If insert failed due to unique constraint, another webhook already processed this
-        if (insertError) {
-            if (insertError.code === '23505') { // Unique violation
-                console.log('Payment already being processed by another webhook:', orderId)
-                return
-            }
-            console.error('Error creating payment log:', insertError)
-            throw insertError
+        if (duration.includes('month')) {
+            const months = parseInt(duration)
+            endDate.setUTCMonth(endDate.getUTCMonth() + months)
+        } else if (duration.includes('year')) {
+            endDate.setUTCFullYear(endDate.getUTCFullYear() + 1)
         }
 
-        // Step 2: Check for existing active subscription (idempotency)
-        const { data: existingSub } = await supabaseAdmin
-            .from('subscriptions')
-            .select('id')
-            .eq('user_id', userId)
-            .eq('status', 'active')
-            .gt('end_date', new Date().toISOString())
-            .maybeSingle()
+        const propertiesLimit = PLAN_LIMITS[planName.toUpperCase() as keyof typeof PLAN_LIMITS] || 1
 
-        if (existingSub) {
-            console.log('User already has active subscription:', existingSub.id)
-            // Update payment log with existing subscription
-            await supabaseAdmin
-                .from('payment_logs')
-                .update({
-                    subscription_id: existingSub.id,
-                    status: 'success'
-                })
-                .eq('transaction_id', orderId)
+        // 🔥 ATOMIC OPERATION: Use database function to prevent race conditions
+        const { data: result, error: rpcError } = await supabaseAdmin.rpc(
+            'atomic_subscription_replace',
+            {
+                p_user_id: userId,
+                p_plan_name: planName,
+                p_plan_duration: duration,
+                p_amount: amount,
+                p_properties_limit: propertiesLimit,
+                p_start_date: startDate.toISOString(),
+                p_end_date: endDate.toISOString(),
+                p_transaction_id: orderId,
+                p_triggered_by: 'webhook'
+            }
+        )
+
+        if (rpcError) {
+            console.error('Atomic subscription replacement failed:', rpcError)
+            throw rpcError
+        }
+
+        if (!result) {
+            throw new Error('No result from atomic subscription replacement')
+        }
+
+        // Handle idempotent response
+        if (result.idempotent) {
+            console.log('Payment already processed (idempotent):', orderId)
             return
         }
 
-        // Map properties limit (aligned with constants.ts)
-        const limitMap: Record<string, number> = {
-            'Free': 1,
-            'Silver': 3,
-            'Gold': 5,
-            'Platinum': 10,
-            'Elite': 999
-        }
-        const propertiesLimit = limitMap[planName] || 1
-
-        // 🔥 STATE MACHINE FIX: Use proper state machine for cancelled -> renewed transition
-        const result = await handleCancelledToRenewed(userId, {
-            planName,
-            duration,
-            amount,
-            propertiesLimit
-        })
-
         if (!result.success) {
-            // Mark payment as failed
-            await supabaseAdmin
-                .from('payment_logs')
-                .update({ status: 'failed' })
-                .eq('transaction_id', orderId)
+            if (result.code === 'CONCURRENT_CREATION') {
+                console.log('Concurrent subscription creation detected:', orderId)
+                return
+            }
             throw new Error(result.error || 'Failed to process subscription')
         }
-
-        const subscription = result.subscription!
 
         // 🔥 NEW: Auto-feature existing properties if plan allows
         const planFeatures = {
@@ -455,31 +572,6 @@ async function fulfillSubscription(
                 .eq('owner_id', userId)
                 .in('status', ['active', 'pending'])
         }
-
-        // Step 3: Update payment log with subscription ID and success status
-        const { error: updateError } = await supabaseAdmin
-            .from('payment_logs')
-            .update({
-                subscription_id: subscription.id,
-                status: 'success'
-            })
-            .eq('transaction_id', orderId)
-
-        if (updateError) {
-            console.error('Error updating payment log:', updateError)
-            // Non-fatal: subscription was created successfully
-        }
-
-        // Calculate end date for email
-        const { data: subData } = await supabaseAdmin
-            .from('subscriptions')
-            .select('end_date')
-            .eq('id', subscription.id)
-            .single()
-
-        const endDate = subData?.end_date
-            ? new Date(subData.end_date)
-            : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // Default 30 days
 
         // Send email notification
         const { data: user } = await supabaseAdmin
@@ -502,6 +594,105 @@ async function fulfillSubscription(
 
     } catch (error) {
         console.error('Webhook Fulfillment Error:', error)
+        // Re-throw to let Razorpay retry
+        throw error
+    }
+}
+
+async function fulfillPropertyPayment(
+    userId: string,
+    plan: string,
+    days: number,
+    amount: number,
+    orderId: string
+) {
+    try {
+        // Step 1: Verify user has active subscription (required for property payments)
+        const { data: subscription, error: subError } = await supabaseAdmin
+            .from('subscriptions')
+            .select('id, status, end_date')
+            .eq('user_id', userId)
+            .eq('status', 'active')
+            .gt('end_date', new Date().toISOString())
+            .maybeSingle()
+
+        if (subError) {
+            console.error('Error checking subscription:', subError)
+            throw new Error('Failed to verify subscription status')
+        }
+
+        if (!subscription) {
+            console.error('Property payment attempted without active subscription:', userId)
+            throw new Error('Active subscription required for property payments')
+        }
+
+        // Step 2: Check if payment log already exists (idempotency)
+        const { data: existingLog } = await supabaseAdmin
+            .from('payment_logs')
+            .select('id, status')
+            .eq('transaction_id', orderId)
+            .maybeSingle()
+
+        if (existingLog) {
+            if (existingLog.status === 'completed' || existingLog.status === 'success') {
+                console.log('Property payment already processed:', orderId)
+                return
+            }
+            // Update existing pending/processing log
+            const { error: updateError } = await supabaseAdmin
+                .from('payment_logs')
+                .update({
+                    status: 'completed',
+                    payment_method: 'razorpay',
+                    processed_at: new Date().toISOString()
+                })
+                .eq('transaction_id', orderId)
+
+            if (updateError) {
+                console.error('Error updating payment log:', updateError)
+                throw updateError
+            }
+        } else {
+            // Create new payment log entry
+            const { error: insertError } = await supabaseAdmin
+                .from('payment_logs')
+                .insert({
+                    user_id: userId,
+                    amount: amount,
+                    currency: 'INR',
+                    payment_gateway: 'razorpay',
+                    transaction_id: orderId,
+                    status: 'completed',
+                    payment_method: 'razorpay',
+                    metadata: {
+                        type: 'property_payment',
+                        plan: plan,
+                        days: days,
+                        property_expires_at: new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString()
+                    },
+                    processed_at: new Date().toISOString()
+                })
+
+            if (insertError) {
+                if (insertError.code === '23505') { // Unique violation
+                    console.log('Property payment already processed by another webhook:', orderId)
+                    return
+                }
+                console.error('Error creating payment log:', insertError)
+                throw insertError
+            }
+        }
+
+        console.log('Property payment fulfilled successfully:', {
+            userId,
+            orderId,
+            plan,
+            days,
+            amount
+        })
+
+    } catch (error) {
+        console.error('Property Payment Fulfillment Error:', error)
         // Re-throw to let Razorpay retry
         throw error
     }

@@ -2,9 +2,19 @@ import { NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { generateVerificationToken } from '@/lib/verification-utils'
 import { sendVerificationEmailAction } from '@/app/actions/auth-actions'
+import { csrfProtection } from '@/lib/csrf-server'
 
 export async function POST(request: Request) {
     try {
+        // CSRF Protection
+        const csrfResult = await csrfProtection(request)
+        if (!csrfResult.valid) {
+            return NextResponse.json(
+                { success: false, error: csrfResult.error || 'Invalid CSRF token', code: 'CSRF_ERROR' },
+                { status: 403 }
+            )
+        }
+
         const body = await request.json()
         const { email } = body
 

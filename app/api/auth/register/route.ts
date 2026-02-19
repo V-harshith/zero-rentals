@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { z } from 'zod'
+import { csrfProtection } from '@/lib/csrf-server'
 
 // ============================================================================
 // VALIDATION SCHEMA
@@ -229,6 +230,17 @@ async function createUserAtomically(
 
 export async function POST(request: NextRequest) {
   try {
+    // -------------------------------------------------------------------------
+    // CSRF Protection Check
+    // -------------------------------------------------------------------------
+    const csrfResult = await csrfProtection(request)
+    if (!csrfResult.valid) {
+      return NextResponse.json(
+        { success: false, error: csrfResult.error || 'Invalid CSRF token', code: 'CSRF_ERROR' },
+        { status: 403 }
+      )
+    }
+
     // -------------------------------------------------------------------------
     // Parse and validate request body
     // -------------------------------------------------------------------------

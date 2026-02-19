@@ -5,6 +5,18 @@ import { ImagePlus, X, Loader2 } from "lucide-react"
 import type { FormData } from "./types"
 import { memo, useEffect, useRef } from "react"
 
+// Track mount state to prevent state updates on unmounted component
+const useIsMounted = () => {
+    const isMountedRef = useRef(true)
+    useEffect(() => {
+        isMountedRef.current = true
+        return () => {
+            isMountedRef.current = false
+        }
+    }, [])
+    return () => isMountedRef.current
+}
+
 interface MediaStepProps {
     formData: FormData
     setFormData: (data: FormData) => void
@@ -32,7 +44,10 @@ const MediaStepComponent = ({
     isProcessing = false,
     processingCount = 0
 }: MediaStepProps) => {
+    const isMounted = useIsMounted()
+
     const updateField = (field: keyof FormData, value: string) => {
+        if (!isMounted()) return
         setFormData({ ...formData, [field]: value })
     }
 

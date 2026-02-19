@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
+import { csrfProtection } from '@/lib/csrf-server'
 import crypto from 'crypto'
 
 // Rate limiting store (in production, use Redis)
@@ -30,6 +31,15 @@ function checkRateLimit(email: string): { allowed: boolean; retryAfter?: number 
 
 export async function POST(request: NextRequest) {
   try {
+    // CSRF Protection
+    const csrfResult = await csrfProtection(request)
+    if (!csrfResult.valid) {
+      return NextResponse.json(
+        { success: false, error: csrfResult.error || 'Invalid CSRF token', code: 'CSRF_ERROR' },
+        { status: 403 }
+      )
+    }
+
     const { email, name, role } = await request.json()
 
     if (!email || !name || !role) {

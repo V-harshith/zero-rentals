@@ -176,10 +176,32 @@ CREATE TABLE IF NOT EXISTS payment_logs (
   currency TEXT DEFAULT 'INR',
   payment_method TEXT,
   payment_gateway TEXT,
+  plan_name TEXT,
   transaction_id TEXT UNIQUE,
   status TEXT DEFAULT 'pending',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- Webhook events table (for idempotency and event sequencing)
+CREATE TABLE IF NOT EXISTS webhook_events (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  event_id TEXT UNIQUE NOT NULL,
+  event_type TEXT NOT NULL,
+  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
+  payload JSONB NOT NULL,
+  sequence_number INTEGER DEFAULT 999,
+  entity_id TEXT,
+  error TEXT,
+  processed_at TIMESTAMP WITH TIME ZONE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Webhook events indexes
+CREATE INDEX IF NOT EXISTS idx_webhook_events_event_id ON webhook_events(event_id);
+CREATE INDEX IF NOT EXISTS idx_webhook_events_entity_status ON webhook_events(entity_id, status, sequence_number) WHERE entity_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_webhook_events_entity_pending ON webhook_events(entity_id, sequence_number) WHERE status IN ('pending', 'processing', 'failed');
+CREATE INDEX IF NOT EXISTS idx_webhook_events_type ON webhook_events(event_type);
+CREATE INDEX IF NOT EXISTS idx_webhook_events_status_created ON webhook_events(status, created_at);
 
 -- 3. APPLY RLS
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
@@ -190,6 +212,7 @@ ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE favorites ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE payment_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE webhook_events ENABLE ROW LEVEL SECURITY;
 
 -- 4. RECREATE POLICIES (Now safe because we dropped them)
 
@@ -230,6 +253,9 @@ CREATE POLICY "Owners can update inquiry status" ON inquiries FOR UPDATE USING (
 CREATE POLICY "Users can view own notifications" ON notifications FOR SELECT USING (user_id = auth.uid());
 CREATE POLICY "System can create notifications" ON notifications FOR INSERT WITH CHECK (true);
 CREATE POLICY "Users can mark notifications as read" ON notifications FOR UPDATE USING (user_id = auth.uid());
+
+-- Webhook events (service role only)
+CREATE POLICY "Service role can manage webhook events" ON webhook_events USING (true) WITH CHECK (true);
 
 -- 5. FUNCTION & TRIGGER (Safe Drop/Create)
 CREATE OR REPLACE FUNCTION update_updated_at_column() RETURNS TRIGGER AS $$

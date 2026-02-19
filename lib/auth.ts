@@ -233,7 +233,8 @@ export async function signUp(
     role: 'owner' | 'tenant';
     preferred_city?: string | null;
     preferred_area?: string | null;
-  }
+  },
+  csrfToken: string
 ) {
   validateEmail(email)
   validatePasswordStrength(password)
@@ -252,6 +253,7 @@ export async function signUp(
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      'x-csrf-token': csrfToken,
     },
     body: JSON.stringify({
       email,

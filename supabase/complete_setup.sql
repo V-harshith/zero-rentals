@@ -196,8 +196,25 @@ CREATE TABLE IF NOT EXISTS payment_logs (
   currency TEXT DEFAULT 'INR',
   payment_method TEXT,
   payment_gateway TEXT,
+  plan_name TEXT,
   transaction_id TEXT UNIQUE,
   status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'success', 'failed', 'refunded')),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- =============================================
+-- WEBHOOK_EVENTS TABLE
+-- =============================================
+CREATE TABLE IF NOT EXISTS webhook_events (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  event_id TEXT UNIQUE NOT NULL,
+  event_type TEXT NOT NULL,
+  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
+  payload JSONB NOT NULL,
+  sequence_number INTEGER DEFAULT 999,
+  entity_id TEXT,
+  error TEXT,
+  processed_at TIMESTAMP WITH TIME ZONE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -223,6 +240,11 @@ CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender_id);
 CREATE INDEX IF NOT EXISTS idx_messages_receiver ON messages(receiver_id);
 CREATE INDEX IF NOT EXISTS idx_favorites_user ON favorites(user_id);
 CREATE INDEX IF NOT EXISTS idx_favorites_property ON favorites(property_id);
+CREATE INDEX IF NOT EXISTS idx_webhook_events_event_id ON webhook_events(event_id);
+CREATE INDEX IF NOT EXISTS idx_webhook_events_entity_status ON webhook_events(entity_id, status, sequence_number) WHERE entity_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_webhook_events_entity_pending ON webhook_events(entity_id, sequence_number) WHERE status IN ('pending', 'processing', 'failed');
+CREATE INDEX IF NOT EXISTS idx_webhook_events_type ON webhook_events(event_type);
+CREATE INDEX IF NOT EXISTS idx_webhook_events_status_created ON webhook_events(status, created_at);
 
 -- =============================================
 -- PART 3: ENABLE RLS ON ALL TABLES
@@ -236,6 +258,7 @@ ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE favorites ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE payment_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE webhook_events ENABLE ROW LEVEL SECURITY;
 
 -- =============================================
 -- PART 4: RLS POLICIES - USERS
@@ -343,7 +366,15 @@ CREATE POLICY "Users can mark notifications as read" ON notifications
   FOR UPDATE USING (user_id = auth.uid());
 
 -- =============================================
--- PART 10: FUNCTIONS & TRIGGERS
+-- PART 10: RLS POLICIES - WEBHOOK EVENTS
+-- =============================================
+
+CREATE POLICY "Service role can manage webhook events" ON webhook_events
+  USING (true)
+  WITH CHECK (true);
+
+-- =============================================
+-- PART 11: FUNCTIONS & TRIGGERS
 -- =============================================
 
 CREATE OR REPLACE FUNCTION update_updated_at_column()

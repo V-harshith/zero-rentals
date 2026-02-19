@@ -2,10 +2,26 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createRazorpayOrder } from '@/lib/razorpay'
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
+import { validatePlanAmount } from '@/lib/pricing'
 
 export async function POST(request: NextRequest) {
     try {
         const { planName, amount, duration, propertiesLimit } = await request.json()
+
+        // Validate amount against server-side pricing
+        const validation = validatePlanAmount(planName, duration, amount)
+        if (!validation.valid) {
+            console.error('[create-order] Amount validation failed:', validation.error)
+            return NextResponse.json(
+                {
+                    error: 'Invalid amount',
+                    details: validation.error,
+                    expected: validation.expected,
+                    received: validation.received
+                },
+                { status: 400 }
+            )
+        }
 
         // Get authenticated user
         const cookieStore = await cookies()

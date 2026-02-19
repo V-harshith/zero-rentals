@@ -108,10 +108,10 @@ vercel --prod
 
 | Plan | Duration | Properties | Price |
 |------|----------|-----------|-------|
-| Silver | 1 Month | 3 | ₹1,000 |
-| Gold | 3 Months | 5 | ₹2,700 |
-| Platinum | 6 Months | 10 | ₹5,000 |
-| Elite | 1 Year | Unlimited | ₹9,000 |
+| Silver | 1 Month | 1 | ₹1,000 |
+| Gold | 3 Months | 1 | ₹2,700 |
+| Platinum | 6 Months | 1 | ₹5,000 |
+| Elite | 1 Year | 1 | ₹9,000 |
 
 ## 🔒 Security Features
 

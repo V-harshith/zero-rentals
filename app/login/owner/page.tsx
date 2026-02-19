@@ -12,6 +12,7 @@ import Link from "next/link"
 import Image from "next/image"
 import { toast } from "sonner"
 import { supabase } from "@/lib/supabase"
+import { csrfFetch } from "@/lib/csrf-fetch"
 
 export default function OwnerLoginPage() {
     const { user, login, isLoading: authLoading } = useAuth()
@@ -70,9 +71,8 @@ export default function OwnerLoginPage() {
                         onClick: async () => {
                             const toastId = toast.loading("Sending verification email...")
                             try {
-                                const res = await fetch('/api/auth/resend-verification', {
+                                const res = await csrfFetch('/api/auth/resend-verification', {
                                     method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
                                     body: JSON.stringify({ email })
                                 })
                                 const data = await res.json()

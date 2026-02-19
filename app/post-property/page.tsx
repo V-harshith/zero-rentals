@@ -162,6 +162,7 @@ function PostPropertyPage() {
     currentIndex: 0
   })
   const abortControllerRef = useRef<AbortController | null>(null)
+  const isMountedRef = useRef(true)
   const [processingImageIds, setProcessingImageIds] = useState<Set<string>>(new Set())
 
   // Form draft persistence key
@@ -260,7 +261,10 @@ function PostPropertyPage() {
 
   // Cleanup scripts and image processing on unmount
   useEffect(() => {
+    isMountedRef.current = true
+
     return () => {
+      isMountedRef.current = false
       cleanupScripts();
       // Cancel any in-flight image processing
       if (abortControllerRef.current) {
@@ -377,12 +381,16 @@ function PostPropertyPage() {
         if (data.images && Array.isArray(data.images)) {
           setExistingImages(data.images)
         }
-        toast.success('Property data loaded')
+        if (isMountedRef.current) {
+          toast.success('Property data loaded')
+        }
       }
     } catch (error) {
       console.error('Error loading property:', error)
-      toast.error('Failed to load property data')
-      router.push('/dashboard/admin')
+      if (isMountedRef.current) {
+        toast.error('Failed to load property data')
+        router.push('/dashboard/admin')
+      }
     } finally {
       setIsLoadingProperty(false)
     }
@@ -627,7 +635,9 @@ function PostPropertyPage() {
     }
 
     state.isProcessing = true
-    setProcessingImageIds(new Set(state.queue.map(item => item.id)))
+    if (isMountedRef.current) {
+      setProcessingImageIds(new Set(state.queue.map(item => item.id)))
+    }
 
     // Create new abort controller for this batch
     abortControllerRef.current = new AbortController()
@@ -639,7 +649,9 @@ function PostPropertyPage() {
 
         // Update status to compressing
         item.status = 'compressing'
-        setProcessingImageIds(prev => new Set(prev).add(item.id))
+        if (isMountedRef.current) {
+          setProcessingImageIds(prev => new Set(prev).add(item.id))
+        }
 
         try {
           // Compress the image
@@ -652,30 +664,36 @@ function PostPropertyPage() {
           item.compressedFile = compressedFile
           item.status = 'completed'
 
-          // Add to form data immediately after compression
-          setFormData(prev => ({
-            ...prev,
-            images: [...prev.images, compressedFile]
-          }))
+          // Add to form data immediately after compression (with mount check)
+          if (isMountedRef.current && !signal.aborted) {
+            setFormData(prev => ({
+              ...prev,
+              images: [...prev.images, compressedFile]
+            }))
+          }
 
           // Remove from processing set
-          setProcessingImageIds(prev => {
-            const next = new Set(prev)
-            next.delete(item.id)
-            return next
-          })
+          if (isMountedRef.current) {
+            setProcessingImageIds(prev => {
+              const next = new Set(prev)
+              next.delete(item.id)
+              return next
+            })
+          }
         } catch (error: any) {
           if (error.message === 'Image processing cancelled') {
             throw error
           }
           item.status = 'error'
           item.error = error.message
-          setProcessingImageIds(prev => {
-            const next = new Set(prev)
-            next.delete(item.id)
-            return next
-          })
-          toast.error(`Failed to process ${item.file.name}: ${error.message}`)
+          if (isMountedRef.current) {
+            setProcessingImageIds(prev => {
+              const next = new Set(prev)
+              next.delete(item.id)
+              return next
+            })
+            toast.error(`Failed to process ${item.file.name}: ${error.message}`)
+          }
         }
 
         state.currentIndex++
@@ -683,7 +701,7 @@ function PostPropertyPage() {
 
       // Show success toast for completed batch
       const completedCount = state.queue.filter(i => i.status === 'completed').length
-      if (completedCount > 0 && !signal.aborted) {
+      if (isMountedRef.current && completedCount > 0 && !signal.aborted) {
         toast.success(`${completedCount} image(s) added successfully`)
       }
     } catch (error: any) {
@@ -692,7 +710,9 @@ function PostPropertyPage() {
       }
     } finally {
       state.isProcessing = false
-      setProcessingImageIds(new Set())
+      if (isMountedRef.current) {
+        setProcessingImageIds(new Set())
+      }
 
       // Clear processed items from queue
       state.queue = state.queue.filter(item => item.status === 'pending' || item.status === 'compressing')

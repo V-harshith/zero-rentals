@@ -180,8 +180,28 @@ CREATE TABLE payment_logs (
   currency TEXT DEFAULT 'INR',
   payment_method TEXT,
   payment_gateway TEXT,
+  plan_name TEXT, -- Subscription plan name for admin reporting (Silver, Gold, Platinum, Elite)
   transaction_id TEXT UNIQUE,
   status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'success', 'failed', 'refunded')),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- =============================================
+-- WEBHOOK_EVENTS TABLE
+-- =============================================
+-- Purpose: Store and track Razorpay webhook events for idempotency,
+--          event sequencing, and reliable processing
+
+CREATE TABLE IF NOT EXISTS webhook_events (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  event_id TEXT UNIQUE NOT NULL,
+  event_type TEXT NOT NULL,
+  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
+  payload JSONB NOT NULL,
+  sequence_number INTEGER DEFAULT 999,
+  entity_id TEXT,
+  error TEXT,
+  processed_at TIMESTAMP WITH TIME ZONE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -216,6 +236,13 @@ CREATE INDEX idx_messages_receiver ON messages(receiver_id);
 CREATE INDEX idx_favorites_user ON favorites(user_id);
 CREATE INDEX idx_favorites_property ON favorites(property_id);
 
+-- Webhook events indexes
+CREATE INDEX idx_webhook_events_event_id ON webhook_events(event_id);
+CREATE INDEX idx_webhook_events_entity_status ON webhook_events(entity_id, status, sequence_number) WHERE entity_id IS NOT NULL;
+CREATE INDEX idx_webhook_events_entity_pending ON webhook_events(entity_id, sequence_number) WHERE status IN ('pending', 'processing', 'failed');
+CREATE INDEX idx_webhook_events_type ON webhook_events(event_type);
+CREATE INDEX idx_webhook_events_status_created ON webhook_events(status, created_at);
+
 -- =============================================
 -- ROW LEVEL SECURITY (RLS)
 -- =============================================
@@ -227,6 +254,7 @@ ALTER TABLE subscriptions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE inquiries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE favorites ENABLE ROW LEVEL SECURITY;
+ALTER TABLE webhook_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE payment_logs ENABLE ROW LEVEL SECURITY;
 
@@ -272,6 +300,11 @@ CREATE POLICY "Users can view their messages" ON messages
 
 CREATE POLICY "Users can send messages" ON messages
   FOR INSERT WITH CHECK (sender_id = auth.uid());
+
+-- Webhook events policies (service role only)
+CREATE POLICY "Service role can manage webhook events" ON webhook_events
+  USING (true)
+  WITH CHECK (true);
 
 -- =============================================
 -- FUNCTIONS

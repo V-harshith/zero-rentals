@@ -14,6 +14,7 @@ import { Building2, Mail, User, Phone, ArrowLeft } from "lucide-react"
 import Image from "next/image"
 import { PasswordStrength } from "@/components/password-strength"
 import { useAuth } from "@/lib/auth-context"
+import { csrfFetch } from "@/lib/csrf-fetch"
 
 export default function OwnerRegisterPage() {
   const router = useRouter()
@@ -96,13 +97,19 @@ export default function OwnerRegisterPage() {
     }
 
 
-    console.log("RegisterPage: Starting registration...")
     try {
+      // Fetch CSRF token before registration
+      const csrfResponse = await fetch('/api/csrf')
+      if (!csrfResponse.ok) {
+        throw new Error('Failed to fetch CSRF token')
+      }
+      const { csrfToken } = await csrfResponse.json()
+
       const result = await signUp(formData.email, formData.password, {
         name: formData.name,
         phone: formData.phone,
         role: "owner",
-      })
+      }, csrfToken)
 
       // Show success message with verification requirement
       if (result.requiresVerification) {
@@ -135,9 +142,8 @@ export default function OwnerRegisterPage() {
             onClick: async () => {
               const toastId = toast.loading("Sending verification email...")
               try {
-                const res = await fetch('/api/auth/resend-verification', {
+                const res = await csrfFetch('/api/auth/resend-verification', {
                   method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ email: formData.email })
                 })
                 const data = await res.json()

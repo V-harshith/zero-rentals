@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
+import { csrfFetch } from '@/lib/csrf-fetch'
 
 // ============================================================================
 // TYPES & INTERFACES
@@ -177,9 +178,8 @@ export function EmailVerificationProvider({ children }: { children: React.ReactN
     }))
 
     try {
-      const response = await fetch('/api/auth/send-verification', {
+      const response = await csrfFetch('/api/auth/send-verification', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, name, role }),
       })
 
@@ -247,9 +247,8 @@ export function EmailVerificationProvider({ children }: { children: React.ReactN
     }))
 
     try {
-      const response = await fetch('/api/auth/resend-verification', {
+      const response = await csrfFetch('/api/auth/resend-verification', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: state.email }),
       })
 

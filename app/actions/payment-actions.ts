@@ -3,6 +3,7 @@
 import { createRazorpayOrder, verifyRazorpaySignature } from "@/lib/payment-service"
 import { supabaseAdmin } from "@/lib/supabase-admin"
 import { PLAN_LIMITS } from "@/lib/constants"
+import { validatePlanAmount } from "@/lib/pricing"
 
 // In-memory store for recent idempotency keys (resets on server restart)
 // For production, use Redis or database
@@ -79,6 +80,20 @@ export async function initiatePlanPurchaseAction(
     idempotencyKey?: string
 ) {
     try {
+        // Validate amount against server-side pricing
+        const validation = validatePlanAmount(planName, duration, amount)
+        if (!validation.valid) {
+            console.error('[initiatePlanPurchaseAction] Amount validation failed:', validation.error)
+            return {
+                success: false,
+                error: validation.error,
+                details: {
+                    expected: validation.expected,
+                    received: validation.received
+                }
+            }
+        }
+
         // Check idempotency key if provided
         if (idempotencyKey) {
             const existing = recentIdempotencyKeys.get(idempotencyKey)
@@ -156,24 +171,6 @@ export async function fulfillSubscriptionAction(data: {
             }
         }
 
-        // 🔥 CRITICAL FIX: Idempotency check - prevent duplicate processing
-        const { data: existingPayment } = await supabaseAdmin
-            .from('payment_logs')
-            .select('id, status')
-            .eq('transaction_id', data.razorpayPaymentId)
-            .maybeSingle()
-
-        if (existingPayment?.status === 'success') {
-            // Store result for idempotency
-            if (data.idempotencyKey) {
-                processedFulfillmentKeys.set(data.idempotencyKey, {
-                    timestamp: Date.now(),
-                    result: { success: true, message: 'Payment already processed' }
-                })
-            }
-            return { success: true, message: 'Payment already processed' }
-        }
-
         // 1. Verify Signature
         const isValid = verifyRazorpaySignature(
             data.razorpayOrderId,
@@ -185,7 +182,14 @@ export async function fulfillSubscriptionAction(data: {
             throw new Error("Invalid payment signature")
         }
 
-        // 2. Calculate End Date using UTC to avoid timezone issues
+        // 2. Validate amount against server-side pricing
+        const validation = validatePlanAmount(data.planName, data.planDuration, data.amount)
+        if (!validation.valid) {
+            console.error('[fulfillSubscriptionAction] Amount validation failed:', validation.error)
+            throw new Error(`Payment amount validation failed: ${validation.error}`)
+        }
+
+        // 3. Calculate End Date using UTC to avoid timezone issues
         const now = new Date()
         const startDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), now.getUTCHours(), now.getUTCMinutes(), now.getUTCSeconds()))
         const endDate = new Date(startDate)
@@ -202,53 +206,49 @@ export async function fulfillSubscriptionAction(data: {
             else if (data.planName === 'Elite') endDate.setUTCFullYear(endDate.getUTCFullYear() + 1)
         }
 
-        // 3. Map properties limit
-        const limitMap: Record<string, number> = {
-            'Free': 1,
-            'Silver': 1,
-            'Gold': 1,
-            'Platinum': 1,
-            'Elite': 1
+        // 3. Use centralized PLAN_LIMITS from constants (single source of truth)
+        const propertiesLimit = PLAN_LIMITS[data.planName.toUpperCase() as keyof typeof PLAN_LIMITS] ?? PLAN_LIMITS.FREE
+
+        // 4. 🔥 ATOMIC OPERATION: Use database function to prevent race conditions
+        const { data: result, error: rpcError } = await supabaseAdmin.rpc(
+            'atomic_subscription_replace',
+            {
+                p_user_id: data.userId,
+                p_plan_name: data.planName,
+                p_plan_duration: data.planDuration,
+                p_amount: data.amount,
+                p_properties_limit: propertiesLimit,
+                p_start_date: startDate.toISOString(),
+                p_end_date: endDate.toISOString(),
+                p_transaction_id: data.razorpayPaymentId,
+                p_triggered_by: 'manual_action'
+            }
+        )
+
+        if (rpcError) {
+            console.error('[fulfillSubscriptionAction] RPC error:', rpcError)
+            throw new Error(`Failed to create subscription: ${rpcError.message}`)
         }
-        const propertiesLimit = limitMap[data.planName] || 1
 
-        // 4. Update Database (Atomic sequence)
-        // Update existing active subscriptions to 'cancelled'
-        await supabaseAdmin
-            .from('subscriptions')
-            .update({ status: 'cancelled' })
-            .eq('user_id', data.userId)
-            .eq('status', 'active')
+        if (!result?.success) {
+            const errorMessage = result?.error || result?.message || 'Unknown error'
+            console.error('[fulfillSubscriptionAction] Atomic function failed:', result)
+            throw new Error(`Subscription creation failed: ${errorMessage}`)
+        }
 
-        // Insert new subscription
-        const { data: subscription, error: subError } = await supabaseAdmin
-            .from('subscriptions')
-            .insert([{
-                user_id: data.userId,
-                plan_name: data.planName,
-                plan_duration: data.planDuration,
-                amount: data.amount,
-                status: 'active',
-                properties_limit: propertiesLimit,
-                start_date: startDate.toISOString(),
-                end_date: endDate.toISOString()
-            }])
-            .select()
-            .single()
+        // If idempotent (already processed), return early
+        if (result.idempotent) {
+            // Store result for idempotency
+            if (data.idempotencyKey) {
+                processedFulfillmentKeys.set(data.idempotencyKey, {
+                    timestamp: Date.now(),
+                    result: { success: true, message: 'Payment already processed' }
+                })
+            }
+            return { success: true, message: 'Payment already processed' }
+        }
 
-        if (subError) throw subError
-
-        // Log payment
-        await supabaseAdmin
-            .from('payment_logs')
-            .insert([{
-                user_id: data.userId,
-                subscription_id: subscription.id,
-                amount: data.amount,
-                transaction_id: data.razorpayPaymentId,
-                status: 'success',
-                payment_gateway: 'razorpay'
-            }])
+        const subscriptionId = result.subscription_id
 
         // 5. Auto-feature existing properties if plan allows
         const { getTierFeatures } = await import('@/lib/subscription-service')

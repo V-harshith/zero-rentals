@@ -14,6 +14,7 @@ import { toast } from "sonner"
 import { UserCircle, Mail, Lock, User, Phone, ArrowLeft, Eye, EyeOff, MapPin } from "lucide-react"
 import { PasswordStrength } from "@/components/password-strength"
 import { useAuth } from "@/lib/auth-context"
+import { csrfFetch } from "@/lib/csrf-fetch"
 
 export default function TenantRegisterPage() {
   const router = useRouter()
@@ -106,13 +107,20 @@ export default function TenantRegisterPage() {
     }
 
     try {
+      // Fetch CSRF token before registration
+      const csrfResponse = await fetch('/api/csrf')
+      if (!csrfResponse.ok) {
+        throw new Error('Failed to fetch CSRF token')
+      }
+      const { csrfToken } = await csrfResponse.json()
+
       const result = await signUp(formData.email, formData.password, {
         name: formData.name,
         phone: formData.phone,
         role: "tenant",
         preferred_city: formData.preferredCity || null,
         preferred_area: formData.preferredArea || null,
-      })
+      }, csrfToken)
 
       // Show success message with verification requirement
       if (result.requiresVerification) {
@@ -146,9 +154,8 @@ export default function TenantRegisterPage() {
             onClick: async () => {
               const toastId = toast.loading("Sending verification email...")
               try {
-                const res = await fetch('/api/auth/resend-verification', {
+                const res = await csrfFetch('/api/auth/resend-verification', {
                   method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ email: formData.email })
                 })
                 const data = await res.json()
