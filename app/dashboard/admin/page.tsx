@@ -27,7 +27,7 @@ import { UsersManagementTab } from "@/components/dashboard/admin/UsersManagement
 import { PaymentsTab } from "@/components/dashboard/admin/PaymentsTab"
 import { AdminStats } from "@/components/dashboard/admin/AdminStats"
 import { AllPropertiesTab } from "@/components/dashboard/admin/AllPropertiesTab"
-import { BulkUploadTab } from "@/components/dashboard/admin/BulkUploadTab"
+// import { BulkUploadTab } from "@/components/dashboard/admin/BulkUploadTab" // COMMENTED OUT - Client doesn't want this feature now
 import { withAuth } from "@/lib/with-auth"
 import { ErrorBoundary } from "@/components/error-boundary"
 import { useDebounce } from "@/hooks/use-debounce"
@@ -173,7 +173,7 @@ function AdminDashboard() {
   // Sync tab with URL for better UX and shareability
   const [activeTab, setActiveTab] = useState(() => {
     const tabFromUrl = searchParams.get('tab')
-    const validTabs = ['pending', 'properties', 'overview', 'users', 'payments', 'bulk-upload', 'data']
+    const validTabs = ['pending', 'properties', 'overview', 'users', 'payments', 'data'] // 'bulk-upload' removed - client doesn't want this feature now
     return validTabs.includes(tabFromUrl || '') ? tabFromUrl! : 'pending'
   })
   const [searchQuery, setSearchQuery] = useState("")
@@ -806,10 +806,12 @@ function AdminDashboard() {
               <TabsTrigger value="overview" className="text-xs md:text-sm whitespace-nowrap">Overview</TabsTrigger>
               <TabsTrigger value="users" className="text-xs md:text-sm whitespace-nowrap">Users</TabsTrigger>
               <TabsTrigger value="payments" className="text-xs md:text-sm whitespace-nowrap">Payments</TabsTrigger>
+              {/* BULK UPLOAD TAB COMMENTED OUT - Client doesn't want this feature now, can be enabled later
               <TabsTrigger value="bulk-upload" className="text-xs md:text-sm whitespace-nowrap">
                 <span className="hidden sm:inline">Bulk Upload</span>
                 <span className="sm:hidden">Upload</span>
               </TabsTrigger>
+              */}
               <TabsTrigger value="data" className="text-xs md:text-sm whitespace-nowrap">
                 <span className="hidden sm:inline">Data Management</span>
                 <span className="sm:hidden">Data</span>
@@ -926,10 +928,11 @@ function AdminDashboard() {
             />
           </TabsContent>
 
-          {/* Bulk Upload Tab */}
+          {/* BULK UPLOAD TAB COMMENTED OUT - Client doesn't want this feature now, can be enabled later
           <TabsContent value="bulk-upload">
             <BulkUploadTab />
           </TabsContent>
+          */}
 
           {/* Data Management Tab */}
           <TabsContent value="data">
