@@ -45,21 +45,31 @@ export default function ResetPasswordPage() {
   // 1. Supabase detectSessionInUrl processes the hash and fires PASSWORD_RECOVERY event
   // 2. The hash contains tokens that create a temporary session for password reset
   const validateSession = useCallback(async () => {
+    console.log("[RESET_PASSWORD] validateSession called")
+
     // Wait for Supabase to process URL hash (detectSessionInUrl)
     await new Promise(resolve => setTimeout(resolve, 500))
 
-    if (!isMountedRef.current || sessionEstablishedRef.current) return
+    if (!isMountedRef.current || sessionEstablishedRef.current) {
+      console.log("[RESET_PASSWORD] validateSession aborted - unmounted or already established")
+      return
+    }
 
     // Check if we have a valid session from the recovery link
+    console.log("[RESET_PASSWORD] Checking session...")
     const { data: { session }, error: sessionError } = await supabase.auth.getSession()
 
+    console.log("[RESET_PASSWORD] Session check result:", { hasSession: !!session, hasError: !!sessionError })
+
     if (sessionError) {
+      console.error("[RESET_PASSWORD] Session error:", sessionError)
       setSessionError("Failed to validate session. Please try again.")
       setIsCheckingSession(false)
       return
     }
 
     if (session) {
+      console.log("[RESET_PASSWORD] Session found, establishing...")
       sessionEstablishedRef.current = true
       setHasValidSession(true)
       setIsCheckingSession(false)
@@ -68,15 +78,24 @@ export default function ResetPasswordPage() {
       if (window.location.hash) {
         window.history.replaceState(null, '', window.location.pathname + window.location.search)
       }
+    } else {
+      console.log("[RESET_PASSWORD] No session found in validateSession")
     }
   }, [])
 
   useEffect(() => {
     isMountedRef.current = true
 
+    // DEBUG: Log URL information
+    console.log("[RESET_PASSWORD] Page loaded")
+    console.log("[RESET_PASSWORD] Full URL:", window.location.href)
+    console.log("[RESET_PASSWORD] Hash present:", !!window.location.hash)
+    console.log("[RESET_PASSWORD] Hash length:", window.location.hash?.length || 0)
+
     // Set up auth state listener FIRST to catch PASSWORD_RECOVERY event
     // This must be done before checking session to avoid race conditions
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      console.log("[RESET_PASSWORD] Auth event:", event, "Session:", !!session)
       if (!isMountedRef.current) return
 
       if (event === 'PASSWORD_RECOVERY') {
@@ -112,13 +131,26 @@ export default function ResetPasswordPage() {
       validateSession()
     }, 1000)
 
-    // Safety timeout - show error if session isn't established after 10 seconds
+    // Safety timeout - show error if session isn't established after 30 seconds
+    // Increased from 10s to 30s to handle slow networks and PKCE flow
     const safetyTimeout = setTimeout(() => {
       if (isMountedRef.current && !sessionEstablishedRef.current) {
-        setIsCheckingSession(false)
-        setSessionError("This password reset link is invalid or has expired. Please request a new one.")
+        console.error("[RESET_PASSWORD] Session establishment timeout - checking final state")
+        // Try one final check before showing error
+        supabase.auth.getSession().then(({ data: { session } }) => {
+          if (session && isMountedRef.current) {
+            console.log("[RESET_PASSWORD] Session found on final check")
+            sessionEstablishedRef.current = true
+            setHasValidSession(true)
+            setIsCheckingSession(false)
+          } else if (isMountedRef.current) {
+            console.error("[RESET_PASSWORD] No session established after timeout")
+            setIsCheckingSession(false)
+            setSessionError("This password reset link is invalid or has expired. Please request a new one.")
+          }
+        })
       }
-    }, 10000)
+    }, 30000)
 
     return () => {
       isMountedRef.current = false
