@@ -15,6 +15,7 @@ import { supabase } from "@/lib/supabase"
 import { PLAN_FEATURES } from "@/lib/constants"
 import { sendPropertyPostedEmail } from "@/lib/email-service"
 import { withAuth } from "@/lib/with-auth"
+import { useCsrf } from "@/lib/csrf-context"
 
 // Import modular components
 import { BasicDetailsStep } from "@/components/post-property/BasicDetailsStep"
@@ -111,6 +112,7 @@ function PostPropertyPage() {
   const isEditMode = !!editPropertyId
 
   const { user } = useAuth()
+  const { csrfToken } = useCsrf()
   const [currentStep, setCurrentStep] = useState(1)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [uploadStatus, setUploadStatus] = useState<string>("")
@@ -1004,48 +1006,36 @@ function PostPropertyPage() {
             throw new Error(`An account with email ${ownerDetails.email} already exists. Please select this owner from the existing owners list.`)
           }
 
-          const { data: authData, error: authError } = await supabase.auth.signUp({
-            email: ownerDetails.email,
-            password: ownerDetails.password,
-            options: {
-              data: {
-                name: ownerDetails.name,
-                phone: ownerDetails.phone,
-                role: 'owner'
-              }
-            }
+          // Validate CSRF token
+          if (!csrfToken) {
+            throw new Error("Security token missing. Please refresh the page and try again.")
+          }
+
+          // Create owner via admin API (bypasses email rate limits)
+          const ownerResponse = await fetch('/api/admin/create-owner', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-csrf-token': csrfToken
+            },
+            body: JSON.stringify({
+              email: ownerDetails.email,
+              password: ownerDetails.password,
+              name: ownerDetails.name,
+              phone: ownerDetails.phone
+            })
           })
 
-          if (authError) {
-            console.error("Error creating owner account:", authError)
-            throw new Error(`Failed to create owner account: ${authError.message}`)
+          const ownerData = await ownerResponse.json()
+
+          if (!ownerResponse.ok) {
+            throw new Error(ownerData.error || 'Failed to create owner account')
           }
 
-          if (!authData.user) {
-            throw new Error("Failed to create owner account - no user returned")
-          }
-
-          // Insert owner into users table
-          const { error: userError } = await supabase
-            .from('users')
-            .insert({
-              id: authData.user.id,
-              email: ownerDetails.email,
-              name: ownerDetails.name,
-              phone: ownerDetails.phone,
-              role: 'owner',
-              verified: false
-            })
-
-          if (userError) {
-            console.error("Error inserting owner into users table:", userError)
-            throw new Error(`Failed to create owner profile: ${userError.message}`)
-          }
-
-          ownerId = authData.user.id
+          ownerId = ownerData.userId
           ownerName = ownerDetails.name
           ownerContact = ownerDetails.phone
-          
+
           toast.success("Owner account created successfully")
           setUploadStatus("Creating property...")
         }
@@ -1624,4 +1614,4 @@ function PostPropertyPage() {
   )
 }
 
-export default withAuth(PostPropertyPage, { requiredRole: 'owner' })
+export default withAuth(PostPropertyPage, { requiredRole: ['owner', 'admin'] })

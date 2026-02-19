@@ -198,9 +198,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: csrfCheck.error || 'Invalid request' }, { status: 403 })
     }
 
-    // Rate limiting: 5 property creations per hour per user
     const user = await getCurrentUser()
-    if (user) {
+
+    // Check authentication - allow both owner and admin roles
+    if (!user || (user.role !== 'owner' && user.role !== 'admin')) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    const isAdmin = user.role === 'admin'
+
+    // Rate limiting: 5 property creations per hour per user (skip for admin)
+    if (!isAdmin) {
       const rateLimitKey = `property:create:${user.id}`
       const rateLimitResult = await rateLimit(rateLimitKey, 5, 60 * 60 * 1000)
       if (!rateLimitResult.success) {
@@ -210,21 +218,20 @@ export async function POST(request: NextRequest) {
         )
       }
     }
-    if (!user || user.role !== 'owner') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
 
-    // 🔥 CRITICAL FIX: Check subscription limit BEFORE allowing property creation
-    const { checkPropertyLimit } = await import('@/lib/subscription-service')
-    const limitCheck = await checkPropertyLimit(user.id)
+    // 🔥 CRITICAL FIX: Check subscription limit BEFORE allowing property creation (skip for admin)
+    if (!isAdmin) {
+      const { checkPropertyLimit } = await import('@/lib/subscription-service')
+      const limitCheck = await checkPropertyLimit(user.id)
 
-    if (!limitCheck.allowed) {
-      return NextResponse.json({
-        error: limitCheck.reason || 'Property limit reached',
-        limit: limitCheck.limit,
-        current: limitCheck.current,
-        planName: limitCheck.planName
-      }, { status: 403 })
+      if (!limitCheck.allowed) {
+        return NextResponse.json({
+          error: limitCheck.reason || 'Property limit reached',
+          limit: limitCheck.limit,
+          current: limitCheck.current,
+          planName: limitCheck.planName
+        }, { status: 403 })
+      }
     }
 
     const supabase = await createClient()
@@ -306,10 +313,10 @@ export async function POST(request: NextRequest) {
           owner_name: user.name,
           owner_contact: user.phone || user.email,
           owner_verified: user.verified,
-          status: 'pending',
+          status: isAdmin ? 'active' : 'pending',
           availability: 'Available',
           views: 0,
-          source: 'manual',
+          source: isAdmin ? 'admin' : 'manual',
         },
       ])
       .select()
