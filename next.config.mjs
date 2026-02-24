@@ -23,7 +23,8 @@ const nextConfig = {
   reactStrictMode: true,
   // Experimental features for better performance
   experimental: {
-    optimizeCss: true,
+    // optimizeCss disabled - conflicts with Tailwind CSS 4 on Vercel
+    // optimizeCss: true,
     optimizePackageImports: ['lucide-react', '@radix-ui/react-icons'],
     // Body size limit for Vercel free tier (4.5MB max, using 4MB for safety)
     serverActions: {

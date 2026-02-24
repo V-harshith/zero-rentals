@@ -1,10 +1,7 @@
 @import "tailwindcss";
-@source "../**/*.{js,ts,jsx,tsx,mdx}";
-@source "!../.agent/**/*";
-@source "!../.agents/**/*";
-@source "!../.cursor/**/*";
-@source "!../.kiro/**/*";
-@source "!../.trae/**/*";
+@source "../app/**/*.{js,ts,jsx,tsx,mdx}";
+@source "../components/**/*.{js,ts,jsx,tsx,mdx}";
+@source "../lib/**/*.{js,ts,jsx,tsx}";
 @source "!../node_modules/**/*";
 @source "!../.next/**/*";
 
