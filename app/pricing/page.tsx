@@ -120,7 +120,7 @@ export default function PricingPage() {
     {
       name: "Silver",
       price: "₹1,000",
-      duration: "1 month",
+      duration: "1 Month",
       icon: Zap,
       iconBg: "bg-gradient-to-br from-slate-400 to-slate-600",
       description: "Great for testing the waters",
@@ -139,7 +139,7 @@ export default function PricingPage() {
     {
       name: "Gold",
       price: "₹2,700",
-      duration: "3 months",
+      duration: "3 Months",
       icon: Crown,
       iconBg: "bg-gradient-to-br from-yellow-400 via-yellow-500 to-amber-600",
       description: "Most popular for PG owners",
@@ -160,7 +160,7 @@ export default function PricingPage() {
     {
       name: "Platinum",
       price: "₹5,000",
-      duration: "6 months",
+      duration: "6 Months",
       icon: Crown,
       iconBg: "bg-gradient-to-br from-cyan-400 via-blue-500 to-indigo-600",
       description: "Best for professional PG chains",
@@ -180,7 +180,7 @@ export default function PricingPage() {
     {
       name: "Elite",
       price: "₹9,000",
-      duration: "1 year",
+      duration: "1 Year",
       icon: Sparkles,
       iconBg: "bg-gradient-to-br from-purple-500 via-pink-500 to-rose-500",
       description: "Ultimate plan for large businesses",
