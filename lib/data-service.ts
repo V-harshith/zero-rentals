@@ -118,9 +118,7 @@ function buildSearchQuery(filters: SearchFilters) {
         }
       }
     }
-    query = query.limit(50)
-  } else {
-    query = query.limit(50)
+    // NOTE: Limit removed from here - applied AFTER tier sorting in searchProperties()
   }
 
   if (filters.roomType?.length) {
@@ -290,13 +288,13 @@ export async function getProperties(): Promise<Property[]> {
     })
 
     // Get all active, available properties
+    // NOTE: No limit here - we need to sort by tier first, then limit
     const { data, error } = await supabase
       .from('properties')
       .select('*, owner:users!owner_id(name, email, phone, avatar_url, verified)')
       .eq('status', 'active')
       .eq('availability', 'Available')
       .order('created_at', { ascending: false })
-      .limit(50)
 
     if (error) {
       return []
@@ -322,7 +320,9 @@ export async function getProperties(): Promise<Property[]> {
       return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     })
 
-    return sortedProperties.map(mapPropertyFromDB)
+    // Apply limit AFTER sorting by tier
+    // This ensures paid plan properties appear on top
+    return sortedProperties.slice(0, 50).map(mapPropertyFromDB)
   } catch (error) {
     console.error('[DataService] getProperties failed:', error)
     return []
@@ -356,13 +356,13 @@ export async function getFeaturedProperties(limit = 6): Promise<Property[]> {
     // Get all featured properties
     // Note: We only filter by status='active' for moderation, not by availability
     // Featured properties should appear regardless of availability (Available/Occupied/etc)
+    // NOTE: No limit here - we need to sort by tier first, then limit
     const { data, error } = await supabase
       .from('properties')
       .select('*, owner:users!owner_id(name, email, phone, avatar_url, verified)')
       .eq('status', 'active')
       .eq('featured', true)
       .order('created_at', { ascending: false })
-      .limit(limit * 2) // Fetch more to allow for sorting
 
     if (error) {
       return []
@@ -505,7 +505,11 @@ export async function searchProperties(filters: SearchFilters, signal?: AbortSig
     })
 
     const mappedProperties = sortedProperties.map(mapPropertyFromDB)
-    return filterByPriceRange(mappedProperties, filters)
+    const filteredByPrice = filterByPriceRange(mappedProperties, filters)
+
+    // Apply limit AFTER sorting by tier and filtering by price
+    // This ensures paid plan properties appear on top
+    return filteredByPrice.slice(0, 50)
   } catch (error) {
     // Re-throw abort errors for the caller to handle
     if (error instanceof Error && error.message === 'AbortError') {
