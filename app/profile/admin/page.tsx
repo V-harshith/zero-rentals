@@ -8,10 +8,11 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { toast } from "sonner"
-import { User, Mail, Key, Trash2, Save, ShieldCheck, Loader2, ArrowLeft, Eye, EyeOff, CheckCircle2 } from "lucide-react"
+import { User, Mail, Key, Trash2, Save, ShieldCheck, Loader2, ArrowLeft, Eye, EyeOff, CheckCircle2, Edit2, X, Clock, AlertCircle } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import Link from "next/link"
 import { withAuth } from "@/lib/with-auth"
+import { csrfFetch } from "@/lib/csrf-fetch"
 
 function AdminProfilePage() {
     const { user, logout, isLoading } = useAuth()
@@ -42,6 +43,16 @@ function AdminProfilePage() {
         hasNumber: false,
         hasSpecial: false,
     })
+
+    // Email change state
+    const [showEmailChangeModal, setShowEmailChangeModal] = useState(false)
+    const [changingEmail, setChangingEmail] = useState(false)
+    const [emailChangeData, setEmailChangeData] = useState({
+        newEmail: "",
+        currentPassword: ""
+    })
+    const [pendingEmail, setPendingEmail] = useState<string | null>(null)
+    const [cancellingEmailChange, setCancellingEmailChange] = useState(false)
 
     const validatePasswordStrength = (password: string) => {
         setPasswordStrength({
@@ -90,6 +101,7 @@ function AdminProfilePage() {
                 email: data.email || "",
                 phone: data.phone || "",
             })
+            setPendingEmail(data.pending_email || null)
         } catch (error) {
             console.error('Error fetching profile:', error)
             toast.error('Failed to load profile data')
@@ -191,6 +203,65 @@ function AdminProfilePage() {
         }
     }
 
+    const handleRequestEmailChange = async () => {
+        if (!emailChangeData.newEmail || !emailChangeData.currentPassword) {
+            toast.error("Please enter both new email and current password")
+            return
+        }
+
+        // Validate email format
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+        if (!emailRegex.test(emailChangeData.newEmail)) {
+            toast.error("Please enter a valid email address")
+            return
+        }
+
+        setChangingEmail(true)
+        try {
+            const response = await csrfFetch('/api/admin/change-email/request', {
+                method: 'POST',
+                body: JSON.stringify(emailChangeData)
+            })
+
+            const result = await response.json()
+
+            if (!response.ok) {
+                throw new Error(result.error || 'Failed to request email change')
+            }
+
+            toast.success(result.message)
+            setPendingEmail(result.pendingEmail)
+            setShowEmailChangeModal(false)
+            setEmailChangeData({ newEmail: "", currentPassword: "" })
+        } catch (error: any) {
+            toast.error(error.message || "Failed to request email change")
+        } finally {
+            setChangingEmail(false)
+        }
+    }
+
+    const handleCancelEmailChange = async () => {
+        setCancellingEmailChange(true)
+        try {
+            const response = await csrfFetch('/api/admin/change-email/cancel', {
+                method: 'POST'
+            })
+
+            const result = await response.json()
+
+            if (!response.ok) {
+                throw new Error(result.error || 'Failed to cancel email change')
+            }
+
+            toast.success(result.message)
+            setPendingEmail(null)
+        } catch (error: any) {
+            toast.error(error.message || "Failed to cancel email change")
+        } finally {
+            setCancellingEmailChange(false)
+        }
+    }
+
     return (
         <div className="min-h-screen bg-muted/30 py-8">
             <div className="container mx-auto px-4 max-w-4xl">
@@ -225,7 +296,42 @@ function AdminProfilePage() {
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="email">Email</Label>
-                                    <Input id="email" value={profileData.email} disabled className="bg-muted" />
+                                    <div className="flex gap-2">
+                                        <Input id="email" value={profileData.email} disabled className="bg-muted flex-1" />
+                                        <Button
+                                            variant="outline"
+                                            size="icon"
+                                            onClick={() => setShowEmailChangeModal(true)}
+                                            disabled={!!pendingEmail}
+                                            title={pendingEmail ? "Email change pending" : "Change email"}
+                                        >
+                                            <Edit2 className="h-4 w-4" />
+                                        </Button>
+                                    </div>
+                                    {pendingEmail && (
+                                        <div className="mt-2 p-3 bg-yellow-50 border border-yellow-200 rounded-md">
+                                            <div className="flex items-start gap-2">
+                                                <Clock className="h-4 w-4 text-yellow-600 mt-0.5" />
+                                                <div className="flex-1">
+                                                    <p className="text-sm text-yellow-800">
+                                                        Pending verification: <strong>{pendingEmail}</strong>
+                                                    </p>
+                                                    <p className="text-xs text-yellow-600 mt-1">
+                                                        Please check your new email inbox and click the verification link.
+                                                    </p>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        className="mt-2 h-7 text-xs text-yellow-700 hover:text-yellow-800 hover:bg-yellow-100"
+                                                        onClick={handleCancelEmailChange}
+                                                        disabled={cancellingEmailChange}
+                                                    >
+                                                        {cancellingEmailChange ? "Cancelling..." : "Cancel Request"}
+                                                    </Button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="phone">Phone Number</Label>
@@ -376,6 +482,88 @@ function AdminProfilePage() {
                     </Card>
                 </div>
             </div>
+
+            {/* Email Change Modal */}
+            {showEmailChangeModal && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-lg shadow-lg max-w-md w-full p-6">
+                        <div className="flex items-center justify-between mb-4">
+                            <h2 className="text-xl font-semibold flex items-center gap-2">
+                                <Mail className="h-5 w-5" />
+                                Change Email Address
+                            </h2>
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => setShowEmailChangeModal(false)}
+                            >
+                                <X className="h-4 w-4" />
+                            </Button>
+                        </div>
+
+                        <div className="space-y-4">
+                            <div className="p-3 bg-blue-50 border border-blue-200 rounded-md">
+                                <div className="flex items-start gap-2">
+                                    <AlertCircle className="h-4 w-4 text-blue-600 mt-0.5" />
+                                    <p className="text-sm text-blue-700">
+                                        A verification link will be sent to your new email address. Your email will only be updated after you verify it.
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div className="space-y-2">
+                                <Label htmlFor="newEmail">New Email Address</Label>
+                                <Input
+                                    id="newEmail"
+                                    type="email"
+                                    placeholder="Enter your new email"
+                                    value={emailChangeData.newEmail}
+                                    onChange={(e) => setEmailChangeData({ ...emailChangeData, newEmail: e.target.value })}
+                                />
+                            </div>
+
+                            <div className="space-y-2">
+                                <Label htmlFor="emailChangePassword">Current Password</Label>
+                                <Input
+                                    id="emailChangePassword"
+                                    type="password"
+                                    placeholder="Enter your current password"
+                                    value={emailChangeData.currentPassword}
+                                    onChange={(e) => setEmailChangeData({ ...emailChangeData, currentPassword: e.target.value })}
+                                />
+                                <p className="text-xs text-muted-foreground">
+                                    Required for security verification
+                                </p>
+                            </div>
+
+                            <div className="flex gap-3 pt-2">
+                                <Button
+                                    variant="outline"
+                                    className="flex-1"
+                                    onClick={() => setShowEmailChangeModal(false)}
+                                    disabled={changingEmail}
+                                >
+                                    Cancel
+                                </Button>
+                                <Button
+                                    className="flex-1"
+                                    onClick={handleRequestEmailChange}
+                                    disabled={changingEmail || !emailChangeData.newEmail || !emailChangeData.currentPassword}
+                                >
+                                    {changingEmail ? (
+                                        <>
+                                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                            Sending...
+                                        </>
+                                    ) : (
+                                        "Send Verification"
+                                    )}
+                                </Button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }

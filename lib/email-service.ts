@@ -1,6 +1,7 @@
 import { Resend } from 'resend'
 import { VerificationEmailTemplate } from './email-templates/verification-email'
 import { PasswordResetEmailTemplate } from './email-templates/password-reset-email'
+import { getEmailChangeVerificationHtml, getEmailChangeVerificationText } from './email-templates/email-change-verification'
 import { sanitizeHtml } from './security-utils'
 
 // Lazy initialization to avoid client-side errors
@@ -609,4 +610,51 @@ export async function sendSubscriptionExpiryEmail(data: {
   })
 
   if (error) console.error('Failed to send subscription expiry email:', error)
+}
+
+/**
+ * Send email change verification email
+ */
+export async function sendEmailChangeVerificationEmail(
+  email: string,
+  name: string,
+  token: string
+): Promise<void> {
+  const baseUrl = getBaseUrl()
+  const verificationUrl = `${baseUrl}/api/admin/change-email/verify?token=${token}`
+
+  try {
+    const resend = getResend()
+
+    if (!resend) {
+      throw new Error('Email service not configured - RESEND_API_KEY missing')
+    }
+
+    const { data, error } = await resend.emails.send({
+      from: 'ZeroRentals <noreply@zerorentals.com>',
+      to: email,
+      subject: '🔐 Verify Your Email Change',
+      html: getEmailChangeVerificationHtml({
+        name,
+        newEmail: email,
+        verificationUrl,
+        expiresIn: '24 hours'
+      }),
+      text: getEmailChangeVerificationText({
+        name,
+        newEmail: email,
+        verificationUrl,
+        expiresIn: '24 hours'
+      })
+    })
+
+    if (error) {
+      throw new Error(`Resend API error: ${error.message || 'Unknown error'}`)
+    }
+
+    console.log('✅ Email change verification sent successfully:', data?.id)
+  } catch (error: any) {
+    console.error('[EMAIL] Email change verification failed:', error.message || error)
+    throw new Error(`Failed to send email change verification: ${error.message || 'Unknown error'}`)
+  }
 }
