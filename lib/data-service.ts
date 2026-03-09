@@ -264,7 +264,18 @@ export async function getProperties(): Promise<Property[]> {
       .eq('status', 'active')
       .gt('end_date', today)
 
+    // Debug: Log subscription fetch results
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[getProperties] Subscribers found:', validSubscribers?.length || 0)
+      if (validSubscribers?.length) {
+        console.log('[getProperties] Sample subscriber:', validSubscribers[0])
+      }
+    }
+
     // Subscription fetch errors are handled silently - properties will still be shown
+    if (subError) {
+      console.error('[getProperties] Subscription fetch error:', subError)
+    }
 
     // Create a map of owner_id to plan tier rank
     const ownerTierMap = new Map<string, number>()
@@ -276,6 +287,11 @@ export async function getProperties(): Promise<Property[]> {
         ownerTierMap.set(s.user_id, rank)
       }
     })
+
+    // Debug: Log tier map
+    if (process.env.NODE_ENV !== 'production' && ownerTierMap.size > 0) {
+      console.log('[getProperties] Tier map entries:', ownerTierMap.size)
+    }
 
     // Get all active, available properties
     // NOTE: No limit here - we need to sort by tier first, then limit
