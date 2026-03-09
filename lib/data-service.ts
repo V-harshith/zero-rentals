@@ -191,28 +191,18 @@ function buildSearchQuery(filters: SearchFilters) {
 }
 
 function applySorting(query: any, sortBy?: string) {
-  // ALWAYS prioritize featured properties first, then apply the requested sort
+  // NOTE: Do NOT sort by 'featured' at DB level - plan tier sorting happens in JavaScript
+  // The tier sorting (Elite > Platinum > Gold > Silver > Free) is applied AFTER fetching
   switch (sortBy) {
     case 'price-asc':
-      return query
-        .order('featured', { ascending: false })
-        .order('private_room_price', { ascending: true, nullsFirst: false })
+      return query.order('private_room_price', { ascending: true, nullsFirst: false })
     case 'price-desc':
-      return query
-        .order('featured', { ascending: false })
-        .order('private_room_price', { ascending: false, nullsFirst: false })
+      return query.order('private_room_price', { ascending: false, nullsFirst: false })
     case 'popular':
-      return query
-        .order('featured', { ascending: false })
-        .order('views', { ascending: false })
+      return query.order('views', { ascending: false })
     case 'featured':
-      return query
-        .order('featured', { ascending: false })
-        .order('created_at', { ascending: false })
     default:
-      return query
-        .order('featured', { ascending: false })
-        .order('created_at', { ascending: false })
+      return query.order('created_at', { ascending: false })
   }
 }
 

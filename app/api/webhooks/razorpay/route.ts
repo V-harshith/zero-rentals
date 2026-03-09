@@ -565,12 +565,21 @@ async function fulfillSubscription(
         const currentTierFeatures = planFeatures[planName.toUpperCase() as keyof typeof planFeatures]
 
         if (currentTierFeatures?.featuredBadge) {
-            console.log('Auto-featuring existing properties for user:', userId)
-            await supabaseAdmin
+            console.log('[Auto-feature] Updating properties for user:', userId, 'plan:', planName)
+            const { data: updatedProperties, error: featureError, count } = await supabaseAdmin
                 .from('properties')
                 .update({ featured: true })
                 .eq('owner_id', userId)
                 .in('status', ['active', 'pending'])
+                .select('id')
+
+            if (featureError) {
+                console.error('[Auto-feature] FAILED for user:', userId, 'error:', featureError)
+            } else {
+                console.log('[Auto-feature] SUCCESS for user:', userId, 'properties updated:', updatedProperties?.length || count || 0)
+            }
+        } else {
+            console.log('[Auto-feature] Skipped - plan does not include featured badge:', planName)
         }
 
         // Send email notification
