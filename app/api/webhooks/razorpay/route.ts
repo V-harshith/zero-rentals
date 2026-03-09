@@ -194,7 +194,7 @@ async function processEventByType(eventType: string, payload: { payload: { order
                 notes.plan,
                 days,
                 order.amount / 100,
-                order.id
+                order.payment_id || order.id // Use payment_id for transaction_id
             )
         } else {
             // Validate required subscription fields
@@ -350,7 +350,18 @@ export async function POST(req: NextRequest) {
             const userId = notes.userId
             const amount = order.amount / 100 // Convert from paise
             const orderId = order.id
+            // 🔥 FIX: Use payment_id for transaction_id to match client-side handler
+            // This ensures idempotency works across both webhook and client paths
+            const paymentId = order.payment_id || orderId
             const paymentType = notes.type || 'subscription' // Default to subscription for backward compat
+
+            console.log('[webhook] order.paid received:', {
+                orderId,
+                paymentId,
+                userId,
+                amount,
+                paymentType
+            })
 
             if (paymentType === 'property_payment') {
                 // Handle property addon payment
@@ -424,11 +435,14 @@ export async function POST(req: NextRequest) {
                     )
                 }
 
-                await fulfillPropertyPayment(userId, plan, days, amount, orderId)
+                await fulfillPropertyPayment(userId, plan, days, amount, paymentId)
             } else {
                 // Handle subscription payment (default, backward compatible)
                 const planName = notes.planName
                 const duration = notes.duration
+                // 🔥 FIX: Get payment_id from order for transaction_id
+                // This ensures idempotency works across both webhook and client paths
+                const paymentId = order.payment_id || orderId
 
                 // Validate amount against server-side pricing
                 const validation = validatePlanAmount(planName, duration, amount)
@@ -442,7 +456,7 @@ export async function POST(req: NextRequest) {
                             amount: amount,
                             currency: 'INR',
                             payment_gateway: 'razorpay',
-                            transaction_id: orderId,
+                            transaction_id: paymentId,
                             status: 'failed',
                             plan_name: planName,
                         })
@@ -453,7 +467,15 @@ export async function POST(req: NextRequest) {
                     )
                 }
 
-                await fulfillSubscription(userId, planName, duration, amount, orderId)
+                console.log('[webhook] Processing subscription:', {
+                    userId,
+                    planName,
+                    duration,
+                    amount,
+                    paymentId
+                })
+
+                await fulfillSubscription(userId, planName, duration, amount, paymentId)
             }
         }
 
@@ -495,7 +517,7 @@ async function fulfillSubscription(
     planName: string,
     duration: string,
     amount: number,
-    orderId: string
+    transactionId: string // Changed from orderId to transactionId for idempotency
 ) {
     try {
         // Calculate dates
@@ -526,7 +548,7 @@ async function fulfillSubscription(
                 p_properties_limit: propertiesLimit,
                 p_start_date: startDate.toISOString(),
                 p_end_date: endDate.toISOString(),
-                p_transaction_id: orderId,
+                p_transaction_id: transactionId,
                 p_triggered_by: 'webhook'
             }
         )
@@ -613,7 +635,7 @@ async function fulfillPropertyPayment(
     plan: string,
     days: number,
     amount: number,
-    orderId: string
+    transactionId: string // Changed from orderId to transactionId for idempotency
 ) {
     try {
         // Step 1: Verify user has active subscription (required for property payments)

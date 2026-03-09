@@ -40,7 +40,13 @@
       "Bash(awk:*)",
       "Bash(git add:*)",
       "Bash(env:*)",
-      "Bash(wc:*)"
+      "Bash(wc:*)",
+      "Bash(curl:*)",
+      "Bash(npx playwright test:*)",
+      "Bash(find:*)",
+      "Bash(git commit:*)",
+      "Bash(git restore:*)",
+      "Bash(git push:*)"
     ]
   }
 }
