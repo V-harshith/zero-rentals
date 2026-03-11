@@ -10,6 +10,7 @@ export async function GET(request: NextRequest) {
     const supabase = await createClient()
     const searchParams = request.nextUrl.searchParams
     const location = searchParams.get('location')
+    const city = searchParams.get('city')  // NEW: Structured city param
     const propertyType = searchParams.get('propertyType')
     const roomType = searchParams.get('roomType')
     const minPrice = searchParams.get('minPrice')
@@ -50,7 +51,16 @@ export async function GET(request: NextRequest) {
       .eq('availability', 'Available')
 
     if (location) {
-      query = query.or(`city.ilike.%${location}%,area.ilike.%${location}%,locality.ilike.%${location}%`)
+      // SMART LOCATION SEARCH: Prioritize area matches over city matches
+      // If city param is also provided, use AND logic for precise matching
+      if (city) {
+        // Combined search: area AND city (most precise)
+        query = query.or(`area.ilike.%${location}%,locality.ilike.%${location}%`)
+        query = query.ilike('city', `%${city}%`)
+      } else {
+        // Single location search: search area/locality first, city as fallback
+        query = query.or(`area.ilike.%${location}%,locality.ilike.%${location}%,city.ilike.%${location}%`)
+      }
     }
 
     if (propertyType) {

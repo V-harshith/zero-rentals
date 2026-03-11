@@ -167,7 +167,7 @@ async function processQueuedEvents(entityId: string | null): Promise<void> {
 /**
  * Process event based on its type
  */
-async function processEventByType(eventType: string, payload: { payload: { order: { entity: { notes: { userId: string; type?: string; planName?: string; duration?: string; plan?: string; days?: string }; amount: number; id: string } } } }): Promise<void> {
+async function processEventByType(eventType: string, payload: { payload: { order: { entity: { notes: { userId: string; type?: string; planName?: string; duration?: string; plan?: string; days?: string }; amount: number; id: string; payment_id?: string } } } }): Promise<void> {
     if (eventType === 'order.paid') {
         const order = payload.payload.order.entity
         const notes = order.notes
@@ -564,13 +564,13 @@ async function fulfillSubscription(
 
         // Handle idempotent response
         if (result.idempotent) {
-            console.log('Payment already processed (idempotent):', orderId)
+            console.log('Payment already processed (idempotent):', transactionId)
             return
         }
 
         if (!result.success) {
             if (result.code === 'CONCURRENT_CREATION') {
-                console.log('Concurrent subscription creation detected:', orderId)
+                console.log('Concurrent subscription creation detected:', transactionId)
                 return
             }
             throw new Error(result.error || 'Failed to process subscription')
@@ -618,7 +618,7 @@ async function fulfillSubscription(
                 name: user.name,
                 planName: planName,
                 amount: amount,
-                transactionId: orderId,
+                transactionId: transactionId,
                 endDate: endDate.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })
             })
         }
@@ -661,12 +661,12 @@ async function fulfillPropertyPayment(
         const { data: existingLog } = await supabaseAdmin
             .from('payment_logs')
             .select('id, status')
-            .eq('transaction_id', orderId)
+            .eq('transaction_id', transactionId)
             .maybeSingle()
 
         if (existingLog) {
             if (existingLog.status === 'completed' || existingLog.status === 'success') {
-                console.log('Property payment already processed:', orderId)
+                console.log('Property payment already processed:', transactionId)
                 return
             }
             // Update existing pending/processing log
@@ -677,7 +677,7 @@ async function fulfillPropertyPayment(
                     payment_method: 'razorpay',
                     processed_at: new Date().toISOString()
                 })
-                .eq('transaction_id', orderId)
+                .eq('transaction_id', transactionId)
 
             if (updateError) {
                 console.error('Error updating payment log:', updateError)
@@ -692,7 +692,7 @@ async function fulfillPropertyPayment(
                     amount: amount,
                     currency: 'INR',
                     payment_gateway: 'razorpay',
-                    transaction_id: orderId,
+                    transaction_id: transactionId,
                     status: 'completed',
                     payment_method: 'razorpay',
                     metadata: {
@@ -706,7 +706,7 @@ async function fulfillPropertyPayment(
 
             if (insertError) {
                 if (insertError.code === '23505') { // Unique violation
-                    console.log('Property payment already processed by another webhook:', orderId)
+                    console.log('Property payment already processed by another webhook:', transactionId)
                     return
                 }
                 console.error('Error creating payment log:', insertError)
@@ -716,7 +716,7 @@ async function fulfillPropertyPayment(
 
         console.log('Property payment fulfilled successfully:', {
             userId,
-            orderId,
+            transactionId,
             plan,
             days,
             amount

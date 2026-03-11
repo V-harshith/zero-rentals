@@ -8,6 +8,7 @@ import { motion, AnimatePresence } from "framer-motion"
 import { useLocation } from "@/lib/location-context"
 import {
     getPlaceSuggestions,
+    getPlaceDetailsById,
     getReverseGeocoding,
     debounce,
     type PlaceSuggestion
@@ -16,7 +17,13 @@ import {
 interface LocationInputProps {
     value: string
     onChange: (value: string) => void
-    onPlaceSelect: (place: { placeId: string; address: string }) => void
+    onPlaceSelect: (place: {
+        placeId: string
+        address: string
+        sublocality?: string
+        city?: string
+        state?: string
+    }) => void
     sessionToken: string
     placeholder?: string
     onClear?: () => void
@@ -64,12 +71,19 @@ export function LocationInput({
         }
     }, [value, debouncedFetchSuggestions])
 
-    const handleSelectPlace = (suggestion: PlaceSuggestion) => {
+    const handleSelectPlace = async (suggestion: PlaceSuggestion) => {
         isSelectionRef.current = true // Flag that this update is a selection
         onChange(suggestion.description)
+
+        // Fetch place details to get structured location data
+        const details = await getPlaceDetailsById(suggestion.placeId)
+
         onPlaceSelect({
             placeId: suggestion.placeId,
-            address: suggestion.description
+            address: suggestion.description,
+            sublocality: details?.sublocality,
+            city: details?.city,
+            state: details?.state
         })
         setShowSuggestions(false)
         setSuggestions([])

@@ -65,7 +65,13 @@ export function SearchBar({ className }: SearchBarProps) {
     // State
     const [activeType, setActiveType] = useState<"PG" | "Co-living" | "Rent">(initialState.activeType)
     const [locationValue, setLocationValue] = useState(initialState.location)
-    const [selectedPlace, setSelectedPlace] = useState<{ placeId: string; address: string } | null>(null)
+    const [selectedPlace, setSelectedPlace] = useState<{
+        placeId: string
+        address: string
+        sublocality?: string
+        city?: string
+        state?: string
+    } | null>(null)
     const [sessionToken] = useState(() => generateSessionToken())
 
     // Filter State - Gender defaults based on property type
@@ -148,22 +154,25 @@ export function SearchBar({ className }: SearchBarProps) {
                 try {
                     const details = await getPlaceDetailsById(selectedPlace.placeId)
                     if (details) {
-                        // CRITICAL FIX: Extract city name for text-based database search
-                        // Priority: 1. city from Google API, 2. First part of address (before comma)
-                        let locationForSearch = details.city
+                        // CRITICAL FIX: Use sublocality (area) for precise location search
+                        // Priority: 1. sublocality from Google API, 2. city, 3. First part of address
+                        let locationForSearch = details.sublocality || details.city
 
                         if (!locationForSearch && details.formattedAddress) {
-                            // Extract city from formatted address (e.g., "Ahmedabad, Gujarat, India" -> "Ahmedabad")
+                            // Extract from formatted address (e.g., "BTM Layout, Bangalore" -> "BTM Layout")
                             const addressParts = details.formattedAddress.split(',')
                             locationForSearch = addressParts[0]?.trim()
                         }
 
                         if (locationForSearch) {
-                            // Use city name for text search - DO NOT pass lat/lng
-                            // This ensures database uses ILIKE matching on city field
+                            // Pass location for text search
                             params.set("location", locationForSearch)
+                            // Also pass city for additional filtering when available
+                            if (details.city) {
+                                params.set("city", details.city)
+                            }
                         } else {
-                            // Fallback to geospatial search only if we couldn't extract city name
+                            // Fallback to geospatial search only if we couldn't extract location
                             params.set("lat", details.latitude.toString())
                             params.set("lng", details.longitude.toString())
                         }

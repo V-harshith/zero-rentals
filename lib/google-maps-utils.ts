@@ -11,6 +11,8 @@ export interface PlaceSuggestion {
     description: string
     mainText: string
     secondaryText: string
+    sublocality?: string  // Optional: sublocality/area name for display
+    city?: string  // Optional: city name
 }
 
 export interface PlaceDetails {
@@ -22,6 +24,8 @@ export interface PlaceDetails {
     state?: string
     country?: string
     postalCode?: string
+    // NEW: Sublocality/area for precise location search
+    sublocality?: string  // e.g., "BTM Layout", "Koramangala", "HSR Layout"
 }
 
 /**
@@ -126,9 +130,24 @@ export async function getPlaceDetailsById(placeId: string): Promise<PlaceDetails
                         const country = addressComponents.find((c: any) =>
                             c.types.includes('country')
                         )?.long_name
-
                         const postalCode = addressComponents.find((c: any) =>
                             c.types.includes('postal_code')
+                        )?.long_name
+
+                        // Extract sublocality/area (e.g., "BTM Layout", "Koramangala")
+                        // Priority: sublocality > neighborhood > administrative_area_level_2 > administrative_area_level_3
+                        const sublocality = addressComponents.find((c: any) =>
+                            c.types.includes('sublocality') ||
+                            c.types.includes('sublocality_level_1')
+                        )?.long_name ||
+                        addressComponents.find((c: any) =>
+                            c.types.includes('neighborhood')
+                        )?.long_name ||
+                        addressComponents.find((c: any) =>
+                            c.types.includes('administrative_area_level_2')
+                        )?.long_name ||
+                        addressComponents.find((c: any) =>
+                            c.types.includes('administrative_area_level_3')
                         )?.long_name
 
                         resolve({
@@ -140,6 +159,7 @@ export async function getPlaceDetailsById(placeId: string): Promise<PlaceDetails
                             state,
                             country,
                             postalCode,
+                            sublocality,
                         })
                     } else {
                         console.error('Place details failed status:', status)

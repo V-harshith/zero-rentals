@@ -94,8 +94,7 @@ function buildSearchQuery(filters: SearchFilters) {
       .gte('longitude', lng - delta)
       .lte('longitude', lng + delta)
   } else if (filters.location) {
-    // INDUSTRY-STANDARD LOCATION SEARCH
-    // Matches: City, Area, Locality, Pincode, Landmark
+    // SMART LOCATION SEARCH: Prioritize area matches over city matches
     // SECURITY FIX: Sanitize input to prevent SQL injection
     const cleanLoc = filters.location.trim()
       .replace(/[%_]/g, '') // Remove wildcards
@@ -110,11 +109,12 @@ function buildSearchQuery(filters: SearchFilters) {
         // Exact pincode match for better accuracy
         query = query.eq('pincode', cleanLoc)
       } else {
-        // Multi-field fuzzy search (case-insensitive)
         // SECURITY: Additional validation before building query
         const sanitizedLoc = cleanLoc.replace(/[^a-zA-Z0-9\s\-,.]/g, '')
         if (sanitizedLoc) {
-          query = query.or(`city.ilike.%${sanitizedLoc}%,area.ilike.%${sanitizedLoc}%,locality.ilike.%${sanitizedLoc}%,landmark.ilike.%${sanitizedLoc}%`)
+          // Search area/locality first, city as fallback
+          // This ensures "BTM Layout" only returns BTM Layout properties
+          query = query.or(`area.ilike.%${sanitizedLoc}%,locality.ilike.%${sanitizedLoc}%,landmark.ilike.%${sanitizedLoc}%,city.ilike.%${sanitizedLoc}%`)
         }
       }
     }
