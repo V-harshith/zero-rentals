@@ -117,45 +117,14 @@ export async function GET(request: NextRequest) {
       query = query.contains('amenities', amenitiesArray)
     }
 
-    // Apply sorting - always prioritize featured first, then apply requested sort
-    switch (sortBy) {
-      case 'price-asc':
-        query = query
-          .order('featured', { ascending: false })
-          .order('private_room_price', { ascending: true, nullsFirst: false })
-        break
-      case 'price-desc':
-        query = query
-          .order('featured', { ascending: false })
-          .order('private_room_price', { ascending: false, nullsFirst: false })
-        break
-      case 'popular':
-        query = query
-          .order('featured', { ascending: false })
-          .order('views', { ascending: false })
-        break
-      case 'featured':
-        query = query
-          .order('featured', { ascending: false })
-          .order('created_at', { ascending: false })
-        break
-      case 'date-desc':
-      default:
-        query = query
-          .order('featured', { ascending: false })
-          .order('created_at', { ascending: false })
-        break
-    }
-
-    const from = (page - 1) * limit
-    const to = from + limit - 1
-    query = query.range(from, to)
-
+    // Fetch ALL matching properties (without pagination) to sort by plan tier first
+    // This ensures paid properties appear on top regardless of their position in DB
+    // Note: { count: 'exact' } returns both data and total count in one query
     const { data, error, count } = await query
 
     if (error) throw error
 
-    // Sort results by plan tier priority
+    // Sort ALL results by plan tier priority FIRST
     // Order: Plan tier (highest first) -> Featured -> Requested sort
     const sortedData = (data || []).sort((a: any, b: any) => {
       const aTier = ownerTierMap.get(a.owner_id) ?? PLAN_TIER_RANK.FREE
@@ -181,17 +150,22 @@ export async function GET(request: NextRequest) {
         case 'featured':
         case 'date-desc':
         default:
-          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+          return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
       }
     })
 
+    // Apply pagination AFTER sorting
+    const from = (page - 1) * limit
+    const to = from + limit
+    const paginatedData = sortedData.slice(from, to)
+
     return NextResponse.json({
-      data: sortedData,
+      data: paginatedData,
       pagination: {
         page,
         limit,
         total: count || 0,
-        totalPages: Math.ceil((count || 0) / limit),
+        totalPages: limit > 0 ? Math.ceil((count || 0) / limit) : 0,
       },
     })
   } catch (error) {
@@ -314,6 +288,17 @@ export async function POST(request: NextRequest) {
       consented_at: user.role === 'owner' ? new Date().toISOString() : null,
     }
 
+    // 🔥 AUTO-FEATURE: Check if owner has a paid subscription with featured badge
+    let shouldFeature = false
+    if (!isAdmin) {
+      const { getTierFeatures } = await import('@/lib/subscription-service')
+      const tierFeatures = await getTierFeatures(user.id)
+      if (tierFeatures.featuredBadge) {
+        shouldFeature = true
+        console.log('[Auto-feature] Owner has featured badge, setting featured=true for new property')
+      }
+    }
+
     const { data, error } = await supabase
       .from('properties')
       .insert([
@@ -327,6 +312,7 @@ export async function POST(request: NextRequest) {
           availability: 'Available',
           views: 0,
           source: isAdmin ? 'admin' : 'manual',
+          featured: shouldFeature || body.featured || false, // Auto-feature if owner has paid plan
         },
       ])
       .select()
