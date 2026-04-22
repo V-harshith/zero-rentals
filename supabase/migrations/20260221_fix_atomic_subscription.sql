@@ -52,8 +52,7 @@ BEGIN
     -- Cancel existing subscription if found
     IF v_old_subscription_id IS NOT NULL THEN
         UPDATE subscriptions
-        SET status = 'cancelled',
-            updated_at = NOW()
+        SET status = 'cancelled'
         WHERE id = v_old_subscription_id;
     END IF;
 
