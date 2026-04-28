@@ -7,12 +7,15 @@ function parseFilters(params: URLSearchParams) {
     const minPrice = params.get("minPrice")
     const maxPrice = params.get("maxPrice")
 
+    const parsedMinPrice = minPrice ? parseInt(minPrice) : 0
+    const parsedMaxPrice = maxPrice ? parseInt(maxPrice) : 50000
+
     return {
         location: params.get("location") || "",
         propertyType: params.get("type") as any || undefined,
         roomType: params.getAll("roomType").length > 0 ? params.getAll("roomType")[0].split(",") : [],
-        minPrice: minPrice && !isNaN(parseInt(minPrice)) ? parseInt(minPrice) : 0,
-        maxPrice: maxPrice && !isNaN(parseInt(maxPrice)) ? parseInt(maxPrice) : 50000,
+        minPrice: !isNaN(parsedMinPrice) && parsedMinPrice >= 0 ? parsedMinPrice : 0,
+        maxPrice: !isNaN(parsedMaxPrice) && parsedMaxPrice >= 0 ? parsedMaxPrice : 50000,
         amenities: params.getAll("amenities").length > 0 ? params.getAll("amenities")[0].split(",") : [],
         sortBy: "date-desc",
         gender: params.get("gender") as any || undefined,
@@ -233,14 +236,13 @@ describe('FILTERS - Edge Cases', () => {
         expect(filters.maxPrice).toBe(1000000)
     })
 
-    it('BUG: Negative price values are accepted', () => {
+    it('should handle negative price values by falling back to defaults', () => {
         const url = new URL('http://localhost/search?minPrice=-1000&maxPrice=-500')
         const filters = parseFilters(url.searchParams)
 
-        // BUG: The code only checks for NaN, not negative values
-        expect(filters.minPrice).toBe(-1000) // Bug: accepts negative
-        expect(filters.maxPrice).toBe(-500) // Bug: accepts negative
-        // EXPECTED: Should fall back to defaults (0 and 50000)
+        // Negative values should fall back to defaults
+        expect(filters.minPrice).toBe(0)
+        expect(filters.maxPrice).toBe(50000)
     })
 
     it('should handle many amenities', () => {

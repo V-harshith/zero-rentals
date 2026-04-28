@@ -69,12 +69,15 @@ export default function SearchPage() {
                 ? (sortByParam as "date-desc" | "price-asc" | "price-desc" | "popular")
                 : "date-desc"
 
+        const parsedMinPrice = minPrice ? parseInt(minPrice) : 0
+        const parsedMaxPrice = maxPrice ? parseInt(maxPrice) : 50000
+
         return {
             location: params.get("location") || "",
             propertyType: (params.get("type") as SearchFilters['propertyType']) || undefined,
             roomType,
-            minPrice: minPrice && !isNaN(parseInt(minPrice)) ? parseInt(minPrice) : 0,
-            maxPrice: maxPrice && !isNaN(parseInt(maxPrice)) ? parseInt(maxPrice) : 50000,
+            minPrice: !isNaN(parsedMinPrice) && parsedMinPrice >= 0 ? parsedMinPrice : 0,
+            maxPrice: !isNaN(parsedMaxPrice) && parsedMaxPrice >= 0 ? parsedMaxPrice : 50000,
             amenities,
             sortBy,
             gender: (params.get("gender") as SearchFilters['gender']) || undefined,
