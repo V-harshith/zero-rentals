@@ -12,8 +12,7 @@ import { checkRateLimit } from './security-utils'
  * To add admins, update this list or use ADMIN_EMAILS environment variable.
  */
 const ADMIN_EMAILS = process.env.ADMIN_EMAILS?.split(',').map(e => e.trim().toLowerCase()) || [
-  // Add your admin emails here
-  // 'admin@zerorentals.com',
+  'aniljangid121@gmail.com',
 ]
 
 // ============================================================================
@@ -461,24 +460,20 @@ export async function getCurrentUser() {
         if (profileError) {
           console.error('[AUTH] Error fetching user profile after retries:', profileError)
 
-          // CRITICAL FIX: Never trust user_metadata for role - always default to tenant
+// CRITICAL FIX: Never trust user_metadata for role - always default to tenant
           // User metadata can be manipulated client-side, creating privilege escalation risk
-          console.warn('[AUTH] Database error - using basic auth info with safe defaults')
-          return {
-            ...user,
-            name: user.user_metadata?.name || user.email?.split('@')[0] || 'User',
-            role: 'tenant', // SECURITY: Always default to tenant, never trust metadata
-            verified: false,
-            status: 'active'
-          }
+          // SECURITY FIX: If database error, do NOT allow access - force re-authentication
+          console.warn('[AUTH] Database error - denying access, force re-auth')
+          return null
         }
 
-        if (!userData) {
+if (!userData) {
           console.log('[AUTH] No profile found, attempting auto-heal...')
 
           // Auto-heal: Create missing profile
-          // SECURITY FIX: Never trust user_metadata for role - always default to tenant
-          const roleFromMetadata = 'tenant' // Never use user.user_metadata?.role
+          // SECURITY FIX: Check ADMIN_EMAILS for proper role assignment
+          const userEmail = user.email?.toLowerCase() || ''
+          const roleFromMetadata = ADMIN_EMAILS.includes(userEmail) ? 'admin' : 'tenant'
           const nameFromMetadata = (user.user_metadata?.name as string) || user.email!.split('@')[0]
 
           const { data: newUserData, error: insertError } = await supabase
