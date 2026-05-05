@@ -18,7 +18,7 @@ export default function FeaturedPGsPage() {
           .from("properties")
           .select("*")
           .eq("status", "active")
-          .eq("featured", true)
+          .eq("admin_featured", true)
           .order("created_at", { ascending: false })
           .limit(12)
 

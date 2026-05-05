@@ -7,7 +7,7 @@ import Link from "next/link"
 import { Card, CardContent, CardFooter } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { MapPin, Bed, Users, Star, Heart, Eye, Loader2 } from "lucide-react"
+import { MapPin, Bed, Users, Star, Heart, Eye, Loader2, Crown } from "lucide-react"
 import type { Property } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/lib/auth-context"
@@ -65,7 +65,7 @@ export function OptimizedPropertyCard({ property, index = 0, priority = false }:
 
                     {/* Badges Overlay */}
                     <div className="absolute top-3 left-3 flex gap-2">
-                        {property.featured && (
+                        {property.adminFeatured && (
                             <motion.div
                                 initial={{ scale: 0 }}
                                 animate={{ scale: 1 }}
@@ -73,7 +73,19 @@ export function OptimizedPropertyCard({ property, index = 0, priority = false }:
                             >
                                 <Badge className="bg-yellow-500 text-white border-0">
                                     <Star className="h-3 w-3 mr-1 fill-white" />
-                                    Featured
+                                    Admin Pick
+                                </Badge>
+                            </motion.div>
+                        )}
+                        {property.featured && (
+                            <motion.div
+                                initial={{ scale: 0 }}
+                                animate={{ scale: 1 }}
+                                transition={{ delay: 0.2 }}
+                            >
+                                <Badge className="bg-purple-500 text-white border-0">
+                                    <Crown className="h-3 w-3 mr-1" />
+                                    Premium
                                 </Badge>
                             </motion.div>
                         )}

@@ -4,7 +4,7 @@ import { Property } from "@/lib/types"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { MapPin, Heart, Eye, Crown, TrendingUp, Loader2 } from "lucide-react"
+import { MapPin, Heart, Eye, Crown, TrendingUp, Loader2, Star } from "lucide-react"
 import Link from "next/link"
 import Image from "next/image"
 import { useAuth } from "@/lib/auth-context"
@@ -117,10 +117,16 @@ export function PropertyCard({ property, showFavorite = true, priority = false }
                             <Badge className="bg-primary text-primary-foreground">
                                 {property?.propertyType || "Property"}
                             </Badge>
-                            {property?.featured && (
+                            {property?.adminFeatured && (
                                 <Badge className="bg-gradient-to-r from-yellow-400 to-amber-500 text-white border-0 gap-1 shadow-lg">
+                                    <Star className="h-3 w-3 fill-white" />
+                                    Admin Pick
+                                </Badge>
+                            )}
+                            {property?.featured && (
+                                <Badge className="bg-gradient-to-r from-purple-500 to-violet-600 text-white border-0 gap-1 shadow-lg">
                                     <Crown className="h-3 w-3" />
-                                    Featured
+                                    Premium
                                 </Badge>
                             )}
                             {property?.verified && (

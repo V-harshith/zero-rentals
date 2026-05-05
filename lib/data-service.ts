@@ -337,60 +337,22 @@ export async function getProperties(): Promise<Property[]> {
 
 export async function getFeaturedProperties(limit = 6): Promise<Property[]> {
   try {
-    const today = new Date().toISOString()
-
-    // Get owners with valid active subscriptions and their plan names
-    const { data: validSubscribers, error: subError } = await supabase
-      .from('subscriptions')
-      .select('user_id, plan_name')
-      .eq('status', 'active')
-      .gt('end_date', today)
-
-    // Subscription fetch errors are handled silently - properties will still be shown
-
-    // Create a map of owner_id to plan tier rank
-    const ownerTierMap = new Map<string, number>()
-    validSubscribers?.forEach(s => {
-      const rank = getPlanTierRank(s.plan_name)
-      // Only update if higher rank (or not set yet)
-      const existingRank = ownerTierMap.get(s.user_id)
-      if (!existingRank || rank > existingRank) {
-        ownerTierMap.set(s.user_id, rank)
-      }
-    })
-
-    // Get all featured properties
-    // Note: We only filter by status='active' for moderation, not by availability
-    // Featured properties should appear regardless of availability (Available/Occupied/etc)
-    // NOTE: No limit here - we need to sort by tier first, then limit
+    // Get admin-featured properties only (not paid-featured)
+    // These are properties the admin manually selected to appear on the home page
     const { data, error } = await supabase
       .from('properties')
       .select('*, owner:users!owner_id(name, email, phone, avatar_url, verified)')
       .eq('status', 'active')
-      .eq('featured', true)
+      .eq('admin_featured', true)
       .order('created_at', { ascending: false })
+      .limit(limit)
 
     if (error) {
+      console.error('[DataService] getFeaturedProperties error:', error)
       return []
     }
 
-    const properties = (data || []) as PropertyRow[]
-
-    // Sort: Plan tier (highest first) -> Created date
-    const sortedProperties = properties.sort((a, b) => {
-      const aTier = ownerTierMap.get(a.owner_id || '') ?? PLAN_TIER_RANK.FREE
-      const bTier = ownerTierMap.get(b.owner_id || '') ?? PLAN_TIER_RANK.FREE
-
-      // Different tiers: higher tier first
-      if (aTier !== bTier) {
-        return bTier - aTier
-      }
-
-      // Same tier: newest first
-      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    })
-
-    return sortedProperties.slice(0, limit).map(mapPropertyFromDB)
+    return (data || []).map(mapPropertyFromDB)
   } catch (error) {
     console.error('[DataService] getFeaturedProperties failed:', error)
     return []
@@ -1161,16 +1123,17 @@ export async function transitionPropertyStatus(
 }
 
 /**
- * Sets the featured status of a property atomically via REST API
+ * Sets the ADMIN featured status of a property atomically via REST API
  * Only active properties can be featured
+ * This is separate from paid plan auto-feature
  *
  * @param propertyId - The property UUID
- * @param featured - Whether to feature the property
+ * @param adminFeatured - Whether to admin-feature the property
  * @returns FeaturedStatusResult with success/failure details
  */
 export async function setPropertyFeatured(
   propertyId: string,
-  featured: boolean
+  adminFeatured: boolean
 ): Promise<FeaturedStatusResult> {
   try {
     const response = await fetch(`/api/admin/properties/${propertyId}/feature`, {
@@ -1178,7 +1141,7 @@ export async function setPropertyFeatured(
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ featured }),
+      body: JSON.stringify({ adminFeatured }),
     })
 
     const result = await response.json()
@@ -1195,7 +1158,7 @@ export async function setPropertyFeatured(
       success: result.success,
       message: result.message,
       propertyId: result.data?.id || propertyId,
-      featured: result.data?.featured,
+      featured: result.data?.adminFeatured,
       changed: result.changed
     }
   } catch (error: any) {

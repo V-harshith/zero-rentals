@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Search, Star, CheckCircle, XCircle, ExternalLink, Loader2, Trash2, Pencil, Eye } from "lucide-react"
+import { Search, Star, CheckCircle, XCircle, ExternalLink, Loader2, Trash2, Pencil, Eye, Crown } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { mapPropertyFromDB, type PropertyRow } from "@/lib/data-mappers"
 import { type Property } from "@/lib/types"
@@ -66,7 +66,7 @@ export function AllPropertiesTab() {
 
             const { data, error, count } = await supabase
                 .from('properties')
-                .select('id, title, city, area, locality, owner_name, owner_contact, private_room_price, double_sharing_price, triple_sharing_price, four_sharing_price, room_type, property_type, featured, verified, status, created_at, images, views', { count: 'exact' })
+                .select('id, title, city, area, locality, owner_name, owner_contact, private_room_price, double_sharing_price, triple_sharing_price, four_sharing_price, room_type, property_type, featured, admin_featured, verified, status, created_at, images, views', { count: 'exact' })
                 .order('created_at', { ascending: false })
                 .range(from, to)
 
@@ -124,7 +124,7 @@ export function AllPropertiesTab() {
                     'Content-Type': 'application/json',
                     'x-csrf-token': csrfToken,
                 },
-                body: JSON.stringify({ featured: !current }),
+                body: JSON.stringify({ adminFeatured: !current }),
             })
 
             if (!response.ok) {
@@ -132,8 +132,8 @@ export function AllPropertiesTab() {
                 throw new Error(data.error || 'Failed to update featured status')
             }
 
-            setProperties(prev => prev.map(p => p.id === id ? { ...p, featured: !current } : p))
-            toast.success(current ? "Property unfeatured" : "Property featured!")
+            setProperties(prev => prev.map(p => p.id === id ? { ...p, adminFeatured: !current } : p))
+            toast.success(current ? "Removed from admin featured" : "Added to admin featured!")
         } catch (error: any) {
             toast.error(error.message || "Failed to update featured status")
         } finally {
@@ -403,132 +403,142 @@ export function AllPropertiesTab() {
                                         <TableHead>Location</TableHead>
                                         <TableHead>Owner</TableHead>
                                         <TableHead>Views</TableHead>
-                                        <TableHead>Featured</TableHead>
+                                        <TableHead>Admin Featured</TableHead>
+                                        <TableHead>Paid</TableHead>
                                         <TableHead>Verified</TableHead>
                                         <TableHead>Actions</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
-                            {loading ? (
-                                <TableRow>
-                                    <TableCell colSpan={9} className="h-32 text-center text-muted-foreground">
-                                        <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
-                                        Loading properties...
-                                    </TableCell>
-                                </TableRow>
-                            ) : filteredProperties.length === 0 ? (
-                                <TableRow>
-                                    <TableCell colSpan={9} className="h-32 text-center text-muted-foreground">
-                                        No properties found
-                                    </TableCell>
-                                </TableRow>
-                            ) : (
-                                filteredProperties.map((property) => (
-                                    <TableRow key={property.id} className={selectedIds.has(property.id) ? 'bg-muted/50' : ''}>
-                                        <TableCell>
-                                            <input
-                                                type="checkbox"
-                                                className="h-4 w-4 rounded border-gray-300 cursor-pointer"
-                                                checked={selectedIds.has(property.id)}
-                                                onChange={() => toggleSelect(property.id)}
-                                            />
-                                        </TableCell>
-                                        <TableCell>
-                                            <div className="font-medium line-clamp-1">{property.title}</div>
-                                            <div className="text-xs text-muted-foreground">₹{property.price.toLocaleString()} / mo</div>
-                                        </TableCell>
-                                        <TableCell>
-                                            <Select
-                                                value={property.propertyType}
-                                                onValueChange={(value) => changePropertyType(property.id, value as 'PG' | 'Co-living' | 'Rent')}
-                                                disabled={updatingId === property.id || isCsrfLoading}
-                                            >
-                                                <SelectTrigger className="w-[100px] h-8">
-                                                    <SelectValue />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    <SelectItem value="PG">PG</SelectItem>
-                                                    <SelectItem value="Rent">Rent</SelectItem>
-                                                    <SelectItem value="Co-living">Co-living</SelectItem>
-                                                </SelectContent>
-                                            </Select>
-                                        </TableCell>
-                                        <TableCell>
-                                            <div className="text-sm">{property.location?.area || "Unknown Area"}</div>
-                                            <div className="text-xs text-muted-foreground">{property.location?.city || "Unknown City"}</div>
-                                        </TableCell>
-                                        <TableCell>
-                                            <div className="text-sm">{property.owner?.name || 'Unknown'}</div>
-                                            <div className="text-xs text-muted-foreground">{property.owner?.phone || 'N/A'}</div>
-                                        </TableCell>
-                                        <TableCell>
-                                            <div className="flex items-center gap-1 text-sm">
-                                                <Eye className="h-3 w-3 text-muted-foreground" />
-                                                <span>{property.views || 0}</span>
-                                            </div>
-                                        </TableCell>
-                                        <TableCell>
-                                            <Button
-                                                size="sm"
-                                                variant={property.featured ? "default" : "outline"}
-                                                className={property.featured ? "bg-yellow-500 hover:bg-yellow-600 border-yellow-500" : ""}
-                                                onClick={() => toggleFeatured(property.id, property.featured)}
-                                                disabled={updatingId === property.id || isCsrfLoading}
-                                                title={property.featured ? "Click to unfeature" : "Click to feature"}
-                                            >
-                                                <Star className={`h-4 w-4 ${property.featured ? "fill-white" : ""}`} />
-                                            </Button>
-                                        </TableCell>
-                                        <TableCell>
-                                            <Button
-                                                size="sm"
-                                                variant={property.verified ? "secondary" : "outline"}
-                                                className={property.verified ? "bg-blue-100 text-blue-700 hover:bg-blue-200 border-blue-200" : ""}
-                                                onClick={() => toggleVerified(property.id, property.verified ?? false)}
-                                                disabled={updatingId === property.id || isCsrfLoading}
-                                                title={property.verified ? "Click to unverify" : "Click to verify"}
-                                            >
-                                                <CheckCircle className={`h-4 w-4 ${property.verified ? "text-blue-700" : ""}`} />
-                                            </Button>
-                                        </TableCell>
-                                        <TableCell>
-                                            <div className="flex items-center gap-2">
-                                                <Link href={`/property/${property.id}`} target="_blank" onClick={saveState}>
-                                                    <Button size="sm" variant="ghost" title="View Property">
-                                                        <ExternalLink className="h-4 w-4" />
-                                                    </Button>
-                                                </Link>
-                                                <Link href={`/property/edit/${property.id}`} onClick={saveState}>
+                                    {loading ? (
+                                        <TableRow>
+                                            <TableCell colSpan={10} className="h-32 text-center text-muted-foreground">
+                                                <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
+                                                Loading properties...
+                                            </TableCell>
+                                        </TableRow>
+                                    ) : filteredProperties.length === 0 ? (
+                                        <TableRow>
+                                            <TableCell colSpan={10} className="h-32 text-center text-muted-foreground">
+                                                No properties found
+                                            </TableCell>
+                                        </TableRow>
+                                    ) : (
+                                        filteredProperties.map((property) => (
+                                            <TableRow key={property.id} className={selectedIds.has(property.id) ? 'bg-muted/50' : ''}>
+                                                <TableCell>
+                                                    <input
+                                                        type="checkbox"
+                                                        className="h-4 w-4 rounded border-gray-300 cursor-pointer"
+                                                        checked={selectedIds.has(property.id)}
+                                                        onChange={() => toggleSelect(property.id)}
+                                                    />
+                                                </TableCell>
+                                                <TableCell>
+                                                    <div className="font-medium line-clamp-1">{property.title}</div>
+                                                    <div className="text-xs text-muted-foreground">₹{property.price.toLocaleString()} / mo</div>
+                                                </TableCell>
+                                                <TableCell>
+                                                    <Select
+                                                        value={property.propertyType}
+                                                        onValueChange={(value) => changePropertyType(property.id, value as 'PG' | 'Co-living' | 'Rent')}
+                                                        disabled={updatingId === property.id || isCsrfLoading}
+                                                    >
+                                                        <SelectTrigger className="w-[100px] h-8">
+                                                            <SelectValue />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="PG">PG</SelectItem>
+                                                            <SelectItem value="Rent">Rent</SelectItem>
+                                                            <SelectItem value="Co-living">Co-living</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                </TableCell>
+                                                <TableCell>
+                                                    <div className="text-sm">{property.location?.area || "Unknown Area"}</div>
+                                                    <div className="text-xs text-muted-foreground">{property.location?.city || "Unknown City"}</div>
+                                                </TableCell>
+                                                <TableCell>
+                                                    <div className="text-sm">{property.owner?.name || 'Unknown'}</div>
+                                                    <div className="text-xs text-muted-foreground">{property.owner?.phone || 'N/A'}</div>
+                                                </TableCell>
+                                                <TableCell>
+                                                    <div className="flex items-center gap-1 text-sm">
+                                                        <Eye className="h-3 w-3 text-muted-foreground" />
+                                                        <span>{property.views || 0}</span>
+                                                    </div>
+                                                </TableCell>
+                                                <TableCell>
                                                     <Button
                                                         size="sm"
-                                                        variant="ghost"
-                                                        className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-                                                        title="Edit Property"
+                                                        variant={property.adminFeatured ? "default" : "outline"}
+                                                        className={property.adminFeatured ? "bg-yellow-500 hover:bg-yellow-600 border-yellow-500" : ""}
+                                                        onClick={() => toggleFeatured(property.id, property.adminFeatured ?? false)}
+                                                        disabled={updatingId === property.id || isCsrfLoading}
+                                                        title={property.adminFeatured ? "Admin featured - Click to remove" : "Click to make admin featured"}
                                                     >
-                                                        <Pencil className="h-4 w-4" />
+                                                        <Star className={`h-4 w-4 ${property.adminFeatured ? "fill-white" : ""}`} />
                                                     </Button>
-                                                </Link>
-                                                <Button
-                                                    size="sm"
-                                                    variant="ghost"
-                                                    className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                                                    onClick={() => deleteProperty(property.id, property.title)}
-                                                    disabled={deletingId === property.id || isCsrfLoading}
-                                                    title="Delete Property"
-                                                >
-                                                    {deletingId === property.id ? (
-                                                        <Loader2 className="h-4 w-4 animate-spin" />
-                                                    ) : (
-                                                        <Trash2 className="h-4 w-4" />
-                                                    )}
-                                                 </Button>
-                                            </div>
-                                        </TableCell>
-                                    </TableRow>
-                                ))
-                            )}
-                        </TableBody>
-                    </Table>
+                                                </TableCell>
+                                                <TableCell>
+                                                    <div className="flex items-center justify-center" title={property.featured ? "Paid/Subscription featured" : "Not paid featured"}>
+                                                        {property.featured ? (
+                                                            <Crown className="h-5 w-5 text-purple-500" />
+                                                        ) : (
+                                                            <span className="text-xs text-muted-foreground">—</span>
+                                                        )}
+                                                    </div>
+                                                </TableCell>
+                                                <TableCell>
+                                                    <Button
+                                                        size="sm"
+                                                        variant={property.verified ? "secondary" : "outline"}
+                                                        className={property.verified ? "bg-blue-100 text-blue-700 hover:bg-blue-200 border-blue-200" : ""}
+                                                        onClick={() => toggleVerified(property.id, property.verified ?? false)}
+                                                        disabled={updatingId === property.id || isCsrfLoading}
+                                                        title={property.verified ? "Click to unverify" : "Click to verify"}
+                                                    >
+                                                        <CheckCircle className={`h-4 w-4 ${property.verified ? "text-blue-700" : ""}`} />
+                                                    </Button>
+                                                </TableCell>
+                                                <TableCell>
+                                                    <div className="flex items-center gap-2">
+                                                        <Link href={`/property/${property.id}`} target="_blank" onClick={saveState}>
+                                                            <Button size="sm" variant="ghost" title="View Property">
+                                                                <ExternalLink className="h-4 w-4" />
+                                                            </Button>
+                                                        </Link>
+                                                        <Link href={`/property/edit/${property.id}`} onClick={saveState}>
+                                                            <Button
+                                                                size="sm"
+                                                                variant="ghost"
+                                                                className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                                                                title="Edit Property"
+                                                            >
+                                                                <Pencil className="h-4 w-4" />
+                                                            </Button>
+                                                        </Link>
+                                                        <Button
+                                                            size="sm"
+                                                            variant="ghost"
+                                                            className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                                                            onClick={() => deleteProperty(property.id, property.title)}
+                                                            disabled={deletingId === property.id || isCsrfLoading}
+                                                            title="Delete Property"
+                                                        >
+                                                            {deletingId === property.id ? (
+                                                                <Loader2 className="h-4 w-4 animate-spin" />
+                                                            ) : (
+                                                                <Trash2 className="h-4 w-4" />
+                                                            )}
+                                                        </Button>
+                                                    </div>
+                                                </TableCell>
+                                            </TableRow>
+                                        ))
+                                    )}
+                                </TableBody>
+                            </Table>
                         </div>
                     </CardContent>
                 </Card>
@@ -583,19 +593,25 @@ export function AllPropertiesTab() {
                                     </div>
 
                                     <div className="flex items-center justify-between mt-3 pt-3 border-t">
-                                        <div className="flex items-center gap-1">
-                                            <Eye className="h-3 w-3 text-muted-foreground" />
-                                            <span className="text-xs">{property.views || 0}</span>
+                                        <div className="flex items-center gap-2">
+                                            <div className="flex items-center gap-1">
+                                                <Eye className="h-3 w-3 text-muted-foreground" />
+                                                <span className="text-xs">{property.views || 0}</span>
+                                            </div>
+                                            {property.featured && (
+                                                <Crown className="h-3 w-3 text-purple-500" />
+                                            )}
                                         </div>
                                         <div className="flex items-center gap-1">
                                             <Button
                                                 size="sm"
-                                                variant={property.featured ? "default" : "outline"}
-                                                className={`h-8 w-8 p-0 ${property.featured ? "bg-yellow-500 hover:bg-yellow-600 border-yellow-500" : ""}`}
-                                                onClick={() => toggleFeatured(property.id, property.featured)}
+                                                variant={property.adminFeatured ? "default" : "outline"}
+                                                className={`h-8 w-8 p-0 ${property.adminFeatured ? "bg-yellow-500 hover:bg-yellow-600 border-yellow-500" : ""}`}
+                                                onClick={() => toggleFeatured(property.id, property.adminFeatured ?? false)}
                                                 disabled={updatingId === property.id || isCsrfLoading}
+                                                title={property.adminFeatured ? "Admin featured - Click to remove" : "Click to make admin featured"}
                                             >
-                                                <Star className={`h-3 w-3 ${property.featured ? "fill-white" : ""}`} />
+                                                <Star className={`h-3 w-3 ${property.adminFeatured ? "fill-white" : ""}`} />
                                             </Button>
                                             <Button
                                                 size="sm"

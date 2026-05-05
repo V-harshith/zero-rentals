@@ -7,11 +7,12 @@ import { rateLimit } from '@/lib/rate-limit'
 /**
  * POST /api/admin/properties/[id]/feature
  *
- * Toggle the featured status of a property.
+ * Toggle the ADMIN featured status of a property.
  * Admin can feature/unfeature ANY property (including free properties).
- * This overrides the auto-feature behavior from paid subscriptions.
+ * This is separate from paid plan auto-feature (which sets the `featured` column).
+ * Admin-featured properties appear on the home page.
  *
- * Request body: { featured: boolean }
+ * Request body: { adminFeatured: boolean }
  */
 export async function POST(
   request: NextRequest,
@@ -37,12 +38,12 @@ export async function POST(
 
     // Parse request body
     const body = await request.json().catch(() => ({}))
-    const { featured } = body
+    const { adminFeatured } = body
 
-    // Validate featured parameter
-    if (typeof featured !== 'boolean') {
+    // Validate adminFeatured parameter
+    if (typeof adminFeatured !== 'boolean') {
       return NextResponse.json(
-        { error: 'Invalid request: featured must be a boolean' },
+        { error: 'Invalid request: adminFeatured must be a boolean' },
         { status: 400 }
       )
     }
@@ -68,7 +69,7 @@ export async function POST(
     // 2. Fetch Property with row locking (Use Admin client)
     const { data: property, error: fetchError } = await supabaseAdmin
       .from('properties')
-      .select('id, title, featured, owner_id, status')
+      .select('id, title, admin_featured, owner_id, status')
       .eq('id', params.id)
       .maybeSingle()
 
@@ -81,7 +82,7 @@ export async function POST(
     }
 
     // 3. Business Logic: Only active properties can be featured
-    if (featured && property.status !== 'active') {
+    if (adminFeatured && property.status !== 'active') {
       return NextResponse.json(
         {
           error: `Only active properties can be featured. Current status: ${property.status}`,
@@ -92,24 +93,24 @@ export async function POST(
     }
 
     // 4. Idempotency check: already in desired state
-    if (property.featured === featured) {
+    if (property.admin_featured === adminFeatured) {
       return NextResponse.json({
         success: true,
-        message: `Property already ${featured ? 'featured' : 'unfeatured'}`,
+        message: `Property already ${adminFeatured ? 'featured' : 'unfeatured'}`,
         data: {
           id: params.id,
           title: property.title,
-          featured: featured,
+          adminFeatured: adminFeatured,
         },
         changed: false
       })
     }
 
-    // 5. Update featured status directly
+    // 5. Update admin_featured status directly
     const { error: updateError } = await supabaseAdmin
       .from('properties')
       .update({
-        featured: featured,
+        admin_featured: adminFeatured,
         updated_at: new Date().toISOString()
       })
       .eq('id', params.id)
@@ -117,7 +118,7 @@ export async function POST(
     if (updateError) {
       console.error('[ADMIN FEATURE] Update error:', updateError)
       return NextResponse.json(
-        { error: 'Failed to update featured status' },
+        { error: 'Failed to update admin featured status' },
         { status: 500 }
       )
     }
@@ -131,7 +132,7 @@ export async function POST(
           old_status: property.status,
           new_status: property.status,
           admin_id: authUser.id,
-          reason: `Featured status changed to: ${featured}`,
+          reason: `Admin featured status changed to: ${adminFeatured}`,
           created_at: new Date().toISOString()
         })
     } catch (logError) {
@@ -144,9 +145,9 @@ export async function POST(
       data: {
         id: params.id,
         title: property.title,
-        featured: featured,
+        adminFeatured: adminFeatured,
       },
-      message: featured ? 'Property featured successfully' : 'Property unfeatured successfully',
+      message: adminFeatured ? 'Property featured successfully' : 'Property unfeatured successfully',
       changed: true
     })
   } catch (error: any) {

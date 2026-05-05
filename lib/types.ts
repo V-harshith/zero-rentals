@@ -36,6 +36,7 @@ export interface Property {
     postedDate: Date
     views: number
     featured: boolean
+    adminFeatured?: boolean
     verified?: boolean
     rules?: string[]
     nearbyPlaces?: string[]

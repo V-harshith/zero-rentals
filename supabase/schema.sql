@@ -87,6 +87,7 @@ CREATE TABLE properties (
   -- Status
   availability TEXT DEFAULT 'Available' CHECK (availability IN ('Available', 'Occupied', 'Under Maintenance')),
   featured BOOLEAN DEFAULT false,
+  admin_featured BOOLEAN DEFAULT false,
   verified BOOLEAN DEFAULT false,
   status TEXT DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'pending', 'rejected')),
   
@@ -216,6 +217,7 @@ CREATE INDEX idx_properties_type ON properties(property_type);
 CREATE INDEX idx_properties_status ON properties(status);
 CREATE INDEX idx_properties_owner ON properties(owner_id);
 CREATE INDEX idx_properties_featured ON properties(featured);
+CREATE INDEX idx_properties_admin_featured ON properties(admin_featured);
 CREATE INDEX idx_properties_availability ON properties(availability);
 
 -- Users indexes

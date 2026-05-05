@@ -58,6 +58,7 @@ export interface PropertyRow {
     // Status
     availability: 'Available' | 'Occupied' | 'Under Maintenance'
     featured: boolean
+    admin_featured: boolean
     verified: boolean
     status: 'active' | 'inactive' | 'pending' | 'rejected'
 
@@ -136,6 +137,7 @@ export function mapPropertyFromDB(row: PropertyRow): Property {
         postedDate: new Date(row.created_at),
         views: row.views || 0,
         featured: row.featured || false,
+        adminFeatured: row.admin_featured || false,
         verified: row.verified || false,
         rules: row.rules || [],
         nearbyPlaces: row.nearby_places || [],

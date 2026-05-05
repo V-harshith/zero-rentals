@@ -32,9 +32,9 @@ export function FeaturedProperties({ initialProperties = [] }: FeaturedPropertie
               <Star className="h-6 w-6 text-yellow-600 fill-yellow-600" />
             </div>
             <div>
-              <h2 className="text-3xl font-bold">Featured Properties</h2>
+              <h2 className="text-3xl font-bold">Admin Picks</h2>
               <p className="text-muted-foreground">
-                Premium properties handpicked for quality and comfort
+                Premium properties handpicked by our team for quality and comfort
               </p>
             </div>
           </div>
