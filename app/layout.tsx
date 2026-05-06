@@ -57,6 +57,12 @@ export const metadata: Metadata = {
     description: "Trusted platform for PG accommodations, co-living spaces, and rental properties across India",
     creator: "@zerorentals"
   },
+  verification: {
+    google: "YDlz4mqOj2fyKVTDaa58NXXEQByyb1tqb8I-MfzUa40",
+    other: {
+      "msvalidate.01": "632BC41E34F3C664FC256B292DEABD88",
+    },
+  },
 }
 
 export default function RootLayout({
