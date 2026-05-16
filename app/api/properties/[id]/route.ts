@@ -4,6 +4,7 @@ import { getCurrentUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { csrfProtection } from '@/lib/csrf-server'
 import { createHash } from 'crypto'
+import { submitUrlToIndexNow } from '@/lib/indexnow'
 
 // In-memory store for idempotency keys (use Redis in production)
 const idempotencyStore = new Map<string, { response: unknown; timestamp: number }>()
@@ -264,6 +265,9 @@ export async function PUT(
       const idempotencyId = `${user.id}:${id}:${idempotencyKey}`
       idempotencyStore.set(idempotencyId, { response, timestamp: Date.now() })
     }
+
+    // Notify IndexNow about the updated property for faster re-indexing
+    submitUrlToIndexNow(`/property/${id}`).catch(() => {})
 
     return NextResponse.json(response, {
       headers: {

@@ -4,6 +4,7 @@ import { getCurrentUser } from '@/lib/auth'
 import { csrfProtection } from '@/lib/csrf-server'
 import { rateLimit } from '@/lib/rate-limit'
 import { PLAN_TIER_RANK, getPlanTierRank } from '@/lib/constants'
+import { submitUrlToIndexNow } from '@/lib/indexnow'
 
 export async function GET(request: NextRequest) {
   try {
@@ -341,6 +342,9 @@ export async function POST(request: NextRequest) {
       // Log email error but don't fail the request
       console.error('Failed to send email notification:', emailError)
     }
+
+    // Notify IndexNow about the new property for faster indexing
+    submitUrlToIndexNow(`/property/${data.id}`).catch(() => {})
 
     return NextResponse.json({ data }, { status: 201 })
   } catch (error) {
