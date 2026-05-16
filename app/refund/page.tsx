@@ -1,3 +1,10 @@
+import type { Metadata } from "next"
+
+export const metadata: Metadata = {
+  title: "Refund Policy",
+  description: "ZeroRentals Refund Policy. Understand our refund and cancellation terms for subscription plans and property listing services.",
+}
+
 export default function RefundPage() {
     return (
         <div className="min-h-screen bg-background">
